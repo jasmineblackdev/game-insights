@@ -69,6 +69,7 @@ check_optional() {
 echo "Probing ${URL} …"
 check "draft-edge (NFL 2026)" "draft-edge?year=2026&league=nfl"
 check "draft-edge (NBA 2026)" "draft-edge?year=2026&league=nba"
+check "draft-edge (MLB 2026)" "draft-edge?year=2026&league=mlb"
 check "player-edge (NBA)" "player-edge?sport=nba"
 check_optional "nba-stats-proxy" "nba-stats-proxy"
 
