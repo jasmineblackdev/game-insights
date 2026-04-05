@@ -290,6 +290,8 @@ const Index = () => {
                       Projected {leagueLabel(league)} Draft order with grades, scouting analysis, and pro comparables.
                       Click any pick to expand the full breakdown.
                     </>
+                  ) : viewMode === "props" ? (
+                    <>Player prop edges across NBA, NFL, MLB, and Soccer — filter by sport and stat type.</>
                   ) : league === "nba" ? (
                     <>Live NBA predictions — win probability, spread lean, injuries, and team trends.</>
                   ) : league === "nfl" ? (
@@ -369,6 +371,17 @@ const Index = () => {
                     Games
                   </button>
                   <button
+                    onClick={() => handleViewModeChange("props")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                      viewMode === "props"
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <User className="w-3 h-3" />
+                    Props
+                  </button>
+                  <button
                     onClick={() => handleViewModeChange("draft")}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                       viewMode === "draft"
@@ -394,7 +407,9 @@ const Index = () => {
               </div>
 
               {/* Content */}
-              {viewMode === "draft" ? (
+              {viewMode === "props" ? (
+                <PlayerEdgeSection />
+              ) : viewMode === "draft" ? (
                 draftPicks.length === 0 ? (
                   <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
                     {league === "soccer"
@@ -448,7 +463,6 @@ const Index = () => {
                   </p>
                 </div>
               )}
-              {viewMode === "games" ? <PlayerEdgeSection /> : null}
             </motion.div>
           )}
         </AnimatePresence>

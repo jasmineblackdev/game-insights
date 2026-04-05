@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(git add:*)",
+      "Bash(git remote:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(grep:*)",
+      "WebFetch(domain:site.api.espn.com)",
+      "WebFetch(domain:sports.core.api.espn.com)",
+      "Read(//tmp/**)",
+      "Bash(ls -lh /tmp/espn_api*.md /tmp/SUMMARY.txt /tmp/INDEX.md)",
+      "Bash(ls:*)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

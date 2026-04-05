@@ -83,9 +83,6 @@ export default function PlayerEdgeDetailPage() {
               {pred.risk_factor}
             </p>
           </div>
-          <p className="text-[11px] text-muted-foreground">
-            Mock detail view — wire GET /api/player-edge/:projectionId when backend is ready.
-          </p>
         </div>
       </main>
     </div>
