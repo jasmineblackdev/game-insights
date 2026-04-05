@@ -1,7 +1,6 @@
 import type { GamePrediction, InjuryStatus, League, PlayerInjury, TeamData } from "@/data/mockGames";
 import {
-  fetchNbaAdvancedRatingsViaProxy,
-  normalizeEspnToNbaStatsAbbr,
+  fetchNbaAdvancedRatings,
   type NbaAdvancedRatingsPayload,
 } from "@/lib/nbaStatsProxy";
 import { isoToEasternYmd, previousCalendarYmd } from "@/lib/espnShared";
@@ -395,10 +394,15 @@ async function enrichOne(
   let nbaStatsApplied = false;
   let nbaStatsSeason: string | undefined;
   if (league === "nba" && nbaAdvanced?.ratings) {
-    const kh = normalizeEspnToNbaStatsAbbr(homeTeam.abbreviation);
-    const ka = normalizeEspnToNbaStatsAbbr(awayTeam.abbreviation);
-    const rh = nbaAdvanced.ratings[kh];
-    const ra = nbaAdvanced.ratings[ka];
+    // ESPN data is keyed by raw ESPN abbreviation — no translation needed.
+    // NBA-stats-proxy data used translated keys; try both forms for compat.
+    const tryKey = (abbr: string) =>
+      nbaAdvanced.ratings[abbr.toUpperCase()] ??
+      nbaAdvanced.ratings[{ GS: "GSW", NY: "NYK", NO: "NOP", SA: "SAS", PHO: "PHX", WSH: "WAS", CHO: "CHA" }[abbr.toUpperCase()] ?? abbr.toUpperCase()];
+    const kh = homeTeam.abbreviation;
+    const ka = awayTeam.abbreviation;
+    const rh = tryKey(kh);
+    const ra = tryKey(ka);
     if (rh) {
       homeTeam = {
         ...homeTeam,
@@ -507,7 +511,7 @@ export async function enrichGamePredictions(predictions: GamePrediction[], leagu
   const [teamPatches, scheduleMap, nbaAdvanced] = await Promise.all([
     fetchTeamMetricsMap(lg, teamIds),
     lg === "nba" || lg === "mlb" ? fetchTeamScheduleMap(lg, teamIds) : Promise.resolve(new Map<string, Set<string>>()),
-    lg === "nba" ? fetchNbaAdvancedRatingsViaProxy() : Promise.resolve(null),
+    lg === "nba" ? fetchNbaAdvancedRatings() : Promise.resolve(null),
   ]);
 
   return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches, nbaAdvanced, scheduleMap));

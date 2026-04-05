@@ -504,22 +504,11 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           <p className="text-[11px] text-muted-foreground mb-3">
             {game._meta?.nbaRatingsFromStats && game._meta.nbaStatsSeason ? (
               <>
-                Official offensive and defensive rating and pace — NBA regular season {game._meta.nbaStatsSeason}.
-                {import.meta.env.DEV ? (
-                  <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
-                    stats.nba.com · nba-stats-proxy Edge Function
-                  </span>
-                ) : null}
+                Offensive rating, defensive rating, and pace — ESPN NBA {game._meta.nbaStatsSeason} regular season.
               </>
             ) : (
               <>
-                PPG, opponent PPG, and estimated pace from ESPN. Connect the NBA stats feed to show official ORtg, DRtg, and
-                pace in these slots instead.
-                {import.meta.env.DEV ? (
-                  <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
-                    Deploy nba-stats-proxy; VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or VITE_NBA_STATS_PROXY_URL)
-                  </span>
-                ) : null}
+                PPG, opponent PPG, and estimated pace from ESPN.
               </>
             )}
           </p>
