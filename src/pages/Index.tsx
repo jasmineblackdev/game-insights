@@ -8,14 +8,14 @@ import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
-import { ClipboardList, Layers, TrendingUp, Tv2, Zap } from "lucide-react";
+import { ClipboardList, Layers, TrendingUp, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 
-type ViewMode = "games" | "draft";
+type ViewMode = "games" | "props" | "draft";
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -216,7 +216,7 @@ const Index = () => {
             <img
               src="/GameLens_logo.png"
               alt="GameLens"
-              className="w-[7.75rem] h-[7.75rem] shrink-0 object-contain"
+              className="w-[7.75rem] h-11 shrink-0 object-contain"
             />
             <Link
               to="/edge"
@@ -266,6 +266,8 @@ const Index = () => {
                 >
                   {viewMode === "draft" ? (
                     <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
+                  ) : viewMode === "props" ? (
+                    <>Player <span className="text-gradient-primary">Props</span></>
                   ) : (
                     <>
                       {dateFilter === "today"
