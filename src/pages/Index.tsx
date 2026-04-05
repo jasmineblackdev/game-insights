@@ -86,19 +86,31 @@ function DatePicker({
   todayLabel,
   tomorrowLabel,
   weekLabel,
+  nearLabel,
 }: {
   value: GameDate;
   onChange: (d: GameDate) => void;
   todayLabel: string;
   tomorrowLabel: string;
-  /** EPL: show third tab for fixtures in the next 7 days (sparse schedule). */
+  /** EPL: fixtures in the next 7 days (sparse schedule). */
   weekLabel?: string;
+  /** EPL: today ∪ tomorrow in one list (default lane). */
+  nearLabel?: string;
 }) {
-  const tabs = [
-    ["today", todayLabel],
-    ["tomorrow", tomorrowLabel],
-    ...(weekLabel ? [["week", weekLabel] as const] : []),
-  ] as [GameDate, string][];
+  const tabs = (
+    nearLabel
+      ? [
+          ["near", nearLabel] as const,
+          ["today", todayLabel],
+          ["tomorrow", tomorrowLabel],
+          ...(weekLabel ? [["week", weekLabel] as const] : []),
+        ]
+      : [
+          ["today", todayLabel],
+          ["tomorrow", tomorrowLabel],
+          ...(weekLabel ? [["week", weekLabel] as const] : []),
+        ]
+  ) as [GameDate, string][];
   return (
     <div className="flex items-center gap-1 rounded-full bg-muted p-0.5 flex-wrap">
       {tabs.map(([d, label]) => (
@@ -184,7 +196,11 @@ const Index = () => {
   const todayLabel = `Today · ${formatDate(today)}`;
   const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
 
-  const filteredGames = leagueGames.filter((g) => g.gameDate === dateFilter);
+  const filteredGames = leagueGames.filter((g) =>
+    dateFilter === "near"
+      ? g.gameDate === "today" || g.gameDate === "tomorrow"
+      : g.gameDate === dateFilter
+  );
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
@@ -193,7 +209,11 @@ const Index = () => {
   const handleLeagueChange = (l: League) => {
     setLeague(l);
     setSelectedGame(null);
-    if (l !== "soccer" && dateFilter === "week") setDateFilter("today");
+    if (l === "soccer") {
+      setDateFilter("near");
+    } else if (dateFilter === "week" || dateFilter === "near") {
+      setDateFilter("today");
+    }
   };
 
   const handleViewModeChange = (m: ViewMode) => {
@@ -276,7 +296,9 @@ const Index = () => {
                         ? "Today's"
                         : dateFilter === "tomorrow"
                           ? "Tomorrow's"
-                          : "Next 7 days · "}{" "}
+                          : dateFilter === "near"
+                            ? "Today & tomorrow · "
+                            : "Next 7 days · "}{" "}
                       <span className="text-gradient-primary">Predictions</span>
                     </>
                   )}
@@ -318,8 +340,9 @@ const Index = () => {
                       <span className="text-foreground/80">fixture congestion</span> (last 7 days of EPL finals on ESPN,
                       or 7d/14d + table with{" "}
                       <span className="text-foreground/80">VITE_FOOTBALL_DATA_API_TOKEN</span> — dev proxy hides the
-                      token). EPL often has <span className="text-foreground/80">empty calendar days</span> — use the{" "}
-                      <span className="text-foreground/80">Next 7 days</span> tab for nearby kickoffs. xG and confirmed
+                      token). EPL often has <span className="text-foreground/80">empty calendar days</span> on a single
+                      day — <span className="text-foreground/80">Today + tomorrow</span> merges both Eastern days;{" "}
+                      <span className="text-foreground/80">Next 7 days</span> shows the full window. xG and confirmed
                       XIs still need StatsBomb-style feeds — see each game&apos;s soccer notes.
                     </>
                   )}
@@ -351,8 +374,18 @@ const Index = () => {
                     <>
                       <div className="flex items-center gap-2 text-xs">
                         <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
-                        <span className="text-muted-foreground">Games loaded:</span>
-                        <span className="text-confidence-high font-semibold">{leagueGames.length}</span>
+                        <span className="text-muted-foreground">
+                          {league === "soccer" ? "In this tab:" : "Games loaded:"}
+                        </span>
+                        <span className="text-confidence-high font-semibold">
+                          {league === "soccer" ? filteredGames.length : leagueGames.length}
+                        </span>
+                        {league === "soccer" && (
+                          <span className="text-muted-foreground font-normal">
+                            {" "}
+                            ({leagueGames.length} in 7d fetch)
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <Zap className="w-3.5 h-3.5 text-primary" />
@@ -403,6 +436,7 @@ const Index = () => {
                     todayLabel={todayLabel}
                     tomorrowLabel={tomorrowLabel}
                     weekLabel={league === "soccer" ? "Next 7 days" : undefined}
+                    nearLabel={league === "soccer" ? "Today + tomorrow" : undefined}
                   />
                 )}
               </div>
@@ -456,9 +490,11 @@ const Index = () => {
                   <p className="text-muted-foreground text-sm max-w-md">
                     {league === "soccer" && dateFilter === "week"
                       ? "No EPL fixtures in the next 7 days on the ESPN board (US Eastern). International breaks or between matchweeks can look like this."
-                      : league === "soccer"
-                        ? `No EPL games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). That’s normal — try Next 7 days for the nearest kickoffs.`
-                        : `No ${leagueLabel(league)} games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are normal — try the other day tab.`}
+                      : league === "soccer" && dateFilter === "near"
+                        ? "No EPL games on the ESPN board for today or tomorrow (US Eastern). Try Next 7 days for the rest of the week’s fixtures."
+                        : league === "soccer"
+                          ? `No EPL games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Try Today + tomorrow or Next 7 days for nearby kickoffs.`
+                          : `No ${leagueLabel(league)} games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are normal — try the other day tab.`}
                   </p>
                 </div>
               )}
