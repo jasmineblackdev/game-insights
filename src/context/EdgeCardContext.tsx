@@ -15,10 +15,15 @@ import {
   type EdgeHubFilters,
   type EdgeSide,
   type EdgeSlipItem,
+  type PlayerPropInput,
+  type TeamEdgeSlipItem,
   autoBuildEdgeSlip,
   buildCandidate,
   candidateToSlipItem,
   defaultEdgeHubFilters,
+  isTeamSlipItem,
+  normalizeSlipItem,
+  playerPropToSlipItem,
   slipAggregateConfidence,
 } from "@/lib/edgeCardScoring";
 
@@ -33,25 +38,37 @@ interface EdgeCardContextValue {
   slip: EdgeSlipItem[];
   history: EdgeHistoryEntry[];
   addPick: (game: GamePrediction, side?: EdgeSide) => { ok: boolean; message?: string };
-  removePick: (gameId: string) => void;
-  replacePick: (gameId: string, item: EdgeSlipItem) => void;
+  addPlayerProp: (p: PlayerPropInput) => { ok: boolean; message?: string };
+  removePick: (itemId: string) => void;
+  replacePick: (itemId: string, item: TeamEdgeSlipItem) => void;
   clearSlip: () => void;
   autoBuild: (candidates: EdgeCandidate[], size: EdgeCardSize) => void;
   saveSlipToHistory: () => void;
   isOnSlip: (gameId: string) => boolean;
+  isPlayerPropOnSlip: (predictionId: string) => boolean;
   slipFull: boolean;
 }
 
 const EdgeCardContext = createContext<EdgeCardContextValue | null>(null);
 
+function parseSlipItems(raw: unknown): EdgeSlipItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: EdgeSlipItem[] = [];
+  for (const row of raw) {
+    const n = normalizeSlipItem(row);
+    if (n) out.push(n);
+  }
+  return out;
+}
+
 function loadSlip(): { cardSize: EdgeCardSize; items: EdgeSlipItem[] } {
   try {
     const raw = localStorage.getItem(STORAGE_SLIP);
     if (!raw) return { cardSize: 3, items: [] };
-    const p = JSON.parse(raw) as { cardSize?: EdgeCardSize; items?: EdgeSlipItem[] };
+    const p = JSON.parse(raw) as { cardSize?: EdgeCardSize; items?: unknown[] };
     const size =
       p.cardSize === 4 || p.cardSize === 6 || p.cardSize === 10 ? p.cardSize : 3;
-    return { cardSize: size, items: Array.isArray(p.items) ? p.items : [] };
+    return { cardSize: size, items: parseSlipItems(p.items) };
   } catch {
     return { cardSize: 3, items: [] };
   }
@@ -62,7 +79,11 @@ function loadHistory(): EdgeHistoryEntry[] {
     const raw = localStorage.getItem(STORAGE_HISTORY);
     if (!raw) return [];
     const p = JSON.parse(raw) as EdgeHistoryEntry[];
-    return Array.isArray(p) ? p.slice(0, 30) : [];
+    if (!Array.isArray(p)) return [];
+    return p.slice(0, 30).map((h) => ({
+      ...h,
+      items: parseSlipItems(h.items as unknown[]),
+    }));
   } catch {
     return [];
   }
@@ -93,7 +114,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
 
   const addPick = useCallback(
     (game: GamePrediction, side?: EdgeSide): { ok: boolean; message?: string } => {
-      if (slip.some((x) => x.gameId === game.id)) {
+      if (slip.some((x) => isTeamSlipItem(x) && x.gameId === game.id)) {
         return { ok: false, message: "Already on your Edge Card" };
       }
       if (slip.length >= cardSize) {
@@ -107,14 +128,39 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
     [slip, cardSize]
   );
 
-  const removePick = useCallback((gameId: string) => {
-    setSlipState((s) => ({ ...s, items: s.items.filter((x) => x.gameId !== gameId) }));
+  const addPlayerProp = useCallback(
+    (p: PlayerPropInput): { ok: boolean; message?: string } => {
+      if (slip.some((x) => x.kind === "player_prop" && x.id === p.id)) {
+        return { ok: false, message: "This player prop is already on your Edge Card" };
+      }
+      const dup = slip.some(
+        (x) =>
+          x.kind === "player_prop" &&
+          x.playerId === p.player_id &&
+          x.gameId === p.game_id &&
+          x.statType === p.stat_type
+      );
+      if (dup) {
+        return { ok: false, message: "You already have this player & stat for this game" };
+      }
+      if (slip.length >= cardSize) {
+        return { ok: false, message: `Edge Card ${cardSize} is full` };
+      }
+      const item = playerPropToSlipItem(p);
+      setSlipState((s) => ({ ...s, items: [...s.items, item] }));
+      return { ok: true };
+    },
+    [slip, cardSize]
+  );
+
+  const removePick = useCallback((itemId: string) => {
+    setSlipState((s) => ({ ...s, items: s.items.filter((x) => x.id !== itemId) }));
   }, []);
 
-  const replacePick = useCallback((gameId: string, item: EdgeSlipItem) => {
+  const replacePick = useCallback((itemId: string, item: TeamEdgeSlipItem) => {
     setSlipState((s) => ({
       ...s,
-      items: s.items.map((x) => (x.gameId === gameId ? item : x)),
+      items: s.items.map((x) => (x.id === itemId ? item : x)),
     }));
   }, []);
 
@@ -133,7 +179,9 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
 
   const saveSlipToHistory = useCallback(() => {
     if (!slip.length) return;
-    const aggregateConfidence = slipAggregateConfidence(slip.map((i) => ({ confidence: i.snapshot.confidence })));
+    const aggregateConfidence = slipAggregateConfidence(
+      slip.map((i) => ({ confidence: i.snapshot.confidence }))
+    );
     let riskLabel: EdgeHistoryEntry["riskLabel"] = "controlled";
     if (slip.some((i) => i.snapshot.confidence === "low")) riskLabel = "elevated";
     else if (slip.some((i) => i.snapshot.confidence === "medium")) riskLabel = "moderate";
@@ -148,7 +196,15 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
     setHistory((h) => [entry, ...h].slice(0, 30));
   }, [slip, cardSize]);
 
-  const isOnSlip = useCallback((gameId: string) => slip.some((x) => x.gameId === gameId), [slip]);
+  const isOnSlip = useCallback(
+    (gameId: string) => slip.some((x) => isTeamSlipItem(x) && x.gameId === gameId),
+    [slip]
+  );
+
+  const isPlayerPropOnSlip = useCallback(
+    (predictionId: string) => slip.some((x) => x.kind === "player_prop" && x.id === predictionId),
+    [slip]
+  );
 
   const value = useMemo(
     () => ({
@@ -159,12 +215,14 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       slip,
       history,
       addPick,
+      addPlayerProp,
       removePick,
       replacePick,
       clearSlip,
       autoBuild,
       saveSlipToHistory,
       isOnSlip,
+      isPlayerPropOnSlip,
       slipFull,
     }),
     [
@@ -175,12 +233,14 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       slip,
       history,
       addPick,
+      addPlayerProp,
       removePick,
       replacePick,
       clearSlip,
       autoBuild,
       saveSlipToHistory,
       isOnSlip,
+      isPlayerPropOnSlip,
       slipFull,
     ]
   );

@@ -40,12 +40,171 @@ export interface EdgeSlipSnapshot {
   lastUpdated: string;
 }
 
-export interface EdgeSlipItem {
+export interface PlayerPropSlipSnapshot {
+  playerName: string;
+  label: string;
+  teamAbbr: string;
+  opponentAbbr: string;
+  gameTime: string;
+  statType: string;
+  lineValue: number;
+  projectedValue: number;
+  predictionDirection: "MORE" | "LESS";
+  edgeDisplay: number;
+  confidence: ConfidenceLevel;
+  topReason: string;
+  topRisk: string;
+  lastUpdated: string;
+}
+
+export type TeamEdgeSlipItem = {
+  kind: "team_pick";
+  id: string;
   gameId: string;
   league: League;
   side: EdgeSide;
   addedAt: string;
   snapshot: EdgeSlipSnapshot;
+};
+
+export type PlayerPropEdgeSlipItem = {
+  kind: "player_prop";
+  id: string;
+  gameId: string;
+  playerId: string;
+  league: League;
+  statType: string;
+  addedAt: string;
+  snapshot: PlayerPropSlipSnapshot;
+};
+
+/** Mixed Edge Card: team moneylines + player props (V1). */
+export type EdgeSlipItem = TeamEdgeSlipItem | PlayerPropEdgeSlipItem;
+
+export function isTeamSlipItem(item: EdgeSlipItem): item is TeamEdgeSlipItem {
+  return item.kind === "team_pick";
+}
+
+export function isPlayerPropSlipItem(item: EdgeSlipItem): item is PlayerPropEdgeSlipItem {
+  return item.kind === "player_prop";
+}
+
+/** API / UI payload shape for adding a player prop to the slip. */
+export interface PlayerPropInput {
+  id: string;
+  game_id: string;
+  player_id: string;
+  player_name: string;
+  sport: "NBA" | "NFL" | "MLB" | "Soccer";
+  team: string;
+  opponent: string;
+  game_time: string;
+  stat_type: string;
+  line_value: number;
+  projected_value: number;
+  prediction_direction: "MORE" | "LESS";
+  edge: number;
+  confidence: "HIGH" | "MED" | "LOW";
+  reason_1: string;
+  reason_2: string;
+  risk_factor: string;
+}
+
+function sportToLeague(s: PlayerPropInput["sport"]): League {
+  if (s === "NBA") return "nba";
+  if (s === "NFL") return "nfl";
+  if (s === "MLB") return "mlb";
+  return "soccer";
+}
+
+function apiConfidenceToLevel(c: PlayerPropInput["confidence"]): ConfidenceLevel {
+  if (c === "HIGH") return "high";
+  if (c === "MED") return "medium";
+  return "low";
+}
+
+function humanStatLabel(statType: string): string {
+  const map: Record<string, string> = {
+    points: "Pts",
+    rebounds: "Reb",
+    assists: "Ast",
+    passing_yards: "Pass Yds",
+    rushing_yards: "Rush Yds",
+    receiving_yards: "Rec Yds",
+    strikeouts: "K",
+    hits: "Hits",
+    total_bases: "TB",
+    shots: "Shots",
+    shots_on_target: "SoT",
+  };
+  return map[statType] ?? statType.replace(/_/g, " ");
+}
+
+export function buildPlayerPropLabel(p: PlayerPropInput): string {
+  return `${p.player_name} ${p.prediction_direction} ${p.line_value} ${humanStatLabel(p.stat_type)}`;
+}
+
+export function playerPropToSlipItem(p: PlayerPropInput): PlayerPropEdgeSlipItem {
+  const league = sportToLeague(p.sport);
+  const conf = apiConfidenceToLevel(p.confidence);
+  const label = buildPlayerPropLabel(p);
+  return {
+    kind: "player_prop",
+    id: p.id,
+    gameId: p.game_id,
+    playerId: p.player_id,
+    league,
+    statType: p.stat_type,
+    addedAt: new Date().toISOString(),
+    snapshot: {
+      playerName: p.player_name,
+      label,
+      teamAbbr: p.team,
+      opponentAbbr: p.opponent,
+      gameTime: p.game_time,
+      statType: p.stat_type,
+      lineValue: p.line_value,
+      projectedValue: p.projected_value,
+      predictionDirection: p.prediction_direction,
+      edgeDisplay: Math.abs(p.edge),
+      confidence: conf,
+      topReason: p.reason_1,
+      topRisk: p.risk_factor,
+      lastUpdated: new Date().toISOString(),
+    },
+  };
+}
+
+/** Migrate v1 JSON slip rows (no `kind`) to discriminated union. */
+export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  if (o.kind === "player_prop") {
+    return raw as PlayerPropEdgeSlipItem;
+  }
+  if (o.kind === "team_pick") {
+    return raw as TeamEdgeSlipItem;
+  }
+  if (
+    typeof o.gameId === "string" &&
+    o.league &&
+    o.side &&
+    o.snapshot &&
+    typeof o.snapshot === "object" &&
+    "pickedAbbr" in (o.snapshot as object)
+  ) {
+    const gid = String(o.gameId);
+    return {
+      kind: "team_pick",
+      id: gid,
+      gameId: gid,
+      league: o.league as League,
+      side: o.side as EdgeSide,
+      addedAt: typeof o.addedAt === "string" ? o.addedAt : new Date().toISOString(),
+      snapshot: o.snapshot as EdgeSlipSnapshot,
+    };
+  }
+  return null;
 }
 
 export interface EdgeHistoryEntry {
@@ -54,7 +213,7 @@ export interface EdgeHistoryEntry {
   size: EdgeCardSize;
   items: EdgeSlipItem[];
   aggregateConfidence: ConfidenceLevel;
-  riskLabel: string;
+  riskLabel: "elevated" | "moderate" | "controlled";
 }
 
 export interface EdgeCandidate {
@@ -172,12 +331,15 @@ export function buildCandidate(game: GamePrediction, side?: EdgeSide): EdgeCandi
   };
 }
 
-export function candidateToSlipItem(c: EdgeCandidate): EdgeSlipItem {
+export function candidateToSlipItem(c: EdgeCandidate): TeamEdgeSlipItem {
   const { game, side } = c;
   const picked = side === "home" ? game.homeTeam : game.awayTeam;
   const opp = side === "home" ? game.awayTeam : game.homeTeam;
+  const gid = game.id;
   return {
-    gameId: game.id,
+    kind: "team_pick",
+    id: gid,
+    gameId: gid,
     league: game.league,
     side,
     addedAt: new Date().toISOString(),
@@ -280,6 +442,36 @@ export function slipAggregateConfidence(items: { confidence: ConfidenceLevel }[]
   if (items.some((i) => i.confidence === "low")) return "low";
   if (items.some((i) => i.confidence === "medium")) return "medium";
   return "high";
+}
+
+/** Short warnings for the fixed Edge Card drawer (mixed team + player props). */
+export function edgeSlipWarningLines(items: EdgeSlipItem[]): string[] {
+  const lines: string[] = [];
+  let lowConf = 0;
+  let pitcherNote = 0;
+  let injuryNote = 0;
+  for (const i of items) {
+    if (isPlayerPropSlipItem(i)) {
+      if (i.snapshot.confidence === "low") lowConf++;
+      continue;
+    }
+    const risk = i.snapshot.topRisk.toLowerCase();
+    const reason = i.snapshot.topReason.toLowerCase();
+    if (risk.includes("probable pitcher") || risk.includes("bullpen leverage")) pitcherNote++;
+    if (risk.includes("injury") || reason.includes("injury") || risk.includes("questionable")) injuryNote++;
+  }
+  if (injuryNote > 0) {
+    lines.push(`${injuryNote} pick${injuryNote > 1 ? "s have" : " has"} lineup uncertainty`);
+  }
+  if (pitcherNote > 0) {
+    lines.push(
+      `${pitcherNote} pick${pitcherNote > 1 ? "s depend" : " depends"} on probable pitcher confirmation`
+    );
+  }
+  if (lowConf > 0) {
+    lines.push(`${lowConf} pick${lowConf > 1 ? "s are" : " is"} low confidence`);
+  }
+  return lines;
 }
 
 export function slipRiskLabel(items: { flags: EdgePickFlags }[]): "elevated" | "moderate" | "controlled" {

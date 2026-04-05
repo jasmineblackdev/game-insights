@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
 import { getDraftPicks } from "@/data/draftPicks";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
+import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { Activity, ClipboardList, Layers, TrendingUp, Tv2, Zap } from "lucide-react";
@@ -450,6 +451,7 @@ const Index = () => {
                   </p>
                 </div>
               )}
+              {viewMode === "games" ? <PlayerEdgeSection /> : null}
             </motion.div>
           )}
         </AnimatePresence>

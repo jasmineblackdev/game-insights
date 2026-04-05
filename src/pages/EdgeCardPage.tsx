@@ -30,7 +30,9 @@ import {
   type EdgeCardSize,
   buildCandidate,
   candidateToSlipItem,
+  edgeSlipWarningLines,
   groupCandidatesByLeague,
+  isTeamSlipItem,
   rankCandidatesForHub,
   suggestReplacement,
 } from "@/lib/edgeCardScoring";
@@ -257,12 +259,18 @@ export default function EdgeCardPage() {
     let risk = "Controlled";
     if (slip.some((s) => s.snapshot.confidence === "low")) risk = "Elevated";
     else if (
-      slip.some((s) => s.snapshot.topRisk.toLowerCase().includes("line") || s.snapshot.topRisk.includes("?"))
+      slip.some(
+        (s) =>
+          isTeamSlipItem(s) &&
+          (s.snapshot.topRisk.toLowerCase().includes("line") || s.snapshot.topRisk.includes("?"))
+      )
     ) {
       risk = "Moderate";
     }
     return { conf, risk };
   }, [slip]);
+
+  const slipWarnings = useMemo(() => edgeSlipWarningLines(slip), [slip]);
 
   return (
     <div className="min-h-screen bg-background pb-36">
@@ -281,7 +289,7 @@ export default function EdgeCardPage() {
               <Layers className="w-5 h-5 text-primary" />
               <div>
                 <h1 className="font-display font-bold text-base text-foreground">Edge Card</h1>
-                <p className="text-[11px] text-muted-foreground">Curated team picks · multi-sport</p>
+                <p className="text-[11px] text-muted-foreground">Team picks &amp; player props · multi-sport</p>
               </div>
             </div>
           </div>
@@ -496,7 +504,13 @@ export default function EdgeCardPage() {
                   · {new Date(h.savedAt).toLocaleString()} · {h.items.length} picks · conf {h.aggregateConfidence} · risk{" "}
                   {h.riskLabel}
                   <span className="block mt-1 text-[11px]">
-                    {h.items.map((x) => `${x.snapshot.pickedAbbr} vs ${x.snapshot.opponentAbbr}`).join(" · ")}
+                    {h.items
+                      .map((x) =>
+                        isTeamSlipItem(x)
+                          ? `${x.snapshot.pickedAbbr} vs ${x.snapshot.opponentAbbr}`
+                          : x.snapshot.label
+                      )
+                      .join(" · ")}
                   </span>
                 </li>
               ))}
@@ -518,6 +532,13 @@ export default function EdgeCardPage() {
                   <span className="text-foreground">{aggregateSummary.risk}</span>
                 </p>
               ) : null}
+              {slipWarnings.length > 0 ? (
+                <ul className="text-[10px] text-amber-600 dark:text-amber-400/90 list-disc list-inside mt-1 space-y-0.5">
+                  {slipWarnings.map((w) => (
+                    <li key={w}>{w}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={clearSlip} disabled={!slip.length}>
@@ -530,17 +551,38 @@ export default function EdgeCardPage() {
             </div>
           </div>
           {slip.length > 0 ? (
-            <ul className="flex flex-col gap-2 max-h-40 overflow-y-auto">
+            <ul className="flex flex-col gap-2 max-h-48 overflow-y-auto">
               {slip.map((item) => {
+                if (!isTeamSlipItem(item)) {
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]"
+                    >
+                      <div>
+                        <span className="font-bold text-foreground">{leagueShort(item.league)}</span> ·{" "}
+                        <span className="text-primary font-semibold">Prop</span> · {item.snapshot.label}
+                        <span className="block text-muted-foreground mt-0.5">
+                          {item.snapshot.predictionDirection} · edge {item.snapshot.edgeDisplay.toFixed(1)} ·{" "}
+                          {item.snapshot.confidence}
+                        </span>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePick(item.id)}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </li>
+                  );
+                }
                 const live = gameById.get(item.gameId);
                 const dataStale = live && live.lastUpdated !== item.snapshot.lastUpdated;
+                const teamGameIds = slip.filter(isTeamSlipItem).map((s) => s.gameId);
                 const rep = suggestReplacement(
                   ranked,
-                  new Set(slip.map((s) => s.gameId).filter((id) => id !== item.gameId))
+                  new Set(teamGameIds.filter((id) => id !== item.gameId))
                 );
                 return (
                   <li
-                    key={item.gameId}
+                    key={item.id}
                     className="flex flex-wrap items-start justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]"
                   >
                     <div>
@@ -564,7 +606,7 @@ export default function EdgeCardPage() {
                           className="h-7 text-[10px] px-2"
                           onClick={() => {
                             const nc = buildCandidate(rep.game, rep.side);
-                            replacePick(item.gameId, candidateToSlipItem(nc));
+                            replacePick(item.id, candidateToSlipItem(nc));
                             toast.success(
                               `Swapped in ${nc.game.awayTeam.abbreviation} @ ${nc.game.homeTeam.abbreviation} — ${nc.side === "home" ? nc.game.homeTeam.abbreviation : nc.game.awayTeam.abbreviation}`
                             );
@@ -574,7 +616,7 @@ export default function EdgeCardPage() {
                           Swap
                         </Button>
                       ) : null}
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePick(item.gameId)}>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePick(item.id)}>
                         <X className="w-3.5 h-3.5" />
                       </Button>
                     </div>
