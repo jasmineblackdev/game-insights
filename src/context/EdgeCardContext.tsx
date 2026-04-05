@@ -12,6 +12,7 @@ import {
   type EdgeCardSize,
   type EdgeCandidate,
   type EdgeHistoryEntry,
+  type EdgeSlipOutcome,
   type EdgeHubFilters,
   type EdgeSide,
   type EdgeSlipItem,
@@ -44,6 +45,7 @@ interface EdgeCardContextValue {
   clearSlip: () => void;
   autoBuild: (candidates: EdgeCandidate[], size: EdgeCardSize) => void;
   saveSlipToHistory: () => void;
+  setHistoryOutcome: (entryId: string, outcome: EdgeSlipOutcome | null) => void;
   isOnSlip: (gameId: string) => boolean;
   isPlayerPropOnSlip: (predictionId: string) => boolean;
   slipFull: boolean;
@@ -80,10 +82,17 @@ function loadHistory(): EdgeHistoryEntry[] {
     if (!raw) return [];
     const p = JSON.parse(raw) as EdgeHistoryEntry[];
     if (!Array.isArray(p)) return [];
-    return p.slice(0, 30).map((h) => ({
-      ...h,
-      items: parseSlipItems(h.items as unknown[]),
-    }));
+    return p.slice(0, 30).map((h) => {
+      const raw = h as EdgeHistoryEntry & { outcome?: unknown };
+      const o = raw.outcome;
+      const outcome: EdgeSlipOutcome | undefined =
+        o === "win" || o === "loss" || o === "push" ? o : undefined;
+      return {
+        ...raw,
+        items: parseSlipItems(raw.items as unknown[]),
+        outcome: outcome ?? null,
+      };
+    });
   } catch {
     return [];
   }
@@ -196,6 +205,20 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
     setHistory((h) => [entry, ...h].slice(0, 30));
   }, [slip, cardSize]);
 
+  const setHistoryOutcome = useCallback((entryId: string, outcome: EdgeSlipOutcome | null) => {
+    setHistory((h) =>
+      h.map((e) => {
+        if (e.id !== entryId) return e;
+        if (outcome === null) {
+          const next = { ...e };
+          delete next.outcome;
+          return next;
+        }
+        return { ...e, outcome };
+      })
+    );
+  }, []);
+
   const isOnSlip = useCallback(
     (gameId: string) => slip.some((x) => isTeamSlipItem(x) && x.gameId === gameId),
     [slip]
@@ -221,6 +244,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       clearSlip,
       autoBuild,
       saveSlipToHistory,
+      setHistoryOutcome,
       isOnSlip,
       isPlayerPropOnSlip,
       slipFull,
@@ -239,6 +263,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       clearSlip,
       autoBuild,
       saveSlipToHistory,
+      setHistoryOutcome,
       isOnSlip,
       isPlayerPropOnSlip,
       slipFull,

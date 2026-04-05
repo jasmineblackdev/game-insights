@@ -8,6 +8,7 @@ import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
+import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { ClipboardList, Layers, TrendingUp, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
@@ -227,6 +228,9 @@ const Index = () => {
             </Link>
           </div>
           <div className="flex items-center gap-2">
+            <div className="hidden sm:block">
+              <UnitSizeCalculator variant="compact" className="h-9 w-9" />
+            </div>
             <Link
               to="/edge"
               className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"

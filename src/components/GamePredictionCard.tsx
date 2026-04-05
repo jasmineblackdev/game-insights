@@ -1,7 +1,9 @@
 import { motion } from "framer-motion";
+import { formatDistanceToNow } from "date-fns";
 import { GamePrediction } from "@/data/mockGames";
 import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
+import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock } from "lucide-react";
 
 interface GamePredictionCardProps {
@@ -21,6 +23,9 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
     game.injuries.home.filter((i) => i.status === "OUT").length +
     game.injuries.away.filter((i) => i.status === "OUT").length;
 
+  const showEdgeBadge = showModelMarketEdgeBadge(game);
+  const updatedAgo = formatDistanceToNow(new Date(game.lastUpdated), { addSuffix: true });
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -30,12 +35,23 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       className="card-shine bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group"
     >
       {/* Header */}
-      <div className="px-4 pt-3 pb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">{game.gameTime}</span>
+      <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground truncate">{game.gameTime}</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground/90 pl-5">Updated {updatedAgo}</span>
         </div>
         <div className="flex items-center gap-1.5 flex-wrap justify-end">
+          {showEdgeBadge ? (
+            <span
+              className="text-[10px] font-bold tracking-wide text-amber-600 dark:text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/25"
+              title="Model win % differs from moneyline implied by more than 7 pts"
+            >
+              ⚡ EDGE
+            </span>
+          ) : null}
           {game.situationalTags.map((tag) => (
             <span key={tag} className="text-[10px] font-semibold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
               {tag}

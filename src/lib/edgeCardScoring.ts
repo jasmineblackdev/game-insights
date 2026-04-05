@@ -207,6 +207,8 @@ export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
   return null;
 }
 
+export type EdgeSlipOutcome = "win" | "loss" | "push";
+
 export interface EdgeHistoryEntry {
   id: string;
   savedAt: string;
@@ -214,6 +216,8 @@ export interface EdgeHistoryEntry {
   items: EdgeSlipItem[];
   aggregateConfidence: ConfidenceLevel;
   riskLabel: "elevated" | "moderate" | "controlled";
+  /** User-tracked result for the saved card (optional). */
+  outcome?: EdgeSlipOutcome | null;
 }
 
 export interface EdgeCandidate {

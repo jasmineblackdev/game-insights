@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import type { GamePrediction, League } from "@/data/mockGames";
 import { useEdgeCard } from "@/context/EdgeCardContext";
+import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -28,6 +29,7 @@ import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import {
   type EdgeCandidate,
   type EdgeCardSize,
+  type EdgeSlipOutcome,
   buildCandidate,
   candidateToSlipItem,
   edgeSlipWarningLines,
@@ -171,6 +173,7 @@ export default function EdgeCardPage() {
     clearSlip,
     autoBuild,
     saveSlipToHistory,
+    setHistoryOutcome,
     isOnSlip,
     slipFull,
   } = useEdgeCard();
@@ -272,6 +275,19 @@ export default function EdgeCardPage() {
 
   const slipWarnings = useMemo(() => edgeSlipWarningLines(slip), [slip]);
 
+  const historyRecord = useMemo(() => {
+    let w = 0;
+    let l = 0;
+    let p = 0;
+    for (const h of history) {
+      if (h.outcome === "win") w++;
+      else if (h.outcome === "loss") l++;
+      else if (h.outcome === "push") p++;
+    }
+    const tracked = w + l + p;
+    return { w, l, p, tracked };
+  }, [history]);
+
   return (
     <div className="min-h-screen bg-background pb-36">
       <header className="border-b border-border surface-glass sticky top-0 z-40">
@@ -293,20 +309,23 @@ export default function EdgeCardPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
-            {([3, 4, 6, 10] as const).map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setCardSize(n)}
-                className={cn(
-                  "px-3 py-1 rounded-full text-xs font-bold transition-colors",
-                  cardSize === n ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {n}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <UnitSizeCalculator variant="compact" className="h-9 w-9 shrink-0" />
+            <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
+              {([3, 4, 6, 10] as const).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => setCardSize(n)}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-xs font-bold transition-colors",
+                    cardSize === n ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>
@@ -485,10 +504,25 @@ export default function EdgeCardPage() {
         ) : null}
 
         <section className="space-y-3 border-t border-border pt-8">
-          <h3 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
-            <History className="w-4 h-4" />
-            Saved Edge Cards
-          </h3>
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <h3 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
+              <History className="w-4 h-4" />
+              Saved Edge Cards
+            </h3>
+            {historyRecord.tracked > 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Tracked:{" "}
+                <span className="text-confidence-high font-semibold">{historyRecord.w}W</span> ·{" "}
+                <span className="text-red-600 dark:text-red-400 font-semibold">{historyRecord.l}L</span>
+                {historyRecord.p > 0 ? (
+                  <>
+                    {" "}
+                    · <span className="text-foreground font-semibold">{historyRecord.p}P</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+          </div>
           {history.length === 0 ? (
             <p className="text-xs text-muted-foreground">Save your current slip to build a history of cards.</p>
           ) : (
@@ -496,14 +530,32 @@ export default function EdgeCardPage() {
               {history.slice(0, 8).map((h) => (
                 <li
                   key={h.id}
-                  className="rounded-md border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground"
+                  className="rounded-md border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground space-y-2"
                 >
-                  <span className="font-semibold text-foreground">
-                    Edge {h.size}
-                  </span>{" "}
-                  · {new Date(h.savedAt).toLocaleString()} · {h.items.length} picks · conf {h.aggregateConfidence} · risk{" "}
-                  {h.riskLabel}
-                  <span className="block mt-1 text-[11px]">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-semibold text-foreground">Edge {h.size}</span>
+                    <span>·</span>
+                    <span>{new Date(h.savedAt).toLocaleString()}</span>
+                    <span>·</span>
+                    <span>{h.items.length} picks</span>
+                    <span>·</span>
+                    <span>conf {h.aggregateConfidence}</span>
+                    <span>·</span>
+                    <span>risk {h.riskLabel}</span>
+                    {h.outcome ? (
+                      <span
+                        className={cn(
+                          "ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full",
+                          h.outcome === "win" && "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
+                          h.outcome === "loss" && "bg-red-500/15 text-red-600 dark:text-red-400",
+                          h.outcome === "push" && "bg-muted text-foreground"
+                        )}
+                      >
+                        {h.outcome.toUpperCase()}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="block text-[11px]">
                     {h.items
                       .map((x) =>
                         isTeamSlipItem(x)
@@ -512,6 +564,30 @@ export default function EdgeCardPage() {
                       )
                       .join(" · ")}
                   </span>
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-muted-foreground mr-1">Result:</span>
+                    {(["win", "loss", "push"] as const).map((o) => (
+                      <Button
+                        key={o}
+                        type="button"
+                        variant={h.outcome === o ? "default" : "outline"}
+                        size="sm"
+                        className={cn(
+                          "h-7 text-[10px] px-2 capitalize",
+                          h.outcome === o && o === "win" && "bg-emerald-600 hover:bg-emerald-600/90",
+                          h.outcome === o && o === "loss" && "bg-red-600 hover:bg-red-600/90",
+                          h.outcome === o && o === "push" && "bg-muted text-foreground"
+                        )}
+                        onClick={() => {
+                          const next: EdgeSlipOutcome | null = h.outcome === o ? null : o;
+                          setHistoryOutcome(h.id, next);
+                          if (next) toast.success(`Marked ${next}`);
+                        }}
+                      >
+                        {o}
+                      </Button>
+                    ))}
+                  </div>
                 </li>
               ))}
             </ul>
