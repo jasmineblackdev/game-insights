@@ -13,3 +13,8 @@ major_version = 17
 #   supabase functions deploy nba-stats-proxy
 #   supabase functions deploy odds-api-proxy
 #   supabase secrets set THE_ODDS_API_KEY=...   # server-only; do not use VITE_ prefix
+#
+# Learning loop (migration 20260409120000): ETL writes prediction_outcome_log; call
+#   select refresh_prediction_accuracy_summary(7);
+#   select refresh_prediction_accuracy_summary(30);
+# as service_role / cron. factor_weight_adjustments is append-only audit for weekly tuning.
