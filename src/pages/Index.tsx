@@ -8,7 +8,7 @@ import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
-import { Activity, ClipboardList, Layers, TrendingUp, Tv2, Zap } from "lucide-react";
+import { ClipboardList, Layers, TrendingUp, Tv2, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -213,9 +213,7 @@ const Index = () => {
       <header className="border-b border-border surface-glass sticky top-0 z-50">
         <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
-              <Activity className="w-4.5 h-4.5 text-primary" />
-            </div>
+            <img src="/GameLens_logo.png" alt="GameLens" className="w-8 h-8 rounded-lg shrink-0 object-contain" />
             <div className="hidden sm:block">
               <h1 className="font-display font-bold text-base text-foreground tracking-tight">
                 GameLens
