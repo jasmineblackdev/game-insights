@@ -308,11 +308,19 @@ function DraftDataSourceNote({
   }
   return (
     <p className="text-[10px] text-muted-foreground max-w-2xl leading-relaxed">
-      <span className="font-semibold text-foreground/80">Preview</span> — sample cards only. Connect this app to the GameLens
-      backend to load live picks.
+      <span className="font-semibold text-foreground/80">Preview</span> — sample cards only. The live Draft Edge API URL was not
+      baked into this build (missing env).
+      <span className="block mt-2 text-foreground/70">
+        <span className="font-semibold">Vercel / production:</span> Project → Settings → Environment Variables → add{" "}
+        <span className="font-mono text-[9px]">VITE_SUPABASE_URL</span> and{" "}
+        <span className="font-mono text-[9px]">VITE_SUPABASE_ANON_KEY</span> (long JWT anon key from Supabase → API, not the
+        short <span className="font-mono text-[9px]">sb_publishable_</span> key). Save, then{" "}
+        <span className="font-semibold">Redeploy</span> — Vite reads <span className="font-mono text-[9px]">VITE_*</span> at{" "}
+        <span className="italic">build</span> time only.
+      </span>
       {import.meta.env.DEV ? (
-        <span className="block mt-1 font-mono text-[9px] opacity-80">
-          VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY, or VITE_DRAFT_EDGE_API_URL
+        <span className="block mt-2 font-mono text-[9px] opacity-80">
+          Local: .env.local — same vars, or VITE_DRAFT_EDGE_API_URL override
         </span>
       ) : null}
     </p>
