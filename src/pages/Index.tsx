@@ -213,7 +213,11 @@ const Index = () => {
       <header className="border-b border-border surface-glass sticky top-0 z-50">
         <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/GameLens_logo.png" alt="GameLens" className="w-11 h-11 shrink-0 object-contain" />
+            <img
+              src="/GameLens_logo.png"
+              alt="GameLens"
+              className="w-[7.75rem] h-[7.75rem] shrink-0 object-contain"
+            />
             <Link
               to="/edge"
               className="sm:hidden inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-card text-primary shrink-0"
