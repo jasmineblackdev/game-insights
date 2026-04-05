@@ -1,8 +1,21 @@
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
-export type League = "nba" | "nfl";
+export type League = "nba" | "nfl" | "mlb";
 export type GameDate = "today" | "tomorrow";
+
+export type PitcherCertainty = "confirmed" | "probable" | "unknown";
+
+/** MLB-specific pregame signals — populated from ESPN when available. */
+export interface MlbIntel {
+  awayProbablePitcher?: string;
+  homeProbablePitcher?: string;
+  awayPitcherHand?: "L" | "R";
+  homePitcherHand?: "L" | "R";
+  pitcherCertainty: PitcherCertainty;
+  /** Bullpen / park / handedness / lineup sensitivity */
+  modelNotes: string[];
+}
 
 export interface PlayerInjury {
   name: string;
@@ -74,8 +87,17 @@ export interface GamePrediction {
   lastUpdated: string;
   situationalTags: string[];
   lines?: GameLines;
+  /** Cross-book odds, weather, etc. */
+  enrichmentNotes?: string[];
+  mlb?: MlbIntel;
   /** ESPN / client-only sort key */
-  _meta?: { easternYmd: string; sortTime: number };
+  _meta?: {
+    easternYmd: string;
+    sortTime: number;
+    eventId?: string;
+    homeTeamId?: string;
+    awayTeamId?: string;
+  };
 }
 
 export const allGames: GamePrediction[] = [

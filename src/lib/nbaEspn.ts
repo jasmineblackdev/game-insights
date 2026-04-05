@@ -20,6 +20,8 @@ import {
   ymdToParam,
   nextCalendarYmd,
 } from "@/lib/espnShared";
+import { enrichGamePredictions } from "@/lib/espnEnrichment";
+import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 export { easternYmd } from "@/lib/espnShared";
 
@@ -142,6 +144,9 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     _meta: {
       easternYmd: easternGameYmd,
       sortTime: new Date(comp.date).getTime(),
+      eventId: event.id,
+      homeTeamId: homeC.team.id,
+      awayTeamId: awayC.team.id,
     },
   };
 }
@@ -165,5 +170,7 @@ export async function fetchNbaGamePredictions(): Promise<GamePrediction[]> {
 
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
-  return predictions;
+  let out = await enrichGamePredictions(predictions, "nba");
+  out = await mergeTheOddsApiNotes(out, "basketball_nba");
+  return out;
 }

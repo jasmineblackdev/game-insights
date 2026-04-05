@@ -368,5 +368,6 @@ export const nbaDraftPicks: DraftPickPrediction[] = [
 ];
 
 export function getDraftPicks(league: League): DraftPickPrediction[] {
+  if (league === "mlb") return [];
   return league === "nfl" ? nflDraftPicks : nbaDraftPicks;
 }

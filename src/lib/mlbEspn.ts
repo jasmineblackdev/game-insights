@@ -1,8 +1,8 @@
-import type { GameLines, GamePrediction, League, PlayerTrendData, TeamData } from "@/data/mockGames";
+import type { GamePrediction, League, MlbIntel, PlayerTrendData, TeamData } from "@/data/mockGames";
 import {
   buildEdges,
   buildLines,
-  confidenceFromSpreadNfl,
+  confidenceFromSpreadMlb,
   easternYmd,
   fetchEspnScoreboardEvents,
   formatGameTime,
@@ -23,54 +23,60 @@ import {
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
-const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
 
-/** Yards/game, points allowed/game, plays/game — heuristics from record until you ingest real team stats. */
-function nflRatingHeuristics(pct: number): Pick<TeamData, "offensiveRating" | "defensiveRating" | "pace"> {
+function defaultMlbIntel(): MlbIntel {
   return {
-    offensiveRating: Math.round(300 + pct * 95),
-    defensiveRating: Math.round((27 - pct * 11) * 10) / 10,
-    pace: Math.round((63 + (pct - 0.5) * 8) * 10) / 10,
+    pitcherCertainty: "unknown",
+    modelNotes: [
+      "MLB is driven by confirmed starter, bullpen workload, handedness splits, and lineup quality — re-run when probables confirm.",
+      "Treat tiny batter-vs-pitcher samples as secondary; lean on season wOBA/OPS splits vs LHP/RHP when you add them from Savant or a data vendor.",
+      "Park factors and wind matter for totals; outdoor games in wind deserve a lower total confidence.",
+    ],
   };
 }
 
-const NFL_LEADER_METRICS: { leaderName: string; keyMetric: string }[] = [
-  { leaderName: "passingYards", keyMetric: "Pass Yds" },
-  { leaderName: "rushingYards", keyMetric: "Rush Yds" },
-  { leaderName: "receivingYards", keyMetric: "Rec Yds" },
-  { leaderName: "points", keyMetric: "PTS" },
+function ratingHeuristics(pct: number): Pick<TeamData, "offensiveRating" | "defensiveRating" | "pace"> {
+  return {
+    offensiveRating: Math.round((3.8 + pct * 2.2) * 100) / 100,
+    defensiveRating: Math.round((5.0 - pct * 1.8) * 100) / 100,
+    pace: 9,
+  };
+}
+
+const MLB_LEADERS: { leaderName: string; keyMetric: string }[] = [
+  { leaderName: "hits", keyMetric: "Hits" },
+  { leaderName: "homeRuns", keyMetric: "HR" },
+  { leaderName: "RBIs", keyMetric: "RBI" },
+  { leaderName: "runs", keyMetric: "R" },
 ];
 
 function leadersToTrends(c: EspnCompetitor): PlayerTrendData[] {
-  const results: PlayerTrendData[] = [];
-  const seen = new Set<string>();
-
-  for (const { leaderName, keyMetric } of NFL_LEADER_METRICS) {
+  for (const { leaderName, keyMetric } of MLB_LEADERS) {
     const row = c.leaders?.find((l) => l.name === leaderName)?.leaders?.[0];
     if (!row?.athlete) continue;
-    const fullName = row.athlete.fullName;
-    if (seen.has(fullName)) continue; // same player won't appear twice
-    seen.add(fullName);
-    const v = row.value ?? Number.parseFloat(row.displayValue.replace(/[^\d.-]/g, ""));
+    const v = row.value ?? Number.parseFloat(String(row.displayValue).replace(/[^\d.-]/g, ""));
     const val = Number.isFinite(v) ? v : 0;
     const pos = row.athlete.position?.abbreviation ?? "—";
-    results.push({
-      name: fullName,
-      position: pos,
-      trend: "steady",
-      last5Avg: Math.round(val * 10) / 10,
-      seasonAvg: Math.round(val * 10) / 10,
-      keyMetric,
-      keyMetricValue: row.displayValue,
-    });
+    return [
+      {
+        name: row.athlete.fullName,
+        position: pos,
+        trend: "steady",
+        last5Avg: Math.round(val * 10) / 10,
+        seasonAvg: Math.round(val * 10) / 10,
+        keyMetric,
+        keyMetricValue: row.displayValue,
+      },
+    ];
   }
-  return results.slice(0, 3);
+  return [];
 }
 
 function buildTeam(c: EspnCompetitor): TeamData {
   const { pct } = parseRecord(overallRecord(c));
-  const r = nflRatingHeuristics(pct);
-  const logo = c.team.logo?.replace("500/scoreboard", "500") ?? c.team.logo ?? "🏈";
+  const r = ratingHeuristics(pct);
+  const logo = c.team.logo?.replace("500/scoreboard", "500") ?? c.team.logo ?? "⚾";
   return {
     name: c.team.displayName,
     abbreviation: c.team.abbreviation,
@@ -100,39 +106,41 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct);
   }
 
-  const confidence = confidenceFromSpreadNfl(spread, prob.home);
+  const confidence = confidenceFromSpreadMlb(spread, prob.home);
 
   const easternGameYmd = isoToEasternYmd(comp.date);
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
   const tags: string[] = [];
   if (status === "live") tags.push("LIVE");
   else if (status === "final") tags.push("FINAL");
-  else tags.push("NFL");
+  else tags.push("MLB");
+
+  const mlbIntel = defaultMlbIntel();
 
   const topReasons = [
-    `${home.abbreviation} ${home.record} at home vs ${away.abbreviation} ${away.record} on the road.`,
+    `${home.abbreviation} ${home.record} hosts ${away.abbreviation} ${away.record}.`,
     odd?.details
       ? `Market: ${odd.details} (O/U ${odd.overUnder ?? "—"}).`
       : `Implied win chance: ${home.abbreviation} ${prob.home}%, ${away.abbreviation} ${prob.away}%.`,
-    `Kickoff / status (ET): ${formatGameTime(comp, status)}.`,
+    `First pitch / status (ET): ${formatGameTime(comp, status)}.`,
+    "Prediction confidence should drop until starters and lineups are confirmed — see MLB factors below.",
   ];
 
   const riskFactors = [
-    status === "upcoming"
-      ? "Lines and injury reports move all week — double-check before kickoff."
-      : "Past results don't guarantee future performance.",
-    spread != null && Math.abs(spread) <= 3
-      ? "Field-goal game — one-score variance is normal."
-      : "Turnovers and special teams can swing any NFL matchup.",
+    "Probable pitchers and bullpen leverage change late — refresh near lock.",
+    "Handedness mismatches (LHP vs LHB-heavy lineup) can move run expectancy quickly.",
+    spread != null && Math.abs(spread) <= 1.5
+      ? "Tight runline — one swing can flip the cover."
+      : "Late scratching of a key bat or reliever changes the script.",
   ];
 
   const upsetTeam = prob.home >= prob.away ? away.abbreviation : home.abbreviation;
-  const upsetPath = `${upsetTeam} wins if they win turnover margin and keep ${prob.home >= prob.away ? home.abbreviation : away.abbreviation} off schedule on early downs.`;
+  const upsetPath = `${upsetTeam} wins if the starter neutralizes the top of the order and the bullpen bridge holds in the middle innings.`;
 
-  const league: League = "nfl";
+  const league: League = "mlb";
 
   return {
-    id: `espn-nfl-${event.id}`,
+    id: `espn-mlb-${event.id}`,
     league,
     gameDate,
     gameTime: formatGameTime(comp, status),
@@ -143,7 +151,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     confidence,
     topReasons,
     riskFactors,
-    keyMatchup: `${away.abbreviation} offense vs ${home.abbreviation} defense — season PPG / points allowed fill in after ESPN team fetch.`,
+    keyMatchup: `${away.abbreviation} lineup vs ${home.abbreviation} starter (handedness & pitch mix) — track confirmation before locking a lean.`,
     injuries: { home: [], away: [] },
     playerTrends: {
       home: leadersToTrends(homeC),
@@ -154,6 +162,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     lastUpdated: new Date().toISOString(),
     situationalTags: tags,
     lines: odd ? buildLines(odd, away.abbreviation, home.abbreviation) : undefined,
+    mlb: mlbIntel,
     _meta: {
       easternYmd: easternGameYmd,
       sortTime: new Date(comp.date).getTime(),
@@ -164,7 +173,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   };
 }
 
-export async function fetchNflGamePredictions(): Promise<GamePrediction[]> {
+export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const tomorrow = nextCalendarYmd(today);
 
@@ -183,7 +192,7 @@ export async function fetchNflGamePredictions(): Promise<GamePrediction[]> {
 
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
-  let out = await enrichGamePredictions(predictions, "nfl");
-  out = await mergeTheOddsApiNotes(out, "americanfootball_nfl");
+  let out = await enrichGamePredictions(predictions, "mlb");
+  out = await mergeTheOddsApiNotes(out, "baseball_mlb");
   return out;
 }

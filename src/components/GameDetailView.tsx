@@ -4,7 +4,7 @@ import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
-import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign } from "lucide-react";
+import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud } from "lucide-react";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -142,6 +142,45 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           </div>
         </div>
 
+        {/* MLB-specific model layer */}
+        {game.mlb && (
+          <div className="card-shine bg-card rounded-lg border border-border p-5 lg:col-span-2">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
+              <Info className="w-4 h-4 text-primary" />
+              MLB pregame model layer
+            </h3>
+            <p className="text-xs text-muted-foreground mb-3">
+              Starter certainty: <span className="text-foreground font-semibold">{game.mlb.pitcherCertainty}</span>
+              {game.mlb.awayProbablePitcher || game.mlb.homeProbablePitcher
+                ? ` · Away: ${game.mlb.awayProbablePitcher ?? "TBD"} (${game.mlb.awayPitcherHand ?? "?"}) · Home: ${game.mlb.homeProbablePitcher ?? "TBD"} (${game.mlb.homePitcherHand ?? "?"})`
+                : " · Probable starters not in this ESPN payload — treat win probability as low-certainty until confirmed."}
+            </p>
+            <ul className="space-y-2 text-sm text-secondary-foreground list-disc list-inside">
+              {game.mlb.modelNotes.map((note, i) => (
+                <li key={i}>{note}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Enrichment: series, PickCenter, weather, Odds API */}
+        {game.enrichmentNotes && game.enrichmentNotes.length > 0 && (
+          <div className="card-shine bg-card rounded-lg border border-border p-5 lg:col-span-2">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
+              <Cloud className="w-4 h-4 text-muted-foreground" />
+              Data feed notes
+            </h3>
+            <ul className="space-y-1.5 text-xs text-muted-foreground">
+              {game.enrichmentNotes.map((note, i) => (
+                <li key={i} className="flex gap-2">
+                  <span className="text-primary shrink-0">•</span>
+                  <span>{note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Injuries */}
         <div className="card-shine bg-card rounded-lg border border-border p-5">
           <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
@@ -261,21 +300,33 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
       {/* Efficiency Comparison */}
       <div className="card-shine bg-card rounded-lg border border-border p-5">
-        <h3 className="font-display font-bold text-sm text-foreground mb-4">Team Stats Comparison</h3>
+        <h3 className="font-display font-bold text-sm text-foreground mb-1">Team Stats Comparison</h3>
+        {game.league === "nba" && (
+          <p className="text-[11px] text-muted-foreground mb-3">
+            Numbers are ESPN season PPG / opponent PPG after enrichment. True offensive/defensive rating from{" "}
+            <span className="text-foreground/90">stats.nba.com</span> needs a Supabase Edge proxy (CORS).
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
           {(game.league === "nfl"
             ? [
-                { label: "Yds/Game", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },
-                { label: "Pts Allowed", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating },
-                { label: "Plays/G", away: game.awayTeam.pace, home: game.homeTeam.pace },
+                { label: "PPG", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
+                { label: "Opp PPG", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
+                { label: "Plays (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
               ]
-            : [
-                { label: "Off Rating", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },
-                { label: "Def Rating", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating },
-                { label: "Pace", away: game.awayTeam.pace, home: game.homeTeam.pace },
-              ]
+            : game.league === "mlb"
+              ? [
+                  { label: "Runs/G", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
+                  { label: "Runs allowed", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
+                  { label: "Innings", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
+                ]
+              : [
+                  { label: "PPG", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
+                  { label: "Opp PPG", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
+                  { label: "Pace (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
+                ]
           ).map((stat) => {
-            const awayBetter = stat.label === "Def Rating" ? stat.away < stat.home : stat.away > stat.home;
+            const awayBetter = stat.lowerBetter ? stat.away < stat.home : stat.away > stat.home;
             return (
               <div key={stat.label}>
                 <div className="text-xs text-muted-foreground mb-2">{stat.label}</div>

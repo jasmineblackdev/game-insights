@@ -96,6 +96,14 @@ export function confidenceFromSpreadNfl(spread: number | undefined, probHome: nu
   return "low";
 }
 
+/** MLB runlines are tight (often 1.5). */
+export function confidenceFromSpreadMlb(spread: number | undefined, probHome: number): ConfidenceLevel {
+  const mag = spread != null ? Math.abs(spread) : Math.abs(probHome - 50) / 2;
+  if (mag >= 2 || Math.abs(probHome - 50) >= 12) return "high";
+  if (mag >= 1.25 || Math.abs(probHome - 50) >= 6) return "medium";
+  return "low";
+}
+
 export interface EspnCompetitor {
   homeAway: "home" | "away";
   score?: string;

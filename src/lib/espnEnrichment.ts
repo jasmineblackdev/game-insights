@@ -1,0 +1,349 @@
+import type { GamePrediction, InjuryStatus, League, PlayerInjury, TeamData } from "@/data/mockGames";
+
+const INJURY_URLS: Record<"nba" | "nfl" | "mlb", string> = {
+  nba: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
+  nfl: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries",
+  mlb: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/injuries",
+};
+
+function summaryUrl(league: League, eventId: string): string | null {
+  if (league === "nba") {
+    return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${eventId}`;
+  }
+  if (league === "nfl") {
+    return `https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${eventId}`;
+  }
+  if (league === "mlb") {
+    return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${eventId}`;
+  }
+  return null;
+}
+
+function teamUrl(league: League, teamId: string): string | null {
+  if (league === "nba") {
+    return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${teamId}`;
+  }
+  if (league === "nfl") {
+    return `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${teamId}`;
+  }
+  if (league === "mlb") {
+    return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}`;
+  }
+  return null;
+}
+
+export function mapEspnInjuryStatus(raw: string | undefined): InjuryStatus {
+  const s = (raw ?? "").toLowerCase();
+  if (s.includes("out") || s === "o") return "OUT";
+  if (s.includes("doubt")) return "QUESTIONABLE";
+  if (s.includes("question")) return "QUESTIONABLE";
+  if (s.includes("day-to-day") || s.includes("day to day")) return "GTD";
+  if (s.includes("probable")) return "PROBABLE";
+  return "QUESTIONABLE";
+}
+
+function impactForStatus(st: InjuryStatus): number {
+  if (st === "OUT") return 8;
+  if (st === "GTD") return 5;
+  if (st === "QUESTIONABLE") return 5;
+  if (st === "PROBABLE") return 2;
+  return 3;
+}
+
+function rowToInjury(row: Record<string, unknown>): PlayerInjury | null {
+  const athlete = row.athlete as Record<string, unknown> | undefined;
+  const name = (athlete?.displayName as string) ?? "";
+  if (!name) return null;
+  const pos = (athlete?.position as { abbreviation?: string } | undefined)?.abbreviation ?? "—";
+  const st = mapEspnInjuryStatus((row.status as string) ?? (row.type as { abbreviation?: string })?.abbreviation);
+  const detail =
+    (row.shortComment as string) ||
+    (row.longComment as string) ||
+    (row.details as { detail?: string } | undefined)?.detail ||
+    "";
+  return {
+    name,
+    position: pos,
+    status: st,
+    impactScore: impactForStatus(st),
+    detail: detail.slice(0, 220),
+  };
+}
+
+async function fetchLeagueInjuryMap(league: "nba" | "nfl" | "mlb"): Promise<Map<string, PlayerInjury[]>> {
+  const map = new Map<string, PlayerInjury[]>();
+  const res = await fetch(INJURY_URLS[league]);
+  if (!res.ok) return map;
+  const data = (await res.json()) as { injuries?: Record<string, unknown>[] };
+  for (const block of data.injuries ?? []) {
+    const tid = String((block as { id?: string }).id ?? "");
+    if (!tid) continue;
+    const rows = (block as { injuries?: Record<string, unknown>[] }).injuries ?? [];
+    const parsed = rows.map(rowToInjury).filter((x): x is PlayerInjury => x != null);
+    if (parsed.length) map.set(tid, parsed);
+  }
+  return map;
+}
+
+function mergeInjuryLists(a: PlayerInjury[], b: PlayerInjury[]): PlayerInjury[] {
+  const byName = new Map<string, PlayerInjury>();
+  for (const x of a) byName.set(x.name.toLowerCase(), x);
+  for (const x of b) {
+    const k = x.name.toLowerCase();
+    const prev = byName.get(k);
+    if (!prev || x.impactScore > prev.impactScore) byName.set(k, x);
+  }
+  return [...byName.values()].sort((p, q) => q.impactScore - p.impactScore);
+}
+
+function statVal(stats: { name?: string; value?: number }[] | undefined, name: string): number | undefined {
+  const v = stats?.find((s) => s.name === name)?.value;
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<TeamData>> {
+  const url = teamUrl(league, teamId);
+  if (!url) return {};
+  const res = await fetch(url);
+  if (!res.ok) return {};
+  const json = (await res.json()) as { team?: Record<string, unknown> };
+  const team = json.team;
+  if (!team) return {};
+  const items = (team.record as { items?: { type?: string; summary?: string; stats?: { name?: string; value?: number }[] }[] })
+    ?.items;
+  const total = items?.find((x) => x.type === "total");
+  const stats = total?.stats;
+  const ppg = statVal(stats, "avgPointsFor");
+  const papg = statVal(stats, "avgPointsAgainst");
+  const streak = statVal(stats, "streak");
+  const summary = total?.summary ?? "0-0";
+  let recentForm = "—";
+  if (streak != null && streak !== 0) {
+    recentForm = streak > 0 ? `W streak ${streak}` : `L streak ${Math.abs(streak)}`;
+  } else if (typeof team.standingSummary === "string") {
+    recentForm = team.standingSummary;
+  }
+
+  if (league === "nba") {
+    return {
+      record: summary,
+      recentForm,
+      offensiveRating: ppg != null ? Math.round(ppg * 10) / 10 : undefined,
+      defensiveRating: papg != null ? Math.round(papg * 10) / 10 : undefined,
+      pace:
+        ppg != null && papg != null
+          ? Math.round((220 - papg + ppg * 0.15) * 10) / 10
+          : undefined,
+    };
+  }
+  if (league === "nfl") {
+    return {
+      record: summary,
+      recentForm,
+      offensiveRating: ppg != null ? Math.round(ppg * 10) / 10 : undefined,
+      defensiveRating: papg != null ? Math.round(papg * 10) / 10 : undefined,
+      pace: 63,
+    };
+  }
+  if (league === "mlb") {
+    return {
+      record: summary,
+      recentForm,
+      offensiveRating: ppg != null ? Math.round(ppg * 100) / 100 : undefined,
+      defensiveRating: papg != null ? Math.round(papg * 100) / 100 : undefined,
+      pace: 9,
+    };
+  }
+  return {};
+}
+
+async function fetchTeamMetricsMap(league: League, teamIds: string[]): Promise<Map<string, Partial<TeamData>>> {
+  const out = new Map<string, Partial<TeamData>>();
+  const unique = [...new Set(teamIds)].filter(Boolean);
+  const batch = 6;
+  for (let i = 0; i < unique.length; i += batch) {
+    const slice = unique.slice(i, i + batch);
+    const patches = await Promise.all(slice.map((id) => fetchTeamPatch(league, id)));
+    slice.forEach((id, j) => out.set(id, patches[j] ?? {}));
+  }
+  return out;
+}
+
+function applyTeamPatch(base: TeamData, patch: Partial<TeamData>): TeamData {
+  return {
+    ...base,
+    ...patch,
+    offensiveRating: patch.offensiveRating ?? base.offensiveRating,
+    defensiveRating: patch.defensiveRating ?? base.defensiveRating,
+    pace: patch.pace ?? base.pace,
+    record: patch.record ?? base.record,
+    recentForm: patch.recentForm ?? base.recentForm,
+  };
+}
+
+async function fetchGameSummary(league: League, eventId: string): Promise<Record<string, unknown> | null> {
+  const url = summaryUrl(league, eventId);
+  if (!url) return null;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  return (await res.json()) as Record<string, unknown>;
+}
+
+function injuriesFromSummaryBlocks(
+  blocks: unknown,
+  homeId: string,
+  awayId: string
+): { home: PlayerInjury[]; away: PlayerInjury[] } {
+  const home: PlayerInjury[] = [];
+  const away: PlayerInjury[] = [];
+  if (!Array.isArray(blocks)) return { home, away };
+  for (const block of blocks) {
+    const b = block as { team?: { id?: string }; injuries?: Record<string, unknown>[] };
+    const tid = b.team?.id;
+    const rows = b.injuries ?? [];
+    const list = rows.map(rowToInjury).filter((x): x is PlayerInjury => x != null);
+    if (tid === homeId) home.push(...list);
+    if (tid === awayId) away.push(...list);
+  }
+  return { home, away };
+}
+
+function seasonSeriesNote(summary: Record<string, unknown>): string | null {
+  const ss = summary.seasonseries ?? summary.seasonSeries;
+  if (!Array.isArray(ss) || !ss.length) return null;
+  const entry = ss[0] as { type?: string; title?: string; series?: { summary?: string }[] };
+  const s = entry?.series?.[0]?.summary;
+  if (s) return `Season series: ${s}`;
+  const title = entry?.title;
+  if (title) return `Season series: ${title}`;
+  return null;
+}
+
+function pickcenterNote(summary: Record<string, unknown>): string | null {
+  const pc = summary.pickcenter as Record<string, unknown>[] | undefined;
+  const row = pc?.[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const spread = row.spread as number | undefined;
+  const ou = row.overUnder as number | undefined;
+  const details = row.details as string | undefined;
+  if (details) return `PickCenter: ${details}${ou != null ? ` · O/U ${ou}` : ""}`;
+  if (spread != null) return `PickCenter spread reference: ${spread}`;
+  return null;
+}
+
+async function weatherNoteFromNflSummary(summary: Record<string, unknown>): Promise<string | null> {
+  const gi = summary.gameInfo as Record<string, unknown> | undefined;
+  const venue = gi?.venue as Record<string, unknown> | undefined;
+  const addr = venue?.address as Record<string, unknown> | undefined;
+  const city = addr?.city as string | undefined;
+  const state = addr?.state as string | undefined;
+  if (!city || !state) return null;
+  try {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(`${city},${state},USA`)}&count=1&language=en&format=json`;
+    const gr = await fetch(geoUrl);
+    if (!gr.ok) return null;
+    const gj = (await gr.json()) as { results?: { latitude: number; longitude: number }[] };
+    const loc = gj.results?.[0];
+    if (!loc) return null;
+    const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,wind_speed_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`;
+    const wr = await fetch(wUrl);
+    if (!wr.ok) return null;
+    const wj = (await wr.json()) as {
+      current?: { temperature_2m?: number; wind_speed_10m?: number };
+    };
+    const t = wj.current?.temperature_2m;
+    const wind = wj.current?.wind_speed_10m;
+    if (t == null && wind == null) return null;
+    return `Weather (${city}): ${t != null ? `${Math.round(t)}°F` : "—"}${wind != null ? `, wind ~${Math.round(wind)} mph` : ""} — strong wind/cold can lean NFL totals lower.`;
+  } catch {
+    return null;
+  }
+}
+
+async function enrichOne(
+  pred: GamePrediction,
+  league: League,
+  injuryMap: Map<string, PlayerInjury[]>,
+  teamPatches: Map<string, Partial<TeamData>>
+): Promise<GamePrediction> {
+  const hid = pred._meta?.homeTeamId;
+  const aid = pred._meta?.awayTeamId;
+  const eid = pred._meta?.eventId;
+  if (!hid || !aid || !eid) return pred;
+
+  let homeInj = injuryMap.get(hid) ?? [];
+  let awayInj = injuryMap.get(aid) ?? [];
+  const notes = [...(pred.enrichmentNotes ?? [])];
+
+  const summary = await fetchGameSummary(league, eid);
+  if (summary) {
+    const fromSum = injuriesFromSummaryBlocks(summary.injuries, hid, aid);
+    homeInj = mergeInjuryLists(homeInj, fromSum.home);
+    awayInj = mergeInjuryLists(awayInj, fromSum.away);
+
+    if (league === "nba") {
+      const h2h = seasonSeriesNote(summary);
+      if (h2h) notes.push(h2h);
+    }
+    const pc = pickcenterNote(summary);
+    if (pc) notes.push(pc);
+
+    if (league === "nfl" && pred.status === "upcoming") {
+      const w = await weatherNoteFromNflSummary(summary);
+      if (w) notes.push(w);
+    }
+  }
+
+  const hp = teamPatches.get(hid);
+  const ap = teamPatches.get(aid);
+  let homeTeam = pred.homeTeam;
+  let awayTeam = pred.awayTeam;
+  if (hp && Object.keys(hp).length) homeTeam = applyTeamPatch(homeTeam, hp);
+  if (ap && Object.keys(ap).length) awayTeam = applyTeamPatch(awayTeam, ap);
+
+  const topReasons = [...pred.topReasons];
+  if (notes.length) {
+    const first = notes[0];
+    if (first && !topReasons.some((r) => r.includes(first.slice(0, 40)))) {
+      topReasons.splice(1, 0, first);
+    }
+  }
+
+  return {
+    ...pred,
+    homeTeam,
+    awayTeam,
+    injuries: { home: homeInj, away: awayInj },
+    enrichmentNotes: notes.length ? notes : pred.enrichmentNotes,
+    topReasons: topReasons.slice(0, 6),
+  };
+}
+
+async function poolMapPredictions(
+  items: GamePrediction[],
+  limit: number,
+  fn: (item: GamePrediction) => Promise<GamePrediction>
+): Promise<GamePrediction[]> {
+  const results: GamePrediction[] = [];
+  for (let i = 0; i < items.length; i += limit) {
+    const chunk = items.slice(i, i + limit);
+    const done = await Promise.all(chunk.map(fn));
+    results.push(...done);
+  }
+  return results;
+}
+
+export async function enrichGamePredictions(predictions: GamePrediction[], league: League): Promise<GamePrediction[]> {
+  if (league !== "nba" && league !== "nfl" && league !== "mlb") return predictions;
+  const lg = league;
+
+  const injuryMap = await fetchLeagueInjuryMap(lg);
+  const teamIds: string[] = [];
+  for (const p of predictions) {
+    if (p._meta?.homeTeamId) teamIds.push(p._meta.homeTeamId);
+    if (p._meta?.awayTeamId) teamIds.push(p._meta.awayTeamId);
+  }
+  const teamPatches = await fetchTeamMetricsMap(lg, teamIds);
+
+  return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches));
+}

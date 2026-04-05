@@ -10,6 +10,7 @@ import { Activity, TrendingUp, Zap, Tv2, ClipboardList } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
+import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
 
 type ViewMode = "games" | "draft";
 
@@ -30,7 +31,7 @@ function DataSourceStatus() {
   if (!isSupabaseConfigured) {
     return (
       <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
-        ESPN NBA · NFL
+        ESPN NBA · NFL · MLB
       </span>
     );
   }
@@ -60,7 +61,7 @@ function DataSourceStatus() {
 function LeaguePicker({ value, onChange }: { value: League; onChange: (l: League) => void }) {
   return (
     <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-      {(["nba", "nfl"] as League[]).map((l) => (
+      {(["nba", "nfl", "mlb"] as League[]).map((l) => (
         <button
           key={l}
           onClick={() => onChange(l)}
@@ -126,8 +127,16 @@ const Index = () => {
     refetchInterval: 2 * 60 * 1000,
   });
 
-  const activeQuery = league === "nba" ? nbaQuery : nflQuery;
-  const leagueGames = league === "nba" ? (nbaQuery.data ?? []) : (nflQuery.data ?? []);
+  const mlbQuery = useQuery({
+    queryKey: ["mlb-espn-scoreboard", easternYmd()],
+    queryFn: fetchMlbGamePredictions,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+
+  const activeQuery = league === "nba" ? nbaQuery : league === "nfl" ? nflQuery : mlbQuery;
+  const leagueGames =
+    league === "nba" ? (nbaQuery.data ?? []) : league === "nfl" ? (nflQuery.data ?? []) : (mlbQuery.data ?? []);
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -224,13 +233,22 @@ const Index = () => {
                     </>
                   ) : league === "nba" ? (
                     <>
-                      Live NBA schedule, team records, and win probabilities from DraftKings moneylines on ESPN
-                      (de-vigged). Team ratings are a record-based estimate until your model runs on Supabase.
+                      Live NBA from ESPN plus league injuries, per-game summary (series, PickCenter), and team season
+                      PPG from the team API. Optional{" "}
+                      <span className="text-foreground/80">The Odds API</span> key adds cross-book spread notes. For
+                      true ORtg/DRtg from stats.nba.com, proxy via Supabase Edge (browser CORS blocks the league site).
+                    </>
+                  ) : league === "nfl" ? (
+                    <>
+                      Live NFL from ESPN: injuries (league + game summary), team PPG / points allowed, PickCenter
+                      notes, and free Open-Meteo weather hints for outdoor kickoffs. Add{" "}
+                      <span className="text-foreground/80">VITE_THE_ODDS_API_KEY</span> for multi-book comparisons.
                     </>
                   ) : (
                     <>
-                      Live NFL schedule from ESPN: records, scores, and lines when ESPN exposes them. Yards / points
-                      allowed / plays per game are estimates from record — swap in SportsDataIO team stats when ready.
+                      Live MLB from ESPN with a separate logic layer: probable-pitcher uncertainty, bullpen/lineup
+                      sensitivity, and handedness splits should drive re-scores (see MLB factors on each game). Data
+                      vendors (SportsDataIO / Sportradar) add confirmed starters, lineups, and pitch-level context.
                     </>
                   )}
                 </motion.p>
@@ -316,11 +334,17 @@ const Index = () => {
 
               {/* Content */}
               {viewMode === "draft" ? (
-                <div className="space-y-3">
-                  {draftPicks.map((pick, i) => (
-                    <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
-                  ))}
-                </div>
+                draftPicks.length === 0 ? (
+                  <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+                    No mock MLB draft board in this build — wire SportsDataIO / your rankings when ready.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {draftPicks.map((pick, i) => (
+                      <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
+                    ))}
+                  </div>
+                )
               ) : activeQuery.isPending ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[0, 1, 2, 3].map((i) => (
@@ -349,11 +373,11 @@ const Index = () => {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="text-4xl mb-3">{league === "nfl" ? "🏈" : "📭"}</div>
+                  <div className="text-4xl mb-3">{league === "nfl" ? "🏈" : league === "mlb" ? "⚾" : "📭"}</div>
                   <p className="text-muted-foreground text-sm max-w-md">
                     No {league.toUpperCase()} games on the ESPN board for{" "}
-                    {dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). During the NFL offseason this is normal;
-                    try the other day tab or check back on game days.
+                    {dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are
+                    normal — try the other day tab.
                   </p>
                 </div>
               )}
