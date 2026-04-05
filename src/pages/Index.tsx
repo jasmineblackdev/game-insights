@@ -293,35 +293,13 @@ const Index = () => {
                       Click any pick to expand the full breakdown.
                     </>
                   ) : league === "nba" ? (
-                    <>
-                      Live NBA from ESPN plus league injuries, per-game summary (series, PickCenter), and team season
-                      PPG from the team API. Optional{" "}
-                      <span className="text-foreground/80">The Odds API</span> key adds cross-book spread notes. For
-                      true ORtg/DRtg from stats.nba.com, proxy via Supabase Edge (browser CORS blocks the league site).
-                    </>
+                    <>Live NBA predictions — win probability, spread lean, injuries, and team trends.</>
                   ) : league === "nfl" ? (
-                    <>
-                      Live NFL from ESPN: injuries (league + game summary), team PPG / points allowed, PickCenter
-                      notes, and free Open-Meteo weather hints for outdoor kickoffs. Add{" "}
-                      <span className="text-foreground/80">VITE_THE_ODDS_API_KEY</span> for multi-book comparisons.
-                    </>
+                    <>Live NFL predictions — win probability, spread lean, injuries, weather, and team trends.</>
                   ) : league === "mlb" ? (
-                    <>
-                      Live MLB from ESPN with a separate logic layer: probable-pitcher uncertainty, bullpen/lineup
-                      sensitivity, and handedness splits should drive re-scores (see MLB factors on each game). Data
-                      vendors (SportsDataIO / Sportradar) add confirmed starters, lineups, and pitch-level context.
-                    </>
+                    <>Live MLB predictions — probable starters, runline lean, and lineup trends. Confidence adjusts when pitchers are unconfirmed.</>
                   ) : (
-                    <>
-                      Premier League from ESPN on a <span className="text-foreground/80">soccer-specific</span> lane:
-                      1X2 de-vig, goals for/against from team enrichment, and{" "}
-                      <span className="text-foreground/80">fixture congestion</span> (last 7 days of EPL finals on ESPN,
-                      or 7d/14d + table with{" "}
-                      <span className="text-foreground/80">VITE_FOOTBALL_DATA_API_TOKEN</span> — dev proxy hides the
-                      token). EPL often has <span className="text-foreground/80">empty calendar days</span> — use the{" "}
-                      <span className="text-foreground/80">Next 7 days</span> tab for nearby kickoffs. xG and confirmed
-                      XIs still need StatsBomb-style feeds — see each game&apos;s soccer notes.
-                    </>
+                    <>Premier League predictions — 1X2 win/draw/loss probability, fixture congestion, and goals data. EPL often has no fixtures today — try <span className="text-foreground/80">Next 7 days</span>.</>
                   )}
                 </motion.p>
 
