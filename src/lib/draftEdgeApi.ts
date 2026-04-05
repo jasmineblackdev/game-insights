@@ -1,6 +1,6 @@
-import { DRAFT_EDGE_MOCK_NFL } from "@/data/draftEdgeMock";
+import { draftEdgeMockForLeague } from "@/data/draftEdgeMock";
 import type { DraftEdgeCard } from "@/data/draftEdgeTypes";
-import { isSupabaseConfigured } from "@/lib/supabase";
+import type { League } from "@/data/mockGames";
 
 function resolveDraftEdgeUrl(): string | null {
   const custom = (import.meta.env.VITE_DRAFT_EDGE_API_URL as string | undefined)?.trim();
@@ -30,25 +30,32 @@ function parseItems(raw: unknown): DraftEdgeCard[] {
   return o.items.filter((x): x is DraftEdgeCard => x != null && typeof x === "object" && "id" in x && "kind" in x);
 }
 
+export type DraftEdgeDataSource = "live" | "mock";
+
+/** Why sample/mock cards are shown (only when source is mock). */
+export type DraftEdgeMockReason = "not_configured" | "live_unavailable";
+
 export type DraftEdgeFetchResult = {
   items: DraftEdgeCard[];
-  source: "api" | "mock";
+  source: DraftEdgeDataSource;
+  /** Set when source is mock — drives footer copy in the UI. */
+  mockReason?: DraftEdgeMockReason;
 };
 
 /**
  * GET `{ items: DraftEdgeCard[] }` from `draft-edge` (query: year, league).
- * Falls back to local NFL mock when unset or on error.
+ * Returns live database-backed rows when Supabase env + Edge Function succeed; otherwise local sample cards.
  */
-export async function fetchDraftEdgeCards(
-  year: number,
-  league: "nfl" | "nba"
-): Promise<DraftEdgeFetchResult> {
-  const mock =
-    league === "nfl" ? DRAFT_EDGE_MOCK_NFL.filter((c) => c.year === year) : [];
+export async function fetchDraftEdgeCards(year: number, league: League): Promise<DraftEdgeFetchResult> {
+  const mock = draftEdgeMockForLeague(league, year);
 
   const base = resolveDraftEdgeUrl();
-  if (!base || !isSupabaseConfigured) {
-    return { items: mock.length ? [...mock] : [], source: "mock" };
+  if (!base) {
+    return {
+      items: mock.length ? [...mock] : [],
+      source: "mock",
+      mockReason: "not_configured",
+    };
   }
 
   try {
@@ -70,9 +77,13 @@ export async function fetchDraftEdgeCards(
     const body = await res.json();
     const items = parseItems(body);
     if (!items.length) throw new Error("Empty items");
-    return { items, source: "api" };
+    return { items, source: "live" };
   } catch (e) {
-    console.warn("[GameLens] Draft Edge API unavailable, using mock:", e);
-    return { items: mock.length ? [...mock] : [], source: "mock" };
+    console.warn("[GameLens] Draft Edge live data unavailable, using sample cards:", e);
+    return {
+      items: mock.length ? [...mock] : [],
+      source: "mock",
+      mockReason: "live_unavailable",
+    };
   }
 }

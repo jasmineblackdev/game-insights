@@ -13,8 +13,8 @@ interface ImportMetaEnv {
   /** Optional override for GET `{ season, ratings }` from stats.nba.com proxy. Default: `/functions/v1/nba-stats-proxy` on Supabase origin. */
   readonly VITE_NBA_STATS_PROXY_URL?: string;
   /**
-   * Optional override: GET `{ items: DraftEdgeCard[] }` (query: year, league).
-   * If unset, `VITE_SUPABASE_URL` + anon key target `/functions/v1/draft-edge`. Mock fallback on error.
+   * Optional override: GET `{ items: DraftEdgeCard[] }` for live draft cards (query: year, league).
+   * If unset, uses `VITE_SUPABASE_URL` + anon key against `/functions/v1/draft-edge`. Sample cards if unreachable.
    */
   readonly VITE_DRAFT_EDGE_API_URL?: string;
 }

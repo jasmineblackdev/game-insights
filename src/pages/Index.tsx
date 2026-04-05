@@ -292,13 +292,10 @@ const Index = () => {
                   className="font-display font-bold text-2xl sm:text-3xl md:text-4xl text-foreground mb-2 break-words"
                 >
                   {viewMode === "draft" ? (
-                    league === "nfl" ? (
-                      <>
-                        NFL <span className="text-gradient-primary">Draft Edge</span>
-                      </>
-                    ) : (
-                      <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
-                    )
+                    <>
+                      {league === "soccer" ? "Soccer" : leagueLabel(league)}{" "}
+                      <span className="text-gradient-primary">Draft Edge</span>
+                    </>
                   ) : viewMode === "props" ? (
                     <>Player <span className="text-gradient-primary">Props</span></>
                   ) : (
@@ -319,17 +316,17 @@ const Index = () => {
                   className="text-sm text-muted-foreground max-w-lg leading-relaxed"
                 >
                   {viewMode === "draft" ? (
-                    league === "nfl" ? (
-                      <>
-                        AI-style draft outcomes: probability ranges, team fit, positional value, and prop-style cards
-                        (O/U, round yes/no, team needs). Add any card to your Edge Card — separate from game markets.
-                      </>
-                    ) : (
-                      <>
-                        Projected {leagueLabel(league)} Draft order with grades, scouting analysis, and pro comparables.
-                        Click any pick to expand the full breakdown.
-                      </>
-                    )
+                    <>
+                      AI-style outcomes: probability ranges, team fit, positional value, and prop-style cards (O/U, round /
+                      window moves, team needs). Add any card to your Edge Card — separate from game markets.
+                      {draftPicks.length > 0 ? (
+                        <>
+                          {" "}
+                          Expand <span className="text-foreground/80">Classic pick-by-pick board</span> below for grades and
+                          scouting blurbs.
+                        </>
+                      ) : null}
+                    </>
                   ) : viewMode === "props" ? (
                     <>Player prop edges across NBA, NFL, MLB, and Soccer — filter by sport and stat type.</>
                   ) : league === "nba" ? (
@@ -460,16 +457,16 @@ const Index = () => {
               {viewMode === "props" ? (
                 <PlayerEdgeSection />
               ) : viewMode === "draft" ? (
-                league === "nfl" ? (
-                  <div className="space-y-10">
-                    <DraftEdgeSection />
+                <div className="space-y-10">
+                  <DraftEdgeSection league={league} />
+                  {draftPicks.length > 0 ? (
                     <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
                       <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
                         <span>Classic pick-by-pick board</span>
                         <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
                       </summary>
                       <p className="text-xs text-muted-foreground mt-2 mb-4">
-                        Original expandable rows — same mock data as before, kept separate from Draft Edge cards above.
+                        Expandable rows — mock scouting blurbs, separate from Draft Edge cards above.
                       </p>
                       <div className="space-y-3 pb-2">
                         {draftPicks.map((pick, i) => (
@@ -477,20 +474,13 @@ const Index = () => {
                         ))}
                       </div>
                     </details>
-                  </div>
-                ) : draftPicks.length === 0 ? (
-                  <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-                    {league === "soccer"
-                      ? "No draft board for soccer in this app — use the Games tab for EPL 1X2 and matchup intel."
-                      : "No mock MLB draft board in this build — wire SportsDataIO / your rankings when ready."}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {draftPicks.map((pick, i) => (
-                      <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
-                    ))}
-                  </div>
-                )
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-6 rounded-lg border border-border bg-card/40">
+                      No classic pick list for {leagueLabel(league)} in this build — Draft Edge cards above cover window /
+                      draft intelligence. Use Games for live fixtures.
+                    </p>
+                  )}
+                </div>
               ) : activeQuery.isPending ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[0, 1, 2, 3].map((i) => (

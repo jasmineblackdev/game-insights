@@ -7,11 +7,11 @@ export type DraftEdgeCardKind =
   | "team_position"
   | "position_first";
 
-/** Rich draft prediction card (NFL-first; mirrors `draft_predictions` / API). */
+/** Rich draft prediction card (mirrors `draft_predictions` / API). NFL · NBA · MLB · soccer window. */
 export interface DraftEdgeCard {
   id: string;
   kind: DraftEdgeCardKind;
-  league: Extract<League, "nfl" | "nba">;
+  league: League;
   year: number;
   player_id: string;
   player_name: string;

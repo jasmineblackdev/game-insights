@@ -5,10 +5,26 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEdgeCardOptional } from "@/context/EdgeCardContext";
 import type { DraftEdgeCard, DraftEdgeFilterId } from "@/data/draftEdgeTypes";
-import { fetchDraftEdgeCards } from "@/lib/draftEdgeApi";
+import type { League } from "@/data/mockGames";
+import {
+  fetchDraftEdgeCards,
+  type DraftEdgeDataSource,
+  type DraftEdgeMockReason,
+} from "@/lib/draftEdgeApi";
 import { TrendingUp, Users, Target, Zap } from "lucide-react";
 
-const NFL_DRAFT_YEAR = 2026;
+const DRAFT_EDGE_YEAR: Record<League, number> = {
+  nfl: 2026,
+  nba: 2026,
+  mlb: 2026,
+  soccer: 2026,
+};
+
+function round1PickCap(league: League): number {
+  if (league === "nfl") return 32;
+  if (league === "nba" || league === "mlb") return 30;
+  return 20;
+}
 
 const FILTER_CHIPS: { id: DraftEdgeFilterId; label: string }[] = [
   { id: "all", label: "All" },
@@ -50,7 +66,7 @@ function kindLabel(k: DraftEdgeCard["kind"]): string {
   }
 }
 
-function passesFilter(card: DraftEdgeCard, f: DraftEdgeFilterId): boolean {
+function passesFilter(card: DraftEdgeCard, f: DraftEdgeFilterId, league: League): boolean {
   if (f === "all") return true;
   if (f === "high_confidence") return card.confidence === "HIGH";
   if (f === "big_movers") return card.tags.includes("mover") || Boolean(card.mover_note);
@@ -62,7 +78,8 @@ function passesFilter(card: DraftEdgeCard, f: DraftEdgeFilterId): boolean {
   }
   if (f === "round1") {
     if (card.tags.includes("round1")) return true;
-    if (card.kind === "exact_pick" && card.pick_number != null && card.pick_number <= 32) return true;
+    const cap = round1PickCap(league);
+    if (card.kind === "exact_pick" && card.pick_number != null && card.pick_number <= cap) return true;
     return false;
   }
   if (f === "position_props") {
@@ -76,7 +93,7 @@ function passesFilter(card: DraftEdgeCard, f: DraftEdgeFilterId): boolean {
   return true;
 }
 
-function DraftEdgeCardView({ card }: { card: DraftEdgeCard }) {
+function DraftEdgeCardView({ card, league }: { card: DraftEdgeCard; league: League }) {
   const edge = useEdgeCardOptional();
   const added = edge?.slip.some((x) => x.kind === "draft_edge" && x.id === card.id) ?? false;
   const full = edge?.slipFull && !added;
@@ -136,7 +153,9 @@ function DraftEdgeCardView({ card }: { card: DraftEdgeCard }) {
       {card.kind === "position_ou" ? (
         <div className="text-xs space-y-1 border-t border-border pt-2">
           <p>
-            <span className="text-muted-foreground">Draft position O/U {card.ou_line ?? "—"} · </span>
+            <span className="text-muted-foreground">
+              {league === "soccer" ? "Composite rank O/U" : "Draft position O/U"} {card.ou_line ?? "—"} ·{" "}
+            </span>
             <span className="font-bold text-foreground">{card.ou_prediction ?? "—"}</span>
           </p>
           {card.projected_pick != null ? (
@@ -155,7 +174,9 @@ function DraftEdgeCardView({ card }: { card: DraftEdgeCard }) {
 
       {card.kind === "round_yes_no" ? (
         <div className="text-xs border-t border-border pt-2">
-          <span className="text-muted-foreground">1st round · </span>
+          <span className="text-muted-foreground">
+            {league === "soccer" ? "Big-5 league move · " : "1st round · "}
+          </span>
           <span className="font-bold text-foreground">{card.round_prediction === "yes" ? "Yes" : "No"}</span>
           {card.probability != null ? (
             <span className="text-muted-foreground tabular-nums ml-2">· {Math.round(card.probability)}%</span>
@@ -165,7 +186,9 @@ function DraftEdgeCardView({ card }: { card: DraftEdgeCard }) {
 
       {card.kind === "team_position" ? (
         <div className="text-xs border-t border-border pt-2">
-          <span className="text-muted-foreground">{card.team_target_abbr ?? "?"} · Round 1 · </span>
+          <span className="text-muted-foreground">
+            {card.team_target_abbr ?? "?"} · {league === "soccer" ? "Early window" : "Round 1"} ·{" "}
+          </span>
           <span className="font-bold text-foreground">{card.team_need_position ?? "—"}</span>
           {card.probability != null ? (
             <span className="text-muted-foreground tabular-nums ml-2">· {Math.round(card.probability)}%</span>
@@ -225,36 +248,89 @@ function DraftEdgeCardView({ card }: { card: DraftEdgeCard }) {
   );
 }
 
-export function DraftEdgeSection() {
+function leagueDraftTitle(league: League): string {
+  switch (league) {
+    case "nfl":
+      return "NFL";
+    case "nba":
+      return "NBA";
+    case "mlb":
+      return "MLB";
+    case "soccer":
+      return "Soccer (summer window)";
+  }
+}
+
+function leagueDraftBlurb(league: League): string {
+  switch (league) {
+    case "nfl":
+      return "NFL 2026 draft intelligence — exact picks, position O/U, round props, team needs, and first-at-position calls. Signals: grades, team fit, consensus shape, positional value, and movement notes.";
+    case "nba":
+      return "NBA 2026 draft intelligence — same card types as NFL, tuned for lottery range, positional scarcity, and team timelines.";
+    case "mlb":
+      return "MLB 2026 First-Year Player Draft — slot variance, bonus games, and org need curves in the same Draft Edge card types.";
+    case "soccer":
+      return "Summer window composite — ranked targets, composite-rank O/U, big-club move props, early-window team needs, and first-to-sign position calls. Not a domestic draft; framed for transfer markets.";
+  }
+}
+
+function DraftDataSourceNote({
+  source,
+  mockReason,
+}: {
+  source?: DraftEdgeDataSource;
+  mockReason?: DraftEdgeMockReason;
+}) {
+  if (source === "live") {
+    return (
+      <p className="text-[10px] text-confidence-high max-w-2xl leading-relaxed">
+        Live data — loaded from your database-backed <span className="font-mono">draft-edge</span> API (table{" "}
+        <span className="font-mono">draft_predictions</span>). Refresh the page or come back to this tab to pick up table
+        changes.
+      </p>
+    );
+  }
+  if (mockReason === "live_unavailable") {
+    return (
+      <p className="text-[10px] text-amber-600 dark:text-amber-400 max-w-2xl leading-relaxed">
+        Live data unavailable — showing sample cards. Check that <span className="font-mono">draft-edge</span> is deployed,
+        reachable from this app, and <span className="font-mono">draft_predictions</span> includes rows for this year and
+        league.
+      </p>
+    );
+  }
+  return (
+    <p className="text-[10px] text-muted-foreground max-w-2xl leading-relaxed">
+      Sample cards — add <span className="font-mono">VITE_SUPABASE_URL</span> and{" "}
+      <span className="font-mono">VITE_SUPABASE_ANON_KEY</span> (or <span className="font-mono">VITE_DRAFT_EDGE_API_URL</span>
+      ) so Draft Edge can load <span className="text-foreground/80">live</span> cards from your backend.
+    </p>
+  );
+}
+
+export function DraftEdgeSection({ league }: { league: League }) {
   const [filter, setFilter] = useState<DraftEdgeFilterId>("all");
+  const year = DRAFT_EDGE_YEAR[league];
 
   const { data, isPending } = useQuery({
-    queryKey: ["draft-edge", NFL_DRAFT_YEAR, "nfl"],
-    queryFn: () => fetchDraftEdgeCards(NFL_DRAFT_YEAR, "nfl"),
+    queryKey: ["draft-edge", year, league],
+    queryFn: () => fetchDraftEdgeCards(year, league),
     staleTime: 5 * 60 * 1000,
   });
 
   const rows = useMemo(() => {
     const list = data?.items ?? [];
-    return list.filter((c) => passesFilter(c, filter));
-  }, [data, filter]);
+    return list.filter((c) => passesFilter(c, filter, league));
+  }, [data, filter, league]);
 
   return (
     <section className="space-y-6" aria-labelledby="draft-edge-heading">
       <div className="space-y-2">
         <h2 id="draft-edge-heading" className="font-display font-bold text-xl sm:text-2xl md:text-3xl text-foreground">
-          Draft Edge
+          Draft Edge · {leagueDraftTitle(league)}
         </h2>
-        <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">
-          NFL {NFL_DRAFT_YEAR} draft intelligence — exact picks, position O/U, round props, team needs, and first-at-position
-          calls. Signals: grades, team fit, consensus shape, positional value, and rumor/movement notes (mock + optional
-          Supabase).
-        </p>
-        <p className="text-[10px] text-muted-foreground max-w-2xl">
-          {data?.source === "api"
-            ? "Live: `draft-edge` Edge Function. Errors fall back to mock."
-            : "Mock board. Deploy `draft-edge` with `VITE_SUPABASE_URL` + anon key for database-backed cards."}
-        </p>
+        <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">{leagueDraftBlurb(league)}</p>
+        {!isPending ? <DraftDataSourceNote source={data?.source} mockReason={data?.mockReason} /> : null}
       </div>
 
       <div className="space-y-2">
@@ -302,7 +378,7 @@ export function DraftEdgeSection() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {rows.map((card) => (
-            <DraftEdgeCardView key={card.id} card={card} />
+            <DraftEdgeCardView key={card.id} card={card} league={league} />
           ))}
         </div>
       )}

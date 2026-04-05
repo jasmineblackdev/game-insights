@@ -97,8 +97,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (leagueParam !== "nfl" && leagueParam !== "nba") {
-      return new Response(JSON.stringify({ error: "league must be nfl or nba", items: [] }), {
+    const allowed = ["nfl", "nba", "mlb", "soccer"] as const;
+    if (!allowed.includes(leagueParam as (typeof allowed)[number])) {
+      return new Response(JSON.stringify({ error: "league must be nfl, nba, mlb, or soccer", items: [] }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
