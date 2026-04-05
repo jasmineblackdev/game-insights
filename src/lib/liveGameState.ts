@@ -171,6 +171,62 @@ export function liveAccuracyClass(accuracy: LiveContext["accuracy"]): string {
   return "text-hot-streak bg-hot-streak/15 border-hot-streak/25";
 }
 
+// ── Final games: model vs result ─────────────────────────────────────────────
+
+export interface FinalPredictionContext {
+  badge: string;
+  tip: string;
+  pickedSide: "home" | "away";
+  correct: boolean;
+  outcome: "hit" | "miss" | "push";
+}
+
+/**
+ * When status is final and `_meta` has scores, compare pre-game win% lean to the winner.
+ * Skips soccer 1X2 (threeWay) until draw handling is defined.
+ */
+export function getFinalPredictionContext(game: GamePrediction): FinalPredictionContext | null {
+  if (game.status !== "final") return null;
+  if (game.threeWay) return null;
+  const fh = game._meta?.finalHomeScore;
+  const fa = game._meta?.finalAwayScore;
+  if (fh == null || fa == null || !Number.isFinite(fh) || !Number.isFinite(fa)) return null;
+
+  const pickedHome = game.winProbability.home >= game.winProbability.away;
+  const picked = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+  const pct = pickedHome ? game.winProbability.home : game.winProbability.away;
+
+  if (fh === fa) {
+    return {
+      badge: "FINAL · TIE",
+      tip: `Final ${fa}–${fh}. No win-side grade.`,
+      pickedSide: pickedHome ? "home" : "away",
+      correct: false,
+      outcome: "push",
+    };
+  }
+
+  const homeWon = fh > fa;
+  const correct = (pickedHome && homeWon) || (!pickedHome && !homeWon);
+  const winner = homeWon ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+
+  return {
+    badge: correct ? "MODEL ✓" : "UPSET",
+    tip: correct
+      ? `Final ${fa}–${fh}. Model leaned ${picked} (${pct}%) — matched winner ${winner}.`
+      : `Final ${fa}–${fh}. ${winner} won; model favored ${picked} (${pct}%).`,
+    pickedSide: pickedHome ? "home" : "away",
+    correct,
+    outcome: correct ? "hit" : "miss",
+  };
+}
+
+export function finalPredictionAccuracyClass(ctx: FinalPredictionContext): string {
+  if (ctx.outcome === "push") return "text-muted-foreground bg-muted/50 border-border";
+  if (ctx.correct) return "text-confidence-high bg-confidence-high/15 border-confidence-high/25";
+  return "text-amber-700 dark:text-amber-300 bg-amber-500/15 border-amber-500/30";
+}
+
 // ── Bet Window Signal ─────────────────────────────────────────────────────────
 
 export type BetPhase = "wait" | "open" | "closing" | "closed";

@@ -4,7 +4,15 @@ import { GamePrediction } from "@/data/mockGames";
 import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
-import { getLiveContext, liveAccuracyClass, getBetWindow, betWindowClass, getUpcomingBetTip } from "@/lib/liveGameState";
+import {
+  getLiveContext,
+  liveAccuracyClass,
+  getFinalPredictionContext,
+  finalPredictionAccuracyClass,
+  getBetWindow,
+  betWindowClass,
+  getUpcomingBetTip,
+} from "@/lib/liveGameState";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp } from "lucide-react";
 
 interface GamePredictionCardProps {
@@ -27,6 +35,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const showEdgeBadge = showModelMarketEdgeBadge(game);
   const updatedAgo = formatDistanceToNow(new Date(game.lastUpdated), { addSuffix: true });
   const liveCtx = getLiveContext(game);
+  const finalCtx = getFinalPredictionContext(game);
   const betWindow = getBetWindow(game);
   const upcomingBetTip = getUpcomingBetTip(game);
 
@@ -56,7 +65,14 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
               ⚡ EDGE
             </span>
           ) : null}
-          {liveCtx ? (
+          {finalCtx ? (
+            <span
+              className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${finalPredictionAccuracyClass(finalCtx)}`}
+              title={finalCtx.tip}
+            >
+              🏁 {finalCtx.badge}
+            </span>
+          ) : liveCtx ? (
             <span
               className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${liveAccuracyClass(liveCtx.accuracy)}`}
               title={liveCtx.tip}
@@ -121,7 +137,12 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
 
       {/* Quick Insights */}
       <div className="px-4 pb-3 space-y-1.5">
-        {liveCtx ? (
+        {finalCtx ? (
+          <div className="flex items-start gap-2 text-xs">
+            <span className="text-[10px] shrink-0 mt-0.5">🏁</span>
+            <span className="text-secondary-foreground">{finalCtx.tip}</span>
+          </div>
+        ) : liveCtx ? (
           <div className="flex items-start gap-2 text-xs">
             <span className="text-[10px] shrink-0 mt-0.5">🔴</span>
             <span className="text-secondary-foreground">{liveCtx.tip}</span>

@@ -147,6 +147,9 @@ export interface GamePrediction {
       /** True when halftime is active (NFL/NBA). */
       isHalftime?: boolean;
     };
+    /** Final score — populated for status === "final" games. */
+    finalHomeScore?: number;
+    finalAwayScore?: number;
   };
 }
 

@@ -375,6 +375,24 @@ export function overallRecord(c: EspnCompetitor): string {
   return r?.summary ?? "0-0";
 }
 
+/** ESPN often exposes a separate row for last-10 (name/type varies by sport). */
+export function lastTenRecordSummary(c: EspnCompetitor): string | undefined {
+  for (const x of c.records ?? []) {
+    const name = (x.name ?? "").toLowerCase();
+    const type = (x.type ?? "").toLowerCase();
+    if (
+      type === "lastten" ||
+      type === "last_ten" ||
+      type.includes("last10") ||
+      (name.includes("last") && (name.includes("10") || name.includes("ten")))
+    ) {
+      const s = x.summary?.trim();
+      if (s && /\d/.test(s)) return s;
+    }
+  }
+  return undefined;
+}
+
 export function sortCompetitors(competitors: EspnCompetitor[]): [EspnCompetitor, EspnCompetitor] {
   const away = competitors.find((c) => c.homeAway === "away")!;
   const home = competitors.find((c) => c.homeAway === "home")!;

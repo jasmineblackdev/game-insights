@@ -12,7 +12,13 @@ import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
 import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud, Layers, Plus, TrendingUp } from "lucide-react";
-import { getBetWindow, betWindowClass, getUpcomingBetTip } from "@/lib/liveGameState";
+import {
+  getBetWindow,
+  betWindowClass,
+  getUpcomingBetTip,
+  getFinalPredictionContext,
+  finalPredictionAccuracyClass,
+} from "@/lib/liveGameState";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -32,6 +38,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
   const timeAgo = Math.round((Date.now() - updatedAt.getTime()) / 60000);
   const betWindow = getBetWindow(game);
   const upcomingBetTip = getUpcomingBetTip(game);
+  const finalCtx = getFinalPredictionContext(game);
 
   return (
     <motion.div
@@ -68,6 +75,17 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
                 title="Model home win % differs from market (ML de-vig / spread heuristic) by more than 7 pts"
               >
                 ⚡ EDGE
+              </span>
+            ) : null}
+            {finalCtx ? (
+              <span
+                className={cn(
+                  "text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border",
+                  finalPredictionAccuracyClass(finalCtx)
+                )}
+                title={finalCtx.tip}
+              >
+                🏁 {finalCtx.badge}
               </span>
             ) : null}
             {game.situationalTags.map((tag) => (

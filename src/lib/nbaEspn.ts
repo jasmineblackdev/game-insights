@@ -86,7 +86,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   let prob = winProbFromOdds(homeMl, awayMl);
   if (!prob) {
-    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct, "nba");
+    prob = winProbFromRecords(parseRecord(home.record).pct, parseRecord(away.record).pct, "nba");
   }
 
   const confidence = confidenceFromSpreadNba(spread, prob.home);
@@ -147,6 +147,9 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
       liveState: parseLiveState(comp),
+      ...(status === "final" && homeC.score != null && awayC.score != null
+        ? { finalHomeScore: Number(homeC.score), finalAwayScore: Number(awayC.score) }
+        : {}),
     },
   };
 }

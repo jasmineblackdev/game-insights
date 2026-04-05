@@ -12,6 +12,7 @@ import {
   mapStatus,
   mergeScoreboardDays,
   overallRecord,
+  lastTenRecordSummary,
   parseRecord,
   parseLiveState,
   sortCompetitors,
@@ -116,6 +117,29 @@ function leadersToTrends(c: EspnCompetitor): PlayerTrendData[] {
   return results.slice(0, 3);
 }
 
+/**
+ * Season win% with small-sample shrink toward .500, blended with last-10 when available.
+ * Feeds winProbFromRecords so home-field boost applies once on the combined strengths.
+ */
+function mlbAdjustedStrengthPct(c: EspnCompetitor): number {
+  const overall = parseRecord(overallRecord(c));
+  const n = overall.w + overall.l;
+  const seasonShrunk = 0.5 + (overall.pct - 0.5) * Math.min(1, n / 22);
+
+  const l10s = lastTenRecordSummary(c);
+  if (!l10s) return seasonShrunk;
+  const l10 = parseRecord(l10s);
+  const n10 = l10.w + l10.l;
+  if (n10 < 5) return seasonShrunk;
+
+  const seasonWeight = Math.min(0.82, 0.38 + (n / 130) * 0.44);
+  return seasonWeight * seasonShrunk + (1 - seasonWeight) * l10.pct;
+}
+
+function winProbFromMlbCompetitors(homeC: EspnCompetitor, awayC: EspnCompetitor) {
+  return winProbFromRecords(mlbAdjustedStrengthPct(homeC), mlbAdjustedStrengthPct(awayC), "mlb");
+}
+
 function buildTeam(c: EspnCompetitor): TeamData {
   const { pct } = parseRecord(overallRecord(c));
   const r = ratingHeuristics(pct);
@@ -146,7 +170,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   let prob = winProbFromOdds(homeMl, awayMl);
   if (!prob) {
-    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct, "mlb");
+    prob = winProbFromMlbCompetitors(homeC, awayC);
   }
 
   const mlbIntel = buildMlbIntel(comp);
@@ -220,6 +244,9 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
       liveState: parseLiveState(comp),
+      ...(status === "final" && homeC.score != null && awayC.score != null
+        ? { finalHomeScore: Number(homeC.score), finalAwayScore: Number(awayC.score) }
+        : {}),
     },
   };
 }
