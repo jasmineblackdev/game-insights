@@ -1,0 +1,152 @@
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
+import { GamePrediction, todaysGames } from "@/data/mockGames";
+import { GamePredictionCard } from "@/components/GamePredictionCard";
+import { GameDetailView } from "@/components/GameDetailView";
+import { Activity, TrendingUp, Zap } from "lucide-react";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+
+function DataSourceStatus() {
+  const health = useQuery({
+    queryKey: ["supabase", "health", "teams"],
+    queryFn: async () => {
+      if (!supabase) throw new Error("Supabase client not configured");
+      const { error } = await supabase.from("teams").select("id").limit(1);
+      if (error) throw error;
+      return true;
+    },
+    enabled: isSupabaseConfigured && !!supabase,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  if (!isSupabaseConfigured) {
+    return (
+      <span className="text-xs text-muted-foreground" title="Add VITE_SUPABASE_* to .env.local">
+        Demo data
+      </span>
+    );
+  }
+  if (health.isPending) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-pulse" />
+        Connecting…
+      </div>
+    );
+  }
+  if (health.isError) {
+    return (
+      <span className="text-xs text-amber-600 dark:text-amber-500" title="Check .env.local and SQL migration">
+        Backend error
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="w-2 h-2 rounded-full bg-confidence-high animate-pulse-glow" />
+      Live data
+    </div>
+  );
+}
+
+const Index = () => {
+  const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b border-border surface-glass sticky top-0 z-50">
+        <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+              <Activity className="w-4.5 h-4.5 text-primary" />
+            </div>
+            <div>
+              <h1 className="font-display font-bold text-base text-foreground tracking-tight">
+                CourtVision
+              </h1>
+              <p className="text-[11px] text-muted-foreground">AI-powered matchup intelligence</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <DataSourceStatus />
+            <span className="text-xs text-muted-foreground">NBA · Apr 5</span>
+          </div>
+        </div>
+      </header>
+
+      <main className="container max-w-6xl mx-auto px-4 py-6">
+        <AnimatePresence mode="wait">
+          {selectedGame ? (
+            <GameDetailView
+              key="detail"
+              game={selectedGame}
+              onBack={() => setSelectedGame(null)}
+            />
+          ) : (
+            <motion.div
+              key="list"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              {/* Hero */}
+              <div className="mb-8">
+                <motion.h2
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="font-display font-bold text-3xl md:text-4xl text-foreground mb-2"
+                >
+                  Today's <span className="text-gradient-primary">Predictions</span>
+                </motion.h2>
+                <motion.p
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="text-sm text-muted-foreground max-w-lg"
+                >
+                  AI-analyzed matchup breakdowns with confidence scores, injury impact, and plain-English reasoning. Click any game for the full scouting card.
+                </motion.p>
+
+                {/* Quick stats */}
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="flex items-center gap-6 mt-4"
+                >
+                  <div className="flex items-center gap-2 text-xs">
+                    <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
+                    <span className="text-muted-foreground">Model accuracy L30:</span>
+                    <span className="text-confidence-high font-semibold">67.2%</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <Zap className="w-3.5 h-3.5 text-primary" />
+                    <span className="text-muted-foreground">High conf picks:</span>
+                    <span className="text-primary font-semibold">2 of 4</span>
+                  </div>
+                </motion.div>
+              </div>
+
+              {/* Games Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {todaysGames.map((game, i) => (
+                  <GamePredictionCard
+                    key={game.id}
+                    game={game}
+                    index={i}
+                    onSelect={setSelectedGame}
+                  />
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+};
+
+export default Index;
