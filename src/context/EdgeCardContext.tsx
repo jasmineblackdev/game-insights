@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { GamePrediction, League } from "@/data/mockGames";
+import type { DraftEdgeCard } from "@/data/draftEdgeTypes";
 import {
   type EdgeCardSize,
   type EdgeCandidate,
@@ -22,6 +23,7 @@ import {
   buildCandidate,
   candidateToSlipItem,
   defaultEdgeHubFilters,
+  draftEdgeToSlipItem,
   isTeamSlipItem,
   normalizeSlipItem,
   playerPropToSlipItem,
@@ -40,6 +42,7 @@ interface EdgeCardContextValue {
   history: EdgeHistoryEntry[];
   addPick: (game: GamePrediction, side?: EdgeSide) => { ok: boolean; message?: string };
   addPlayerProp: (p: PlayerPropInput) => { ok: boolean; message?: string };
+  addDraftEdge: (card: DraftEdgeCard) => { ok: boolean; message?: string };
   removePick: (itemId: string) => void;
   replacePick: (itemId: string, item: TeamEdgeSlipItem) => void;
   clearSlip: () => void;
@@ -131,6 +134,21 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       }
       const c = buildCandidate(game, side);
       const item = candidateToSlipItem(c);
+      setSlipState((s) => ({ ...s, items: [...s.items, item] }));
+      return { ok: true };
+    },
+    [slip, cardSize]
+  );
+
+  const addDraftEdge = useCallback(
+    (card: DraftEdgeCard): { ok: boolean; message?: string } => {
+      if (slip.some((x) => x.kind === "draft_edge" && x.id === card.id)) {
+        return { ok: false, message: "This Draft Edge card is already on your Edge Card" };
+      }
+      if (slip.length >= cardSize) {
+        return { ok: false, message: `Edge Card ${cardSize} is full` };
+      }
+      const item = draftEdgeToSlipItem(card);
       setSlipState((s) => ({ ...s, items: [...s.items, item] }));
       return { ok: true };
     },
@@ -239,6 +257,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       history,
       addPick,
       addPlayerProp,
+      addDraftEdge,
       removePick,
       replacePick,
       clearSlip,
@@ -258,6 +277,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       history,
       addPick,
       addPlayerProp,
+      addDraftEdge,
       removePick,
       replacePick,
       clearSlip,

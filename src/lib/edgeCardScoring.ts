@@ -1,4 +1,5 @@
 import type { ConfidenceLevel, GamePrediction, League } from "@/data/mockGames";
+import type { DraftEdgeCard, DraftEdgeCardKind } from "@/data/draftEdgeTypes";
 
 export type EdgeSide = "home" | "away";
 export type EdgeCardSize = 3 | 4 | 6 | 10;
@@ -78,8 +79,33 @@ export type PlayerPropEdgeSlipItem = {
   snapshot: PlayerPropSlipSnapshot;
 };
 
-/** Mixed Edge Card: team moneylines + player props (V1). */
-export type EdgeSlipItem = TeamEdgeSlipItem | PlayerPropEdgeSlipItem;
+export type DraftEdgeSlipSnapshot = {
+  confidence: ConfidenceLevel;
+  label: string;
+  cardKind: DraftEdgeCardKind;
+  playerName: string;
+  position: string;
+  college: string;
+  grade: string;
+  tier?: string;
+  topReason: string;
+  topRisk: string;
+  cardSummary: string;
+  year: number;
+};
+
+export type DraftEdgeSlipItem = {
+  kind: "draft_edge";
+  id: string;
+  league: League;
+  year: number;
+  cardKind: DraftEdgeCardKind;
+  addedAt: string;
+  snapshot: DraftEdgeSlipSnapshot;
+};
+
+/** Mixed Edge Card: team picks, player props, draft intelligence. */
+export type EdgeSlipItem = TeamEdgeSlipItem | PlayerPropEdgeSlipItem | DraftEdgeSlipItem;
 
 export function isTeamSlipItem(item: EdgeSlipItem): item is TeamEdgeSlipItem {
   return item.kind === "team_pick";
@@ -87,6 +113,10 @@ export function isTeamSlipItem(item: EdgeSlipItem): item is TeamEdgeSlipItem {
 
 export function isPlayerPropSlipItem(item: EdgeSlipItem): item is PlayerPropEdgeSlipItem {
   return item.kind === "player_prop";
+}
+
+export function isDraftEdgeSlipItem(item: EdgeSlipItem): item is DraftEdgeSlipItem {
+  return item.kind === "draft_edge";
 }
 
 /** API / UI payload shape for adding a player prop to the slip. */
@@ -175,10 +205,66 @@ export function playerPropToSlipItem(p: PlayerPropInput): PlayerPropEdgeSlipItem
   };
 }
 
+function draftApiConfidence(c: DraftEdgeCard["confidence"]): ConfidenceLevel {
+  if (c === "HIGH") return "high";
+  if (c === "MED") return "medium";
+  return "low";
+}
+
+export function buildDraftEdgeSlipLabel(card: DraftEdgeCard): string {
+  switch (card.kind) {
+    case "exact_pick": {
+      const abbr = card.predicted_team_abbr ?? card.predicted_team ?? "TBD";
+      const p = card.probability != null ? ` ${Math.round(card.probability)}%` : "";
+      return `#${card.pick_number ?? "?"} ${card.player_name} → ${abbr}${p}`;
+    }
+    case "position_ou":
+      return `${card.player_name} pos O/U ${card.ou_line ?? "—"}: ${card.ou_prediction ?? "—"}`;
+    case "round_yes_no":
+      return `${card.player_name} 1st round: ${card.round_prediction === "yes" ? "Yes" : "No"}`;
+    case "team_position":
+      return `${card.team_target_abbr ?? "?"} R1 ${card.team_need_position ?? "—"}`;
+    case "position_first":
+      return `First ${card.first_position_label ?? card.position}: ${card.player_name}`;
+    default:
+      return `Draft · ${card.player_name}`;
+  }
+}
+
+export function draftEdgeToSlipItem(card: DraftEdgeCard): DraftEdgeSlipItem {
+  const label = buildDraftEdgeSlipLabel(card);
+  const cardSummary = `${card.reason_1} · ${card.risk_factor}`.slice(0, 180);
+  return {
+    kind: "draft_edge",
+    id: card.id,
+    league: card.league,
+    year: card.year,
+    cardKind: card.kind,
+    addedAt: new Date().toISOString(),
+    snapshot: {
+      confidence: draftApiConfidence(card.confidence),
+      label,
+      cardKind: card.kind,
+      playerName: card.player_name,
+      position: card.position,
+      college: card.college,
+      grade: card.grade,
+      tier: card.tier,
+      topReason: card.reason_1,
+      topRisk: card.risk_factor,
+      cardSummary,
+      year: card.year,
+    },
+  };
+}
+
 /** Migrate v1 JSON slip rows (no `kind`) to discriminated union. */
 export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
+  if (o.kind === "draft_edge") {
+    return raw as DraftEdgeSlipItem;
+  }
   if (o.kind === "player_prop") {
     return raw as PlayerPropEdgeSlipItem;
   }
@@ -463,6 +549,10 @@ export function edgeSlipWarningLines(items: EdgeSlipItem[]): string[] {
   let pitcherNote = 0;
   let injuryNote = 0;
   for (const i of items) {
+    if (isDraftEdgeSlipItem(i)) {
+      if (i.snapshot.confidence === "low") lowConf++;
+      continue;
+    }
     if (isPlayerPropSlipItem(i)) {
       if (i.snapshot.confidence === "low") lowConf++;
       continue;

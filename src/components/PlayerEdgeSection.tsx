@@ -1,11 +1,17 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { Star } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEdgeCardOptional } from "@/context/EdgeCardContext";
-import { fetchPlayerEdgePredictions, isPlayerEdgeApiConfigured } from "@/lib/playerEdgeApi";
+import {
+  fetchPlayerEdgePredictions,
+  isPlayerEdgeLiveConfigured,
+  isSupabasePlayerEdgeConfigured,
+} from "@/lib/playerEdgeApi";
+import { usePlayerEdgeFavorites } from "@/hooks/usePlayerEdgeFavorites";
 import {
   type PlayerEdgePrediction,
   type PlayerEdgeSportFilter,
@@ -71,7 +77,17 @@ function riskTierLabel(t: PlayerRiskTier): string {
   return labels[t];
 }
 
-function PlayerEdgeCard({ pred }: { pred: PlayerEdgePrediction }) {
+function PlayerEdgeCard({
+  pred,
+  favorited,
+  onToggleFavorite,
+  favoritesUi,
+}: {
+  pred: PlayerEdgePrediction;
+  favorited: boolean;
+  onToggleFavorite: () => void;
+  favoritesUi: boolean;
+}) {
   const edge = useEdgeCardOptional();
   const added = edge?.isPlayerPropOnSlip(pred.id) ?? false;
   const full = edge?.slipFull && !added;
@@ -97,7 +113,22 @@ function PlayerEdgeCard({ pred }: { pred: PlayerEdgePrediction }) {
         >
           {initials(pred.player_name)}
         </div>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 relative pr-8">
+          {favoritesUi ? (
+            <button
+              type="button"
+              onClick={onToggleFavorite}
+              className={cn(
+                "absolute right-0 top-0 p-1 rounded-md border border-transparent transition-colors",
+                favorited
+                  ? "text-amber-500 hover:bg-amber-500/10"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/80"
+              )}
+              aria-label={favorited ? "Remove favorite" : "Add favorite"}
+            >
+              <Star className={cn("w-4 h-4", favorited && "fill-current")} />
+            </button>
+          ) : null}
           <div className="flex flex-wrap items-center gap-1.5 gap-y-1">
             <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
               {pred.sport}
@@ -185,7 +216,7 @@ function PlayerEdgeCard({ pred }: { pred: PlayerEdgePrediction }) {
       <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-border">
         <Button
           size="sm"
-          className="flex-1 font-semibold"
+          className="flex-1 font-semibold min-h-11 sm:min-h-9 touch-manipulation"
           disabled={!edge || added || full}
           onClick={() => {
             if (!edge) {
@@ -199,7 +230,7 @@ function PlayerEdgeCard({ pred }: { pred: PlayerEdgePrediction }) {
         >
           {added ? "On Edge Card" : "Add to Edge Card"}
         </Button>
-        <Button variant="outline" size="sm" className="flex-1" asChild>
+        <Button variant="outline" size="sm" className="flex-1 min-h-11 sm:min-h-9 touch-manipulation" asChild>
           <Link to={`/player-edge/${pred.id}`}>View Details</Link>
         </Button>
       </div>
@@ -210,6 +241,7 @@ function PlayerEdgeCard({ pred }: { pred: PlayerEdgePrediction }) {
 export function PlayerEdgeSection() {
   const [sport, setSport] = useState<PlayerEdgeSportFilter>("all");
   const [stat, setStat] = useState<PlayerEdgeStatFilter>("all");
+  const fav = usePlayerEdgeFavorites();
 
   const { data, isPending } = useQuery({
     queryKey: ["player-edge", sport, stat],
@@ -218,40 +250,64 @@ export function PlayerEdgeSection() {
   });
 
   const rows = useMemo(() => {
-    const list = data ?? [];
+    const list = data?.items ?? [];
     const f = filterPlayerEdgePredictions(list, sport, stat);
     return sortPlayerEdgePredictions(f);
   }, [data, sport, stat]);
 
+  const accuracy = data?.accuracy;
+  const graded = accuracy ? accuracy.wins + accuracy.losses : 0;
+  const hitRate =
+    graded > 0 ? Math.round((accuracy!.wins / graded) * 100) : null;
+
   return (
     <section className="mt-12 pt-10 border-t border-border space-y-6" aria-labelledby="player-edge-heading">
       <div className="space-y-2">
-        <h2 id="player-edge-heading" className="font-display font-bold text-2xl md:text-3xl text-foreground">
+        <h2 id="player-edge-heading" className="font-display font-bold text-xl sm:text-2xl md:text-3xl text-foreground">
           Player Edge
         </h2>
         <p className="text-sm text-muted-foreground max-w-2xl">
           AI-ranked player predictions using recent performance, matchup strength, injuries, and projected role.
         </p>
         <p className="text-[10px] text-muted-foreground max-w-2xl">
-          {isPlayerEdgeApiConfigured()
-            ? "Live props: VITE_PLAYER_EDGE_API_URL — JSON { items: [...] }. Errors fall back to mock."
-            : "Mock props board. Set VITE_PLAYER_EDGE_API_URL to your GET endpoint to wire real data."}
+          {isPlayerEdgeLiveConfigured()
+            ? isSupabasePlayerEdgeConfigured()
+              ? "Live props: Supabase Edge `player-edge` (override with VITE_PLAYER_EDGE_API_URL). Errors fall back to mock."
+              : "Live props: custom GET endpoint (VITE_PLAYER_EDGE_API_URL). Errors fall back to mock."
+            : "Mock props board. Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY and deploy `player-edge`, or set VITE_PLAYER_EDGE_API_URL."}
         </p>
+        {accuracy && accuracy.total > 0 && hitRate !== null ? (
+          <div
+            className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground max-w-xl leading-relaxed"
+            role="status"
+          >
+            <span className="font-semibold text-foreground block sm:inline">Props accuracy (last 7 days)</span>
+            <span className="hidden sm:inline mx-2 text-border">·</span>
+            <span className="block sm:inline mt-1 sm:mt-0">
+              {accuracy.wins}W {accuracy.losses}L
+              {accuracy.pushes > 0 ? ` ${accuracy.pushes}P` : ""}
+              <span className="mx-2 text-border">·</span>
+              <span className="tabular-nums text-foreground font-medium">{hitRate}%</span>
+              <span className="text-muted-foreground"> hit rate</span>
+              <span className="text-[10px] ml-1 opacity-80">(excl. pushes)</span>
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-3">
         <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">SPORT</p>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2 sm:gap-1.5">
           {SPORT_FILTERS.map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => setSport(s)}
               className={cn(
-                "px-3 py-1 rounded-full text-xs font-semibold border transition-colors",
+                "min-h-10 px-3 py-2 sm:min-h-0 sm:py-1 rounded-full text-xs font-semibold border transition-colors touch-manipulation",
                 sport === s
                   ? "bg-card text-foreground border-primary/40 shadow-sm"
-                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground"
+                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
               )}
             >
               {s === "all" ? "All Sports" : s}
@@ -262,17 +318,17 @@ export function PlayerEdgeSection() {
 
       <div className="space-y-3">
         <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">STAT</p>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2 sm:gap-1.5">
           {STAT_FILTERS.map((st) => (
             <button
               key={st}
               type="button"
               onClick={() => setStat(st)}
               className={cn(
-                "px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                "min-h-10 px-2.5 py-2 sm:min-h-0 sm:py-1 rounded-full text-[11px] font-medium border transition-colors touch-manipulation",
                 stat === st
                   ? "bg-card text-foreground border-primary/40 shadow-sm"
-                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground"
+                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
               )}
             >
               {statFilterLabel(st)}
@@ -294,7 +350,13 @@ export function PlayerEdgeSection() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {rows.map((pred) => (
-            <PlayerEdgeCard key={pred.id} pred={pred} />
+            <PlayerEdgeCard
+              key={pred.id}
+              pred={pred}
+              favorited={fav.showFavoritesUi && fav.isFav(pred)}
+              onToggleFavorite={() => fav.toggleFavorite(pred)}
+              favoritesUi={fav.showFavoritesUi}
+            />
           ))}
         </div>
       )}

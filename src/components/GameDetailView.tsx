@@ -499,8 +499,20 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         <h3 className="font-display font-bold text-sm text-foreground mb-1">Team Stats Comparison</h3>
         {game.league === "nba" && (
           <p className="text-[11px] text-muted-foreground mb-3">
-            Numbers are ESPN season PPG / opponent PPG after enrichment. True offensive/defensive rating from{" "}
-            <span className="text-foreground/90">stats.nba.com</span> needs a Supabase Edge proxy (CORS).
+            {game._meta?.nbaRatingsFromStats && game._meta.nbaStatsSeason ? (
+              <>
+                Offensive/defensive rating and pace from{" "}
+                <span className="text-foreground/90">stats.nba.com</span> (advanced, regular season{" "}
+                {game._meta.nbaStatsSeason}), fetched via Supabase Edge proxy to avoid browser CORS.
+              </>
+            ) : (
+              <>
+                Numbers are ESPN season PPG / opponent PPG after enrichment. Deploy{" "}
+                <span className="text-foreground/90">nba-stats-proxy</span> and set{" "}
+                <span className="text-foreground/90">VITE_SUPABASE_URL</span> + anon key for true ORtg/DRtg from{" "}
+                <span className="text-foreground/90">stats.nba.com</span>.
+              </>
+            )}
           </p>
         )}
         {game.league === "soccer" && (
@@ -528,11 +540,17 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
                     { label: "GA / match", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
                     { label: "Poss. (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
                   ]
-                : [
-                    { label: "PPG", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
-                    { label: "Opp PPG", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
-                    { label: "Pace (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
-                  ]
+                : game._meta?.nbaRatingsFromStats
+                  ? [
+                      { label: "ORtg", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
+                      { label: "DRtg", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
+                      { label: "Pace", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
+                    ]
+                  : [
+                      { label: "PPG", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
+                      { label: "Opp PPG", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
+                      { label: "Pace (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
+                    ]
           ).map((stat) => {
             const awayBetter = stat.lowerBetter ? stat.away < stat.home : stat.away > stat.home;
             return (

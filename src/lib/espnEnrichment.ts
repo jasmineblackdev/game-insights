@@ -1,4 +1,10 @@
 import type { GamePrediction, InjuryStatus, League, PlayerInjury, TeamData } from "@/data/mockGames";
+import {
+  fetchNbaAdvancedRatingsViaProxy,
+  normalizeEspnToNbaStatsAbbr,
+  type NbaAdvancedRatingsPayload,
+} from "@/lib/nbaStatsProxy";
+import { isoToEasternYmd, previousCalendarYmd } from "@/lib/espnShared";
 
 const INJURY_URLS: Record<"nba" | "nfl" | "mlb" | "soccer", string> = {
   nba: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
@@ -37,6 +43,48 @@ function teamUrl(league: League, teamId: string): string | null {
     return `https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/${teamId}`;
   }
   return null;
+}
+
+function scheduleUrl(league: League, teamId: string): string | null {
+  if (league === "nba") {
+    return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${teamId}/schedule`;
+  }
+  if (league === "mlb") {
+    return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}/schedule`;
+  }
+  return null;
+}
+
+/** Returns the set of Eastern YYYY-MM-DD dates on which a team played this season. */
+async function fetchTeamGameDates(league: League, teamId: string): Promise<Set<string>> {
+  const url = scheduleUrl(league, teamId);
+  if (!url) return new Set();
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return new Set();
+    const json = (await res.json()) as { events?: { competitions?: { date?: string }[] }[] };
+    const dates = new Set<string>();
+    for (const ev of json.events ?? []) {
+      const d = ev.competitions?.[0]?.date;
+      if (d) dates.add(isoToEasternYmd(d));
+    }
+    return dates;
+  } catch {
+    return new Set();
+  }
+}
+
+async function fetchTeamScheduleMap(league: League, teamIds: string[]): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  const unique = [...new Set(teamIds)].filter(Boolean);
+  if (!scheduleUrl(league, unique[0] ?? "")) return out; // Skip unsupported leagues early
+  const batch = 4;
+  for (let i = 0; i < unique.length; i += batch) {
+    const slice = unique.slice(i, i + batch);
+    const results = await Promise.all(slice.map((id) => fetchTeamGameDates(league, id)));
+    slice.forEach((id, j) => out.set(id, results[j] ?? new Set()));
+  }
+  return out;
 }
 
 export function mapEspnInjuryStatus(raw: string | undefined): InjuryStatus {
@@ -294,7 +342,8 @@ async function enrichOne(
   pred: GamePrediction,
   league: League,
   injuryMap: Map<string, PlayerInjury[]>,
-  teamPatches: Map<string, Partial<TeamData>>
+  teamPatches: Map<string, Partial<TeamData>>,
+  nbaAdvanced: NbaAdvancedRatingsPayload | null
 ): Promise<GamePrediction> {
   const hid = pred._meta?.homeTeamId;
   const aid = pred._meta?.awayTeamId;
@@ -331,6 +380,35 @@ async function enrichOne(
   if (hp && Object.keys(hp).length) homeTeam = applyTeamPatch(homeTeam, hp);
   if (ap && Object.keys(ap).length) awayTeam = applyTeamPatch(awayTeam, ap);
 
+  let nbaStatsApplied = false;
+  let nbaStatsSeason: string | undefined;
+  if (league === "nba" && nbaAdvanced?.ratings) {
+    const kh = normalizeEspnToNbaStatsAbbr(homeTeam.abbreviation);
+    const ka = normalizeEspnToNbaStatsAbbr(awayTeam.abbreviation);
+    const rh = nbaAdvanced.ratings[kh];
+    const ra = nbaAdvanced.ratings[ka];
+    if (rh) {
+      homeTeam = {
+        ...homeTeam,
+        offensiveRating: rh.offRtg,
+        defensiveRating: rh.defRtg,
+        pace: rh.pace,
+      };
+    }
+    if (ra) {
+      awayTeam = {
+        ...awayTeam,
+        offensiveRating: ra.offRtg,
+        defensiveRating: ra.defRtg,
+        pace: ra.pace,
+      };
+    }
+    if (rh && ra) {
+      nbaStatsApplied = true;
+      nbaStatsSeason = nbaAdvanced.season;
+    }
+  }
+
   const topReasons = [...pred.topReasons];
   if (notes.length) {
     const first = notes[0];
@@ -339,6 +417,11 @@ async function enrichOne(
     }
   }
 
+  const nextMeta =
+    pred._meta && league === "nba" && nbaStatsApplied && nbaStatsSeason
+      ? { ...pred._meta, nbaRatingsFromStats: true as const, nbaStatsSeason }
+      : pred._meta;
+
   return {
     ...pred,
     homeTeam,
@@ -346,6 +429,7 @@ async function enrichOne(
     injuries: { home: homeInj, away: awayInj },
     enrichmentNotes: notes.length ? notes : pred.enrichmentNotes,
     topReasons: topReasons.slice(0, 6),
+    _meta: nextMeta,
   };
 }
 
@@ -374,6 +458,7 @@ export async function enrichGamePredictions(predictions: GamePrediction[], leagu
     if (p._meta?.awayTeamId) teamIds.push(p._meta.awayTeamId);
   }
   const teamPatches = await fetchTeamMetricsMap(lg, teamIds);
+  const nbaAdvanced = lg === "nba" ? await fetchNbaAdvancedRatingsViaProxy() : null;
 
-  return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches));
+  return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches, nbaAdvanced));
 }

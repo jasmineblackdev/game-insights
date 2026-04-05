@@ -1,17 +1,52 @@
 import { Link, useParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { getPlayerEdgeById } from "@/data/playerEdgeMock";
+import { fetchPlayerEdgeProjectionById, isPlayerEdgeLiveConfigured } from "@/lib/playerEdgeApi";
 import { cn } from "@/lib/utils";
 
 export default function PlayerEdgeDetailPage() {
   const { projectionId } = useParams<{ projectionId: string }>();
-  const pred = projectionId ? getPlayerEdgeById(projectionId) : undefined;
+
+  const { data: pred, isPending } = useQuery({
+    queryKey: ["player-edge-detail", projectionId],
+    queryFn: () => fetchPlayerEdgeProjectionById(projectionId!),
+    enabled: Boolean(projectionId),
+  });
+
+  if (!projectionId) {
+    return (
+      <div className="min-h-screen bg-background container max-w-2xl mx-auto py-10 sm:py-12 pt-[max(2.5rem,env(safe-area-inset-top))]">
+        <p className="text-muted-foreground mb-4">Missing projection id.</p>
+        <Button variant="outline" size="sm" asChild>
+          <Link to="/">Back home</Link>
+        </Button>
+      </div>
+    );
+  }
+
+  if (isPending) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
+          <div className="container max-w-2xl mx-auto py-3 sm:py-4">
+            <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+          </div>
+        </header>
+        <main className="container max-w-2xl mx-auto py-6 sm:py-8">
+          <div className="h-64 rounded-lg border border-border bg-muted/30 animate-pulse" />
+        </main>
+      </div>
+    );
+  }
 
   if (!pred) {
     return (
-      <div className="min-h-screen bg-background container max-w-2xl mx-auto px-4 py-12">
-        <p className="text-muted-foreground mb-4">Projection not found (mock IDs only).</p>
+      <div className="min-h-screen bg-background container max-w-2xl mx-auto py-10 sm:py-12 pt-[max(2.5rem,env(safe-area-inset-top))]">
+        <p className="text-muted-foreground mb-4">
+          Projection not found
+          {isPlayerEdgeLiveConfigured() ? "." : " (enable live Player Edge or use a mock id from the sample board)."}
+        </p>
         <Button variant="outline" size="sm" asChild>
           <Link to="/">Back home</Link>
         </Button>
@@ -26,19 +61,19 @@ export default function PlayerEdgeDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border surface-glass sticky top-0 z-40">
-        <div className="container max-w-2xl mx-auto px-4 py-4">
+      <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
+        <div className="container max-w-2xl mx-auto py-3 sm:py-4">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="inline-flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation -ml-1 px-1 rounded-md"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 shrink-0" />
             Home
           </Link>
         </div>
       </header>
-      <main className="container max-w-2xl mx-auto px-4 py-8 space-y-6">
-        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+      <main className="container max-w-2xl mx-auto py-6 sm:py-8 space-y-6">
+        <div className="rounded-lg border border-border bg-card p-4 sm:p-6 space-y-4">
           <div className="flex flex-wrap gap-2">
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-muted">{pred.sport}</span>
             <span
@@ -55,7 +90,7 @@ export default function PlayerEdgeDetailPage() {
               {pred.prediction_direction}
             </span>
           </div>
-          <h1 className="font-display font-bold text-2xl text-foreground">{pred.player_name}</h1>
+          <h1 className="font-display font-bold text-xl sm:text-2xl text-foreground break-words">{pred.player_name}</h1>
           <p className="text-sm text-muted-foreground">
             {pred.team} vs {pred.opponent} · {pred.game_time}
           </p>

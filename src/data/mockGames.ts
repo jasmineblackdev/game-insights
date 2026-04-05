@@ -133,6 +133,9 @@ export interface GamePrediction {
     eventId?: string;
     homeTeamId?: string;
     awayTeamId?: string;
+    /** Set when ORtg/DRtg/pace were merged from stats.nba.com via Edge proxy. */
+    nbaRatingsFromStats?: boolean;
+    nbaStatsSeason?: string;
   };
 }
 

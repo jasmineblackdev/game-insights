@@ -35,6 +35,7 @@ import {
   candidateToSlipItem,
   edgeSlipWarningLines,
   groupCandidatesByLeague,
+  isDraftEdgeSlipItem,
   isTeamSlipItem,
   rankCandidatesForHub,
   suggestReplacement,
@@ -314,7 +315,9 @@ export default function EdgeCardPage() {
               <Layers className="w-5 h-5 text-primary" />
               <div>
                 <h1 className="font-display font-bold text-base text-foreground">Edge Card</h1>
-                <p className="text-[11px] text-muted-foreground">Team picks &amp; player props · multi-sport</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Team picks · player props · Draft Edge · multi-sport
+                </p>
               </div>
             </div>
           </div>
@@ -569,7 +572,9 @@ export default function EdgeCardPage() {
                       .map((x) =>
                         isTeamSlipItem(x)
                           ? `${x.snapshot.pickedAbbr} vs ${x.snapshot.opponentAbbr}`
-                          : x.snapshot.label
+                          : isDraftEdgeSlipItem(x)
+                            ? `Draft: ${x.snapshot.label}`
+                            : x.snapshot.label
                       )
                       .join(" · ")}
                   </span>
@@ -650,6 +655,25 @@ export default function EdgeCardPage() {
           {slip.length > 0 ? (
             <ul className="flex flex-col gap-2 max-h-48 overflow-y-auto">
               {slip.map((item) => {
+                if (isDraftEdgeSlipItem(item)) {
+                  return (
+                    <li
+                      key={item.id}
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]"
+                    >
+                      <div>
+                        <span className="font-bold text-foreground">{leagueShort(item.league)}</span> ·{" "}
+                        <span className="text-violet-500 dark:text-violet-400 font-semibold">Draft</span> ·{" "}
+                        {item.snapshot.label}
+                        <span className="block text-muted-foreground mt-0.5 line-clamp-2">{item.snapshot.cardSummary}</span>
+                        <span className="text-[10px] text-muted-foreground">{item.snapshot.confidence} conf</span>
+                      </div>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePick(item.id)}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </li>
+                  );
+                }
                 if (!isTeamSlipItem(item)) {
                   return (
                     <li

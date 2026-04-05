@@ -8,6 +8,7 @@ import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
+import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { ClipboardList, Layers, TrendingUp, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -291,7 +292,13 @@ const Index = () => {
                   className="font-display font-bold text-2xl sm:text-3xl md:text-4xl text-foreground mb-2 break-words"
                 >
                   {viewMode === "draft" ? (
-                    <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
+                    league === "nfl" ? (
+                      <>
+                        NFL <span className="text-gradient-primary">Draft Edge</span>
+                      </>
+                    ) : (
+                      <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
+                    )
                   ) : viewMode === "props" ? (
                     <>Player <span className="text-gradient-primary">Props</span></>
                   ) : (
@@ -312,10 +319,17 @@ const Index = () => {
                   className="text-sm text-muted-foreground max-w-lg leading-relaxed"
                 >
                   {viewMode === "draft" ? (
-                    <>
-                      Projected {leagueLabel(league)} Draft order with grades, scouting analysis, and pro comparables.
-                      Click any pick to expand the full breakdown.
-                    </>
+                    league === "nfl" ? (
+                      <>
+                        AI-style draft outcomes: probability ranges, team fit, positional value, and prop-style cards
+                        (O/U, round yes/no, team needs). Add any card to your Edge Card — separate from game markets.
+                      </>
+                    ) : (
+                      <>
+                        Projected {leagueLabel(league)} Draft order with grades, scouting analysis, and pro comparables.
+                        Click any pick to expand the full breakdown.
+                      </>
+                    )
                   ) : viewMode === "props" ? (
                     <>Player prop edges across NBA, NFL, MLB, and Soccer — filter by sport and stat type.</>
                   ) : league === "nba" ? (
@@ -446,7 +460,25 @@ const Index = () => {
               {viewMode === "props" ? (
                 <PlayerEdgeSection />
               ) : viewMode === "draft" ? (
-                draftPicks.length === 0 ? (
+                league === "nfl" ? (
+                  <div className="space-y-10">
+                    <DraftEdgeSection />
+                    <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
+                      <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
+                        <span>Classic pick-by-pick board</span>
+                        <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
+                      </summary>
+                      <p className="text-xs text-muted-foreground mt-2 mb-4">
+                        Original expandable rows — same mock data as before, kept separate from Draft Edge cards above.
+                      </p>
+                      <div className="space-y-3 pb-2">
+                        {draftPicks.map((pick, i) => (
+                          <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                ) : draftPicks.length === 0 ? (
                   <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
                     {league === "soccer"
                       ? "No draft board for soccer in this app — use the Games tab for EPL 1X2 and matchup intel."

@@ -71,9 +71,18 @@
     @apply border-border;
   }
 
+  html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-family: var(--font-body);
+    min-height: 100dvh;
+    overflow-x: clip;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -118,5 +127,10 @@
     right: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.3), transparent);
+  }
+
+  /** Home indicator on fixed footers */
+  .safe-pb {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 }

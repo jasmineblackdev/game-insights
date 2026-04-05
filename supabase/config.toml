@@ -1,0 +1,11 @@
+# https://supabase.com/docs/guides/cli/config
+project_id = "gamelens"
+
+[api]
+enabled = true
+
+[db]
+major_version = 17
+
+[functions]
+# Edge Functions are deployed with: supabase functions deploy player-edge
