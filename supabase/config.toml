@@ -8,4 +8,6 @@ enabled = true
 major_version = 17
 
 [functions]
-# Edge Functions are deployed with: supabase functions deploy player-edge
+# Deploy (linked project): supabase functions deploy draft-edge
+#   supabase functions deploy player-edge
+#   supabase functions deploy nba-stats-proxy

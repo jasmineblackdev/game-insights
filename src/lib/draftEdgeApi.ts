@@ -76,7 +76,7 @@ export async function fetchDraftEdgeCards(year: number, league: League): Promise
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     const items = parseItems(body);
-    if (!items.length) throw new Error("Empty items");
+    // Live backend can legitimately return zero rows for a league/year — still counts as connected.
     return { items, source: "live" };
   } catch (e) {
     console.warn("[GameLens] Draft Edge live data unavailable, using sample cards:", e);
