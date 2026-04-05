@@ -269,7 +269,7 @@ export default function EdgeCardPage() {
             </div>
           </div>
           <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
-            {([3, 4, 6] as const).map((n) => (
+            {([3, 4, 6, 10] as const).map((n) => (
               <button
                 key={n}
                 type="button"
@@ -311,6 +311,10 @@ export default function EdgeCardPage() {
               <Button variant="outline" size="sm" onClick={() => runAuto(6)} className="gap-1">
                 <Sparkles className="w-3.5 h-3.5" />
                 Auto 6
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => runAuto(10)} className="gap-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                Auto 10
               </Button>
             </div>
           </div>

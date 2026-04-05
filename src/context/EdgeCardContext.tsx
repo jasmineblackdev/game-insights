@@ -49,7 +49,8 @@ function loadSlip(): { cardSize: EdgeCardSize; items: EdgeSlipItem[] } {
     const raw = localStorage.getItem(STORAGE_SLIP);
     if (!raw) return { cardSize: 3, items: [] };
     const p = JSON.parse(raw) as { cardSize?: EdgeCardSize; items?: EdgeSlipItem[] };
-    const size = p.cardSize === 4 || p.cardSize === 6 ? p.cardSize : 3;
+    const size =
+      p.cardSize === 4 || p.cardSize === 6 || p.cardSize === 10 ? p.cardSize : 3;
     return { cardSize: size, items: Array.isArray(p.items) ? p.items : [] };
   } catch {
     return { cardSize: 3, items: [] };

@@ -1,7 +1,7 @@
 import type { ConfidenceLevel, GamePrediction, League } from "@/data/mockGames";
 
 export type EdgeSide = "home" | "away";
-export type EdgeCardSize = 3 | 4 | 6;
+export type EdgeCardSize = 3 | 4 | 6 | 10;
 
 export interface EdgeHubFilters {
   leagues: League[] | "all";
@@ -246,7 +246,7 @@ export function groupCandidatesByLeague(candidates: EdgeCandidate[]): Record<Lea
  */
 export function autoBuildEdgeSlip(candidates: EdgeCandidate[], size: EdgeCardSize): EdgeCandidate[] {
   const sorted = [...candidates].sort((a, b) => b.pickScore - a.pickScore);
-  const maxPerLeague = size >= 4 ? 2 : 3;
+  const maxPerLeague = size <= 3 ? 3 : size >= 10 ? 3 : 2;
   const picked: EdgeCandidate[] = [];
   const leagueCount = new Map<League, number>();
 
