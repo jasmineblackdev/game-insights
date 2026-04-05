@@ -84,7 +84,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   let prob = winProbFromOdds(homeMl, awayMl);
   if (!prob) {
-    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct);
+    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct, "nba");
   }
 
   const confidence = confidenceFromSpreadNba(spread, prob.home);

@@ -242,9 +242,15 @@ export function getFavoredSide(game: GamePrediction): EdgeSide {
   return game.winProbability.home >= game.winProbability.away ? "home" : "away";
 }
 
-function confidenceStability(conf: ConfidenceLevel): number {
-  if (conf === "high") return 14;
-  if (conf === "medium") return 7;
+/**
+ * Confidence bonus — dampened per sport to reflect actual predictive power.
+ * NBA/NFL markets are more efficient → higher bonus for HIGH confidence.
+ * MLB/Soccer have more variance → caps lower.
+ */
+function confidenceStability(conf: ConfidenceLevel, league?: string): number {
+  const isHighVariance = league === "mlb" || league === "soccer";
+  if (conf === "high") return isHighVariance ? 10 : 14;
+  if (conf === "medium") return isHighVariance ? 5 : 7;
   return 2;
 }
 
@@ -316,11 +322,13 @@ export function computePickFlags(game: GamePrediction, side: EdgeSide): EdgePick
  */
 export function computePickScore(game: GamePrediction, side: EdgeSide): number {
   const win = getWinProbForSide(game, side);
-  const conf = confidenceStability(game.confidence);
+  const conf = confidenceStability(game.confidence, game.league);
   const lineup = lineupCertaintyBonus(game, side);
   const injPen = injuryVolatilityPenalty(game, side);
   const vol = marketVolatility(game, side);
-  const raw = win + conf + lineup - injPen * 0.45 - vol * 0.55;
+  // Injury weight raised to 0.6 (injuries are underweighted at 0.45 — a star OUT materially shifts win%)
+  // Volatility weight lowered slightly to 0.5 (market noise is less impactful than actual roster changes)
+  const raw = win + conf + lineup - injPen * 0.6 - vol * 0.5;
   return Math.round(raw * 10) / 10;
 }
 

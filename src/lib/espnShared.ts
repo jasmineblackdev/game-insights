@@ -87,8 +87,26 @@ export function winProbFromOdds(
   };
 }
 
-export function winProbFromRecords(homePct: number, awayPct: number): { home: number; away: number } {
-  const hStrength = homePct + 0.04;
+/**
+ * Home advantage by sport (historical win-rate premium over neutral-site):
+ *   NBA ~57% home → +6pp   NFL ~57% → +5.5pp   MLB ~53% → +3pp   Soccer ~45% → +2pp
+ * Using these vs the old flat 4% avoids over-stating home edge in MLB/Soccer
+ * and under-stating it in NBA/NFL.
+ */
+const HOME_BOOST: Record<League, number> = {
+  nba: 0.06,
+  nfl: 0.055,
+  mlb: 0.03,
+  soccer: 0.02,
+};
+
+export function winProbFromRecords(
+  homePct: number,
+  awayPct: number,
+  league: League = "nba"
+): { home: number; away: number } {
+  const boost = HOME_BOOST[league] ?? 0.04;
+  const hStrength = homePct + boost;
   const aStrength = awayPct;
   const t = hStrength + aStrength;
   let h = t === 0 ? 0.5 : hStrength / t;
@@ -179,27 +197,43 @@ export function probThreeWayFromSoccerRecords(
   return { home: rh, away: ra, draw: rd };
 }
 
-/** NBA-style spreads (smaller numbers). */
+/**
+ * NBA confidence — tightened thresholds vs original.
+ * Historical: NBA favorites of 8.5+ win ~65% SU; 6-8.5 favs win ~59%.
+ * Below 5pt spread, outcomes are close to coin-flip territory.
+ */
 export function confidenceFromSpreadNba(spread: number | undefined, probHome: number): ConfidenceLevel {
   const mag = spread != null ? Math.abs(spread) : Math.abs(probHome - 50) / 2;
-  if (mag >= 7 || Math.abs(probHome - 50) >= 12) return "high";
-  if (mag >= 4 || Math.abs(probHome - 50) >= 6) return "medium";
+  const gap = Math.abs(probHome - 50);
+  if (mag >= 8.5 || gap >= 14) return "high";
+  if (mag >= 5 || gap >= 8) return "medium";
   return "low";
 }
 
-/** NFL spreads are wider — scale thresholds. */
+/**
+ * NFL confidence — each point more predictive than NBA due to lower-scoring game.
+ * Historical: NFL favorites of 7+ win ~63% SU; below 3.5 is near coin-flip.
+ */
 export function confidenceFromSpreadNfl(spread: number | undefined, probHome: number): ConfidenceLevel {
   const mag = spread != null ? Math.abs(spread) : Math.abs(probHome - 50) / 2;
-  if (mag >= 7 || Math.abs(probHome - 50) >= 12) return "high";
-  if (mag >= 3.5 || Math.abs(probHome - 50) >= 6) return "medium";
+  const gap = Math.abs(probHome - 50);
+  if (mag >= 7 || gap >= 13) return "high";
+  if (mag >= 3.5 || gap >= 7) return "medium";
   return "low";
 }
 
-/** MLB runlines are tight (often 1.5). */
+/**
+ * MLB confidence — runline is almost always 1.5 so it's not a sliding signal.
+ * Drive entirely off moneyline-implied prob gap.
+ * Historical: MLB favourites at -150+ (60% implied) hit ~58% — tight market.
+ * Require a larger prob gap than NBA/NFL to award HIGH.
+ */
 export function confidenceFromSpreadMlb(spread: number | undefined, probHome: number): ConfidenceLevel {
-  const mag = spread != null ? Math.abs(spread) : Math.abs(probHome - 50) / 2;
-  if (mag >= 2 || Math.abs(probHome - 50) >= 12) return "high";
-  if (mag >= 1.25 || Math.abs(probHome - 50) >= 6) return "medium";
+  const gap = Math.abs(probHome - 50);
+  // Runline only used as a secondary signal — MLB spread is almost always ±1.5
+  const mag = spread != null && Math.abs(spread) !== 1.5 ? Math.abs(spread) : 0;
+  if (gap >= 14 || mag >= 2) return "high";
+  if (gap >= 8) return "medium";
   return "low";
 }
 

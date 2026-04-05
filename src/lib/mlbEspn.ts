@@ -142,14 +142,17 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   let prob = winProbFromOdds(homeMl, awayMl);
   if (!prob) {
-    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct);
+    prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct, "mlb");
   }
 
   const mlbIntel = buildMlbIntel(comp);
 
   let confidence = confidenceFromSpreadMlb(spread, prob.home);
-  // Downgrade confidence when starters aren't confirmed — MLB is uniquely pitcher-dependent
-  if (mlbIntel.pitcherCertainty === "unknown" && confidence === "high") confidence = "medium";
+  // MLB is uniquely pitcher-dependent: downgrade all tiers when starters unconfirmed
+  if (mlbIntel.pitcherCertainty === "unknown") {
+    if (confidence === "high") confidence = "medium";
+    else if (confidence === "medium") confidence = "low";
+  }
 
   const easternGameYmd = isoToEasternYmd(comp.date);
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
