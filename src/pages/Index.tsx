@@ -213,14 +213,7 @@ const Index = () => {
       <header className="border-b border-border surface-glass sticky top-0 z-50">
         <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/GameLens_logo.png" alt="GameLens" className="w-8 h-8 rounded-lg shrink-0 object-contain" />
-            <div className="hidden sm:block">
-              <h1 className="font-display font-bold text-base text-foreground tracking-tight">
-                GameLens
-              </h1>
-              <p className="text-[11px] text-muted-foreground">AI-powered matchup intelligence</p>
-            </div>
-            <span className="sm:hidden font-display font-bold text-base text-foreground tracking-tight">GameLens</span>
+            <img src="/GameLens_logo.png" alt="GameLens" className="w-11 h-11 shrink-0 object-contain" />
             <Link
               to="/edge"
               className="sm:hidden inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-card text-primary shrink-0"
