@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { GamePrediction, todaysGames } from "@/data/mockGames";
+import { GamePrediction, League, GameDate, allGames } from "@/data/mockGames";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { GameDetailView } from "@/components/GameDetailView";
 import { Activity, TrendingUp, Zap } from "lucide-react";
@@ -51,8 +51,82 @@ function DataSourceStatus() {
   );
 }
 
+function LeaguePicker({ value, onChange }: { value: League; onChange: (l: League) => void }) {
+  return (
+    <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+      {(["nba", "nfl"] as League[]).map((l) => (
+        <button
+          key={l}
+          onClick={() => onChange(l)}
+          className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider transition-colors ${
+            value === l
+              ? "bg-primary text-primary-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DatePicker({ value, onChange, todayLabel, tomorrowLabel }: {
+  value: GameDate;
+  onChange: (d: GameDate) => void;
+  todayLabel: string;
+  tomorrowLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
+      {([["today", todayLabel], ["tomorrow", tomorrowLabel]] as [GameDate, string][]).map(([d, label]) => (
+        <button
+          key={d}
+          onClick={() => onChange(d)}
+          className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+            value === d
+              ? "bg-card text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
+  const [league, setLeague] = useState<League>("nba");
+  const [dateFilter, setDateFilter] = useState<GameDate>("today");
+
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const todayLabel = `Today · ${formatDate(today)}`;
+  const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
+
+  const filteredGames = allGames.filter(
+    (g) => g.league === league && g.gameDate === dateFilter
+  );
+
+  const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
+
+  const handleLeagueChange = (l: League) => {
+    setLeague(l);
+    setSelectedGame(null);
+  };
+
+  const handleDateChange = (d: GameDate) => {
+    setDateFilter(d);
+    setSelectedGame(null);
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -65,14 +139,14 @@ const Index = () => {
             </div>
             <div>
               <h1 className="font-display font-bold text-base text-foreground tracking-tight">
-                CourtVision
+                GameLens
               </h1>
               <p className="text-[11px] text-muted-foreground">AI-powered matchup intelligence</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <DataSourceStatus />
-            <span className="text-xs text-muted-foreground">NBA · Apr 5</span>
+            <LeaguePicker value={league} onChange={handleLeagueChange} />
           </div>
         </div>
       </header>
@@ -87,19 +161,20 @@ const Index = () => {
             />
           ) : (
             <motion.div
-              key="list"
+              key={`list-${league}-${dateFilter}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
             >
               {/* Hero */}
-              <div className="mb-8">
+              <div className="mb-6">
                 <motion.h2
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="font-display font-bold text-3xl md:text-4xl text-foreground mb-2"
                 >
-                  Today's <span className="text-gradient-primary">Predictions</span>
+                  {dateFilter === "today" ? "Today's" : "Tomorrow's"}{" "}
+                  <span className="text-gradient-primary">Predictions</span>
                 </motion.h2>
                 <motion.p
                   initial={{ opacity: 0, y: 10 }}
@@ -125,22 +200,39 @@ const Index = () => {
                   <div className="flex items-center gap-2 text-xs">
                     <Zap className="w-3.5 h-3.5 text-primary" />
                     <span className="text-muted-foreground">High conf picks:</span>
-                    <span className="text-primary font-semibold">2 of 4</span>
+                    <span className="text-primary font-semibold">{highConfCount} of {filteredGames.length}</span>
                   </div>
                 </motion.div>
               </div>
 
-              {/* Games Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {todaysGames.map((game, i) => (
-                  <GamePredictionCard
-                    key={game.id}
-                    game={game}
-                    index={i}
-                    onSelect={setSelectedGame}
-                  />
-                ))}
+              {/* Date switcher */}
+              <div className="mb-5">
+                <DatePicker
+                  value={dateFilter}
+                  onChange={handleDateChange}
+                  todayLabel={todayLabel}
+                  tomorrowLabel={tomorrowLabel}
+                />
               </div>
+
+              {/* Games Grid */}
+              {filteredGames.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {filteredGames.map((game, i) => (
+                    <GamePredictionCard
+                      key={game.id}
+                      game={game}
+                      index={i}
+                      onSelect={setSelectedGame}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="text-4xl mb-3">📭</div>
+                  <p className="text-muted-foreground text-sm">No {league.toUpperCase()} games scheduled for {dateFilter === "today" ? "today" : "tomorrow"}.</p>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

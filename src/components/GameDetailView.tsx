@@ -176,13 +176,20 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
       {/* Efficiency Comparison */}
       <div className="card-shine bg-card rounded-lg border border-border p-5">
-        <h3 className="font-display font-bold text-sm text-foreground mb-4">Team Efficiency Comparison</h3>
+        <h3 className="font-display font-bold text-sm text-foreground mb-4">Team Stats Comparison</h3>
         <div className="grid grid-cols-3 gap-4 text-center">
-          {[
-            { label: "Off Rating", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },
-            { label: "Def Rating", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating },
-            { label: "Pace", away: game.awayTeam.pace, home: game.homeTeam.pace },
-          ].map((stat) => {
+          {(game.league === "nfl"
+            ? [
+                { label: "Yds/Game", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },
+                { label: "Pts Allowed", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating },
+                { label: "Plays/G", away: game.awayTeam.pace, home: game.homeTeam.pace },
+              ]
+            : [
+                { label: "Off Rating", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },
+                { label: "Def Rating", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating },
+                { label: "Pace", away: game.awayTeam.pace, home: game.homeTeam.pace },
+              ]
+          ).map((stat) => {
             const awayBetter = stat.label === "Def Rating" ? stat.away < stat.home : stat.away > stat.home;
             return (
               <div key={stat.label}>
