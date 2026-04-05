@@ -41,6 +41,15 @@ function leagueShort(l: League) {
   return l === "soccer" ? "EPL" : l.toUpperCase();
 }
 
+/** MLB totals (~7–11) vs NBA (~210+) — surfaces board context on hub cards. */
+function mlbBoardSummary(lines: GamePrediction["lines"]): string | null {
+  if (!lines) return null;
+  const parts: string[] = [];
+  if (lines.spread) parts.push(lines.spread);
+  if (lines.total != null) parts.push(`O/U ${lines.total}`);
+  return parts.length ? parts.join(" · ") : null;
+}
+
 function HubPickCard({
   c,
   onAdd,
@@ -54,6 +63,7 @@ function HubPickCard({
 }) {
   const g = c.game;
   const picked = c.side === "home" ? g.homeTeam : g.awayTeam;
+  const mlbBoard = g.league === "mlb" ? mlbBoardSummary(g.lines) : null;
 
   return (
     <motion.div
@@ -78,6 +88,13 @@ function HubPickCard({
         <p className="text-xs font-semibold text-primary mt-0.5">
           Pick {picked.abbreviation} · {c.winProbability}% model lean
         </p>
+        {g.league === "mlb" ? (
+          mlbBoard ? (
+            <p className="text-[10px] text-muted-foreground tabular-nums mt-0.5">{mlbBoard}</p>
+          ) : (
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">MLB · moneyline / run line from ESPN</p>
+          )
+        ) : null}
         <p className="text-xs text-muted-foreground mt-0.5">
           Edge score {c.pickScore.toFixed(1)} ·{" "}
           <span
