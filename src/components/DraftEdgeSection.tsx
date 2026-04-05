@@ -264,7 +264,7 @@ function leagueDraftTitle(league: League): string {
 function leagueDraftBlurb(league: League): string {
   switch (league) {
     case "nfl":
-      return "NFL 2026 draft intelligence — exact picks, position O/U, round props, team needs, and first-at-position calls. Signals: grades, team fit, consensus shape, positional value, and movement notes.";
+      return "NFL 2026 — pick projections, draft-position O/U, round and team-need props, and first-at-position calls, grounded in grades, fit, consensus, and positional value.";
     case "nba":
       return "NBA 2026 draft intelligence — same card types as NFL, tuned for lottery range, positional scarcity, and team timelines.";
     case "mlb":
@@ -284,26 +284,36 @@ function DraftDataSourceNote({
   if (source === "live") {
     return (
       <p className="text-[10px] text-confidence-high max-w-2xl leading-relaxed">
-        Live data — loaded from your database-backed <span className="font-mono">draft-edge</span> API (table{" "}
-        <span className="font-mono">draft_predictions</span>). Refresh the page or come back to this tab to pick up table
-        changes.
+        Live data — connected to your GameLens draft feed. Refresh the page to pull the latest updates.
+        {import.meta.env.DEV ? (
+          <span className="block mt-1 font-mono text-[9px] text-confidence-high/80">
+            draft-edge → draft_predictions
+          </span>
+        ) : null}
       </p>
     );
   }
   if (mockReason === "live_unavailable") {
     return (
       <p className="text-[10px] text-amber-600 dark:text-amber-400 max-w-2xl leading-relaxed">
-        Live data unavailable — showing sample cards. Check that <span className="font-mono">draft-edge</span> is deployed,
-        reachable from this app, and <span className="font-mono">draft_predictions</span> includes rows for this year and
-        league.
+        Can't reach live draft data right now — showing sample cards. Try again shortly, or confirm your GameLens backend is
+        running and has picks for this sport and year.
+        {import.meta.env.DEV ? (
+          <span className="block mt-1 font-mono text-[9px] opacity-90">
+            Check draft-edge + draft_predictions (year, league)
+          </span>
+        ) : null}
       </p>
     );
   }
   return (
     <p className="text-[10px] text-muted-foreground max-w-2xl leading-relaxed">
-      Sample cards — add <span className="font-mono">VITE_SUPABASE_URL</span> and{" "}
-      <span className="font-mono">VITE_SUPABASE_ANON_KEY</span> (or <span className="font-mono">VITE_DRAFT_EDGE_API_URL</span>
-      ) so Draft Edge can load <span className="text-foreground/80">live</span> cards from your backend.
+      Sample cards for preview. Live picks load when this app is connected to your GameLens backend.
+      {import.meta.env.DEV ? (
+        <span className="block mt-1 font-mono text-[9px] opacity-80">
+          Set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY, or VITE_DRAFT_EDGE_API_URL
+        </span>
+      ) : null}
     </p>
   );
 }

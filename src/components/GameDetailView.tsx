@@ -501,16 +501,23 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           <p className="text-[11px] text-muted-foreground mb-3">
             {game._meta?.nbaRatingsFromStats && game._meta.nbaStatsSeason ? (
               <>
-                Offensive/defensive rating and pace from{" "}
-                <span className="text-foreground/90">stats.nba.com</span> (advanced, regular season{" "}
-                {game._meta.nbaStatsSeason}), fetched via Supabase Edge proxy to avoid browser CORS.
+                ORtg, DRtg, and pace from the NBA&apos;s official advanced stats (regular season{" "}
+                {game._meta.nbaStatsSeason}), via GameLens.
+                {import.meta.env.DEV ? (
+                  <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
+                    stats.nba.com · nba-stats-proxy Edge Function
+                  </span>
+                ) : null}
               </>
             ) : (
               <>
-                Numbers are ESPN season PPG / opponent PPG after enrichment. Deploy{" "}
-                <span className="text-foreground/90">nba-stats-proxy</span> and set{" "}
-                <span className="text-foreground/90">VITE_SUPABASE_URL</span> + anon key for true ORtg/DRtg from{" "}
-                <span className="text-foreground/90">stats.nba.com</span>.
+                Using ESPN season scoring averages (points and opponent points per game) as a stand-in. Connect GameLens to
+                your backend to load official ORtg, DRtg, and pace.
+                {import.meta.env.DEV ? (
+                  <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
+                    Deploy nba-stats-proxy; VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or VITE_NBA_STATS_PROXY_URL)
+                  </span>
+                ) : null}
               </>
             )}
           </p>
