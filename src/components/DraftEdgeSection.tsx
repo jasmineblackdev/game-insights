@@ -264,13 +264,13 @@ function leagueDraftTitle(league: League): string {
 function leagueDraftBlurb(league: League): string {
   switch (league) {
     case "nfl":
-      return "NFL 2026 — pick projections, draft-position O/U, round and team-need props, and first-at-position calls, grounded in grades, fit, consensus, and positional value.";
+      return "NFL 2026: pick projections, draft-position O/U, round and team-need props, and first-at-position calls — driven by grades, fit, consensus, and positional value.";
     case "nba":
-      return "NBA 2026 draft intelligence — same card types as NFL, tuned for lottery range, positional scarcity, and team timelines.";
+      return "NBA 2026: same card mix as NFL — lottery range, positional scarcity, and team timelines.";
     case "mlb":
-      return "MLB 2026 First-Year Player Draft — slot variance, bonus games, and org need curves in the same Draft Edge card types.";
+      return "MLB 2026 draft: slot variance, bonus strategy, and org needs in the same Draft Edge card types.";
     case "soccer":
-      return "Summer window composite — ranked targets, composite-rank O/U, big-club move props, early-window team needs, and first-to-sign position calls. Not a domestic draft; framed for transfer markets.";
+      return "Summer window board: ranked targets, composite-rank O/U, club move props, and first-to-sign positions — transfer-market framing, not a domestic draft.";
   }
 }
 
@@ -284,7 +284,7 @@ function DraftDataSourceNote({
   if (source === "live") {
     return (
       <p className="text-[10px] text-confidence-high max-w-2xl leading-relaxed">
-        Live data — connected to your GameLens draft feed. Refresh the page to pull the latest updates.
+        Connected to the GameLens backend — live draft picks. Refresh the page to sync the latest rows.
         {import.meta.env.DEV ? (
           <span className="block mt-1 font-mono text-[9px] text-confidence-high/80">
             draft-edge → draft_predictions
@@ -296,11 +296,11 @@ function DraftDataSourceNote({
   if (mockReason === "live_unavailable") {
     return (
       <p className="text-[10px] text-amber-600 dark:text-amber-400 max-w-2xl leading-relaxed">
-        Can't reach live draft data right now — showing sample cards. Try again shortly, or confirm your GameLens backend is
+        Can&apos;t reach the GameLens backend right now — showing sample cards. Retry soon, or confirm the draft service is
         running and has picks for this sport and year.
         {import.meta.env.DEV ? (
           <span className="block mt-1 font-mono text-[9px] opacity-90">
-            Check draft-edge + draft_predictions (year, league)
+            draft-edge + draft_predictions (year, league)
           </span>
         ) : null}
       </p>
@@ -308,10 +308,11 @@ function DraftDataSourceNote({
   }
   return (
     <p className="text-[10px] text-muted-foreground max-w-2xl leading-relaxed">
-      Sample cards for preview. Live picks load when this app is connected to your GameLens backend.
+      <span className="font-semibold text-foreground/80">Preview</span> — sample cards only. Connect this app to the GameLens
+      backend to load live picks.
       {import.meta.env.DEV ? (
         <span className="block mt-1 font-mono text-[9px] opacity-80">
-          Set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY, or VITE_DRAFT_EDGE_API_URL
+          VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY, or VITE_DRAFT_EDGE_API_URL
         </span>
       ) : null}
     </p>

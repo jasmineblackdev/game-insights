@@ -497,12 +497,14 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
       {/* Efficiency Comparison */}
       <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
         <h3 className="font-display font-bold text-sm text-foreground mb-1">Team Stats Comparison</h3>
+        {(game.league === "nfl" || game.league === "mlb") && (
+          <p className="text-[11px] text-muted-foreground mb-3">Season team stats from ESPN.</p>
+        )}
         {game.league === "nba" && (
           <p className="text-[11px] text-muted-foreground mb-3">
             {game._meta?.nbaRatingsFromStats && game._meta.nbaStatsSeason ? (
               <>
-                ORtg, DRtg, and pace from the NBA&apos;s official advanced stats (regular season{" "}
-                {game._meta.nbaStatsSeason}), via GameLens.
+                Official offensive and defensive rating and pace — NBA regular season {game._meta.nbaStatsSeason}.
                 {import.meta.env.DEV ? (
                   <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
                     stats.nba.com · nba-stats-proxy Edge Function
@@ -511,8 +513,8 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
               </>
             ) : (
               <>
-                Using ESPN season scoring averages (points and opponent points per game) as a stand-in. Connect GameLens to
-                your backend to load official ORtg, DRtg, and pace.
+                PPG, opponent PPG, and estimated pace from ESPN. Connect the NBA stats feed to show official ORtg, DRtg, and
+                pace in these slots instead.
                 {import.meta.env.DEV ? (
                   <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
                     Deploy nba-stats-proxy; VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (or VITE_NBA_STATS_PROXY_URL)
@@ -524,8 +526,13 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         )}
         {game.league === "soccer" && (
           <p className="text-[11px] text-muted-foreground mb-3">
-            Goals for/against per match from ESPN team totals. Possession % and xG require event feeds (e.g. StatsBomb)
-            — <span className="text-foreground/90">pace</span> here is a placeholder until wired.
+            Goals for and against per match from ESPN. Possession % is approximate; expected goals and richer shape stats are
+            not in this view yet.
+            {import.meta.env.DEV ? (
+              <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
+                Event-level feeds (e.g. StatsBomb) for xG / truer possession
+              </span>
+            ) : null}
           </p>
         )}
         <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
