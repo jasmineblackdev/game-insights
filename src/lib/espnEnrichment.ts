@@ -124,9 +124,19 @@ async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<T
   const papg = statVal(stats, "avgPointsAgainst");
   const streak = statVal(stats, "streak");
   const summary = total?.summary ?? "0-0";
+
+  // True L10 record — ESPN team API exposes a "lastTen" record item alongside "total".
+  // Prefer it over streak so the UI shows "7-3 L10" instead of "W2".
+  const lastTenItem = items?.find(
+    (x) => x.type === "lastTen" || (x as { name?: string }).name?.toLowerCase().includes("last")
+  );
+  const lastTenSummary = lastTenItem?.summary; // e.g. "7-3" or "5-3-2" for soccer
+
   let recentForm = "—";
-  if (streak != null && streak !== 0) {
-    recentForm = streak > 0 ? `W streak ${streak}` : `L streak ${Math.abs(streak)}`;
+  if (lastTenSummary) {
+    recentForm = `${lastTenSummary} L10`;
+  } else if (streak != null && streak !== 0) {
+    recentForm = streak > 0 ? `W${streak}` : `L${Math.abs(streak)}`;
   } else if (typeof team.standingSummary === "string") {
     recentForm = team.standingSummary;
   }
