@@ -3,6 +3,7 @@ import type {
   GameDate,
   GameLines,
   GamePrediction,
+  League,
   MatchupEdge,
   TeamData,
 } from "@/data/mockGames";
@@ -21,6 +22,13 @@ export function nextCalendarYmd(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
   const ud = new Date(Date.UTC(y, m - 1, d));
   ud.setUTCDate(ud.getUTCDate() + 1);
+  return `${ud.getUTCFullYear()}-${String(ud.getUTCMonth() + 1).padStart(2, "0")}-${String(ud.getUTCDate()).padStart(2, "0")}`;
+}
+
+export function previousCalendarYmd(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const ud = new Date(Date.UTC(y, m - 1, d));
+  ud.setUTCDate(ud.getUTCDate() - 1);
   return `${ud.getUTCFullYear()}-${String(ud.getUTCMonth() + 1).padStart(2, "0")}-${String(ud.getUTCDate()).padStart(2, "0")}`;
 }
 
@@ -80,6 +88,89 @@ export function winProbFromRecords(homePct: number, awayPct: number): { home: nu
   return { home: Math.round(h * 100), away: Math.round((1 - h) * 100) };
 }
 
+/** 0–1 strength: NBA/NFL/MLB uses win%; soccer uses (3W+D)/(3·games) from W-D-L tables. */
+export function seasonStrengthFromRecord(summary: string | undefined, league: League): number {
+  if (!summary) return 0.5;
+  const soccer = summary.match(/^(\d+)-(\d+)-(\d+)$/);
+  if (league === "soccer" && soccer) {
+    const w = Number(soccer[1]);
+    const d = Number(soccer[2]);
+    const l = Number(soccer[3]);
+    const n = w + d + l;
+    if (n === 0) return 0.5;
+    return (3 * w + d) / (3 * n);
+  }
+  return parseRecord(summary).pct;
+}
+
+/** De-vig DraftKings 1X2 American odds to integer % (sum 100). */
+export function probThreeWayFromAmerican(
+  homeAmerican: string | undefined,
+  awayAmerican: string | undefined,
+  drawAmerican: string | undefined
+): { home: number; away: number; draw: number } | null {
+  const ph = americanToImplied(homeAmerican);
+  const pa = americanToImplied(awayAmerican);
+  const pd = americanToImplied(drawAmerican);
+  if (ph == null || pa == null || pd == null) return null;
+  const sum = ph + pa + pd;
+  if (sum <= 0) return null;
+  const h = (ph / sum) * 100;
+  const a = (pa / sum) * 100;
+  const d = (pd / sum) * 100;
+  let rh = Math.floor(h);
+  let ra = Math.floor(a);
+  let rd = Math.floor(d);
+  let rem = 100 - (rh + ra + rd);
+  const order = [
+    { i: 0 as const, frac: h - rh },
+    { i: 1 as const, frac: a - ra },
+    { i: 2 as const, frac: d - rd },
+  ].sort((x, y) => y.frac - x.frac);
+  for (let k = 0; k < rem; k++) {
+    const which = order[k % 3].i;
+    if (which === 0) rh++;
+    else if (which === 1) ra++;
+    else rd++;
+  }
+  return { home: rh, away: ra, draw: rd };
+}
+
+/** Fallback 1X2 when odds missing: table-strength gap + home boost; draw peaks when teams are even. */
+export function probThreeWayFromSoccerRecords(
+  homeRecord: string | undefined,
+  awayRecord: string | undefined
+): { home: number; away: number; draw: number } {
+  const hs = seasonStrengthFromRecord(homeRecord, "soccer") + 0.045;
+  const as = seasonStrengthFromRecord(awayRecord, "soccer");
+  const diff = hs - as;
+  const pDraw = Math.min(0.36, Math.max(0.2, 0.29 - Math.abs(diff) * 0.55));
+  const rem = 1 - pDraw;
+  const eh = Math.exp(4 * diff);
+  const ea = Math.exp(-4 * diff);
+  const ph = (rem * eh) / (eh + ea);
+  const pa = rem - ph;
+  const h100 = ph * 100;
+  const a100 = pa * 100;
+  const d100 = pDraw * 100;
+  let rh = Math.floor(h100);
+  let ra = Math.floor(a100);
+  let rd = Math.floor(d100);
+  let remInt = 100 - (rh + ra + rd);
+  const order = [
+    { i: 0 as const, frac: h100 - rh },
+    { i: 1 as const, frac: a100 - ra },
+    { i: 2 as const, frac: d100 - rd },
+  ].sort((x, y) => y.frac - x.frac);
+  for (let k = 0; k < remInt; k++) {
+    const which = order[k % 3].i;
+    if (which === 0) rh++;
+    else if (which === 1) ra++;
+    else rd++;
+  }
+  return { home: rh, away: ra, draw: rd };
+}
+
 /** NBA-style spreads (smaller numbers). */
 export function confidenceFromSpreadNba(spread: number | undefined, probHome: number): ConfidenceLevel {
   const mag = spread != null ? Math.abs(spread) : Math.abs(probHome - 50) / 2;
@@ -102,6 +193,20 @@ export function confidenceFromSpreadMlb(spread: number | undefined, probHome: nu
   if (mag >= 2 || Math.abs(probHome - 50) >= 12) return "high";
   if (mag >= 1.25 || Math.abs(probHome - 50) >= 6) return "medium";
   return "low";
+}
+
+/** Soccer: draws and low scores add variance — never label “high” when draw is a major branch. */
+export function confidenceFromSoccerThreeWay(
+  tw: { home: number; away: number; draw: number },
+  spreadMag: number | undefined
+): ConfidenceLevel {
+  const top = Math.max(tw.home, tw.away, tw.draw);
+  const second = [tw.home, tw.away, tw.draw].sort((a, b) => b - a)[1];
+  const tight = top - second <= 8;
+  if (tw.draw >= 30 || tight) return "low";
+  if (tw.draw >= 24 || (spreadMag != null && spreadMag <= 0.25) || top < 48) return "medium";
+  if (top >= 58 && tw.draw < 22 && (spreadMag == null || spreadMag >= 0.5)) return "high";
+  return "medium";
 }
 
 export interface EspnCompetitor {
@@ -131,6 +236,7 @@ export interface EspnOdds {
   moneyline?: {
     home?: { close?: { odds?: string }; open?: { odds?: string } };
     away?: { close?: { odds?: string }; open?: { odds?: string } };
+    draw?: { close?: { odds?: string }; open?: { odds?: string } };
   };
 }
 
@@ -196,26 +302,42 @@ export function buildEdges(
   home: TeamData,
   spread: number | undefined,
   details: string | undefined,
-  prob: { home: number; away: number }
+  prob: { home: number; away: number },
+  league: League = "nba",
+  threeWay?: { home: number; away: number; draw: number }
 ): MatchupEdge[] {
   const edges: MatchupEdge[] = [];
   const fav = prob.home >= prob.away ? home : away;
-  edges.push({
-    label: "Win probability lean",
-    team: prob.home >= prob.away ? "home" : "away",
-    description: `${fav.abbreviation} implied ~${Math.max(prob.home, prob.away)}% via market & records`,
-  });
+  if (threeWay) {
+    const top = Math.max(threeWay.home, threeWay.away, threeWay.draw);
+    const haFav = threeWay.home >= threeWay.away ? ("home" as const) : ("away" as const);
+    const label = top === threeWay.draw ? "1X2 — draw branch" : "1X2 implied lean";
+    edges.push({
+      label,
+      team: top === threeWay.draw ? haFav : threeWay.home >= threeWay.away ? "home" : "away",
+      description:
+        top === threeWay.draw
+          ? `Draw ~${threeWay.draw}% (de-vig) is the largest branch · ${away.abbreviation} ${threeWay.away}% · ${home.abbreviation} ${threeWay.home}%`
+          : `${fav.abbreviation} ~${Math.max(threeWay.home, threeWay.away)}% · draw ~${threeWay.draw}%`,
+    });
+  } else {
+    edges.push({
+      label: "Win probability lean",
+      team: prob.home >= prob.away ? "home" : "away",
+      description: `${fav.abbreviation} implied ~${Math.max(prob.home, prob.away)}% via market & records`,
+    });
+  }
   if (details) {
     edges.push({
-      label: "Spread (DK)",
+      label: league === "soccer" ? "Line (DK)" : "Spread (DK)",
       team: spread != null && spread < 0 ? "home" : "away",
       description: details,
     });
   }
-  const hp = parseRecord(away.record).pct;
-  const ap = parseRecord(home.record).pct;
+  const hp = seasonStrengthFromRecord(away.record, league);
+  const ap = seasonStrengthFromRecord(home.record, league);
   edges.push({
-    label: "Season record",
+    label: league === "soccer" ? "Table / form (W-D-L)" : "Season record",
     team: hp > ap ? "away" : "home",
     description: `${away.abbreviation} ${away.record} vs ${home.abbreviation} ${home.record}`,
   });
@@ -231,6 +353,7 @@ export function buildLines(
   const total = odd?.overUnder;
   const homeMl = odd?.moneyline?.home?.close?.odds ?? odd?.moneyline?.home?.open?.odds;
   const awayMl = odd?.moneyline?.away?.close?.odds ?? odd?.moneyline?.away?.open?.odds;
+  const drawMl = odd?.moneyline?.draw?.close?.odds ?? odd?.moneyline?.draw?.open?.odds;
 
   // Build a human-readable spread string like "BOS -6.5" or "MIL +6.5"
   let spreadStr: string | undefined;
@@ -245,7 +368,7 @@ export function buildLines(
     }
   }
 
-  if (!spreadStr && total == null && !homeMl && !awayMl) return undefined;
+  if (!spreadStr && total == null && !homeMl && !awayMl && !drawMl) return undefined;
 
   return {
     spread: spreadStr,
@@ -253,6 +376,7 @@ export function buildLines(
     total: total ?? undefined,
     homeMl: homeMl ?? undefined,
     awayMl: awayMl ?? undefined,
+    drawMl: drawMl ?? undefined,
   };
 }
 

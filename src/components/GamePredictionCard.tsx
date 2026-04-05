@@ -11,9 +11,11 @@ interface GamePredictionCardProps {
 }
 
 export function GamePredictionCard({ game, index, onSelect }: GamePredictionCardProps) {
+  const tw = game.threeWay;
   const favored = game.winProbability.home >= game.winProbability.away ? "home" : "away";
   const favoredTeam = favored === "home" ? game.homeTeam : game.awayTeam;
   const favoredProb = favored === "home" ? game.winProbability.home : game.winProbability.away;
+  const ringProb = tw ? Math.max(tw.home, tw.away) : favoredProb;
 
   const totalInjuries =
     game.injuries.home.filter((i) => i.status === "OUT").length +
@@ -51,13 +53,26 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           </div>
           <div className="text-sm font-display font-bold text-foreground">{game.awayTeam.abbreviation}</div>
           <div className="text-xs text-muted-foreground">{game.awayTeam.record}</div>
-          <div className="text-lg font-display font-bold mt-1 text-foreground">{game.winProbability.away}%</div>
+          <div className="text-lg font-display font-bold mt-1 text-foreground">
+            {tw ? tw.away : game.winProbability.away}%
+          </div>
+          {tw ? <div className="text-[10px] text-muted-foreground mt-0.5">win</div> : null}
         </div>
 
         {/* Center */}
         <div className="flex flex-col items-center">
           <span className="text-xs text-muted-foreground mb-2">VS</span>
-          <ConfidenceMeter level={game.confidence} probability={favoredProb} />
+          {tw ? (
+            <>
+              <div className="text-center mb-1.5">
+                <div className="text-[10px] font-semibold text-muted-foreground tracking-wide">DRAW</div>
+                <div className="text-xl font-display font-bold text-foreground leading-tight">{tw.draw}%</div>
+              </div>
+              <ConfidenceMeter level={game.confidence} probability={ringProb} showRing={false} />
+            </>
+          ) : (
+            <ConfidenceMeter level={game.confidence} probability={favoredProb} />
+          )}
         </div>
 
         {/* Home */}
@@ -67,7 +82,10 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           </div>
           <div className="text-sm font-display font-bold text-foreground">{game.homeTeam.abbreviation}</div>
           <div className="text-xs text-muted-foreground">{game.homeTeam.record}</div>
-          <div className="text-lg font-display font-bold mt-1 text-foreground">{game.winProbability.home}%</div>
+          <div className="text-lg font-display font-bold mt-1 text-foreground">
+            {tw ? tw.home : game.winProbability.home}%
+          </div>
+          {tw ? <div className="text-[10px] text-muted-foreground mt-0.5">win</div> : null}
         </div>
       </div>
 
@@ -109,6 +127,13 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
                 {game.lines.awayMl}
               </span>
               {" / "}
+              {game.lines.drawMl ? (
+                <>
+                  Draw{" "}
+                  <span className="font-semibold text-foreground">{game.lines.drawMl}</span>
+                  {" / "}
+                </>
+              ) : null}
               {game.homeTeam.abbreviation}{" "}
               <span className={`font-semibold ${game.lines.homeMl.startsWith("-") ? "text-confidence-high" : "text-foreground"}`}>
                 {game.lines.homeMl}
@@ -121,7 +146,9 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       {/* Footer */}
       <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          {favoredTeam.abbreviation} favored
+          {tw && tw.draw >= Math.max(tw.home, tw.away)
+            ? `Draw branch largest (${tw.draw}%)`
+            : `${favoredTeam.abbreviation} favored to win`}
         </span>
         <span className="text-xs text-primary flex items-center gap-1 group-hover:gap-2 transition-all font-medium">
           Full Breakdown <ChevronRight className="w-3.5 h-3.5" />

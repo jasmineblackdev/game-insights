@@ -1,10 +1,40 @@
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
-export type League = "nba" | "nfl" | "mlb";
+export type League = "nba" | "nfl" | "mlb" | "soccer";
 export type GameDate = "today" | "tomorrow";
 
 export type PitcherCertainty = "confirmed" | "probable" | "unknown";
+
+/**
+ * Soccer is modeled on a different axis than NBA/NFL/MLB: low scoring, draws matter,
+ * and the strongest engines lean on xG, possession profile, congestion, and lineups.
+ * ESPN covers fixtures and 1X2 odds; layer SportsDataIO / football-data.org for ops data
+ * and StatsBomb (or similar) for xG and event-level tactics when you wire APIs.
+ */
+export interface SoccerIntel {
+  competition: string;
+  /** Human-readable factors we’d score with vendor + event data (placeholders until wired). */
+  modelNotes: string[];
+  /** What this build does not yet ingest — drives conservative confidence. */
+  dataGaps: string[];
+  /** Completed league matches in rolling windows (fatigue / rotation signal). */
+  congestion?: {
+    homeLast7: number;
+    awayLast7: number;
+    homeLast14: number;
+    awayLast14: number;
+  };
+  /** From football-data.org standings when mapped by club TLA. */
+  table?: {
+    homePosition?: number;
+    awayPosition?: number;
+    homePoints?: number;
+    awayPoints?: number;
+  };
+  /** Where schedule/table numbers came from for transparency. */
+  scheduleSource?: "football-data.org" | "espn-scoreboard";
+}
 
 /** MLB-specific pregame signals — populated from ESPN when available. */
 export interface MlbIntel {
@@ -65,6 +95,8 @@ export interface GameLines {
   homeMl?: string;
   /** American odds for away team, e.g. "+155" */
   awayMl?: string;
+  /** Soccer 1X2 — draw moneyline when provided by the book payload */
+  drawMl?: string;
 }
 
 export interface GamePrediction {
@@ -76,6 +108,8 @@ export interface GamePrediction {
   homeTeam: TeamData;
   awayTeam: TeamData;
   winProbability: { home: number; away: number };
+  /** Soccer: de-vig 1X2 implied % from book (home / away / draw). Sums to ~100. */
+  threeWay?: { home: number; away: number; draw: number };
   confidence: ConfidenceLevel;
   topReasons: string[];
   riskFactors: string[];
@@ -90,6 +124,7 @@ export interface GamePrediction {
   /** Cross-book odds, weather, etc. */
   enrichmentNotes?: string[];
   mlb?: MlbIntel;
+  soccer?: SoccerIntel;
   /** ESPN / client-only sort key */
   _meta?: {
     easternYmd: string;

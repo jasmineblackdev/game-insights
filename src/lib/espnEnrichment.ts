@@ -1,9 +1,10 @@
 import type { GamePrediction, InjuryStatus, League, PlayerInjury, TeamData } from "@/data/mockGames";
 
-const INJURY_URLS: Record<"nba" | "nfl" | "mlb", string> = {
+const INJURY_URLS: Record<"nba" | "nfl" | "mlb" | "soccer", string> = {
   nba: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
   nfl: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries",
   mlb: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/injuries",
+  soccer: "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/injuries",
 };
 
 function summaryUrl(league: League, eventId: string): string | null {
@@ -15,6 +16,9 @@ function summaryUrl(league: League, eventId: string): string | null {
   }
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${eventId}`;
+  }
+  if (league === "soccer") {
+    return `https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/summary?event=${eventId}`;
   }
   return null;
 }
@@ -28,6 +32,9 @@ function teamUrl(league: League, teamId: string): string | null {
   }
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}`;
+  }
+  if (league === "soccer") {
+    return `https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/${teamId}`;
   }
   return null;
 }
@@ -70,7 +77,7 @@ function rowToInjury(row: Record<string, unknown>): PlayerInjury | null {
   };
 }
 
-async function fetchLeagueInjuryMap(league: "nba" | "nfl" | "mlb"): Promise<Map<string, PlayerInjury[]>> {
+async function fetchLeagueInjuryMap(league: "nba" | "nfl" | "mlb" | "soccer"): Promise<Map<string, PlayerInjury[]>> {
   const map = new Map<string, PlayerInjury[]>();
   const res = await fetch(INJURY_URLS[league]);
   if (!res.ok) return map;
@@ -152,6 +159,19 @@ async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<T
       offensiveRating: ppg != null ? Math.round(ppg * 100) / 100 : undefined,
       defensiveRating: papg != null ? Math.round(papg * 100) / 100 : undefined,
       pace: 9,
+    };
+  }
+  if (league === "soccer") {
+    const gp = statVal(stats, "gamesPlayed");
+    const pf = statVal(stats, "pointsFor");
+    const pa = statVal(stats, "pointsAgainst");
+    const gf = gp != null && gp > 0 && pf != null ? Math.round((pf / gp) * 100) / 100 : undefined;
+    const ga = gp != null && gp > 0 && pa != null ? Math.round((pa / gp) * 100) / 100 : undefined;
+    return {
+      record: summary,
+      recentForm,
+      offensiveRating: gf,
+      defensiveRating: ga,
     };
   }
   return {};
@@ -281,7 +301,7 @@ async function enrichOne(
     homeInj = mergeInjuryLists(homeInj, fromSum.home);
     awayInj = mergeInjuryLists(awayInj, fromSum.away);
 
-    if (league === "nba") {
+    if (league === "nba" || league === "soccer") {
       const h2h = seasonSeriesNote(summary);
       if (h2h) notes.push(h2h);
     }
@@ -334,7 +354,7 @@ async function poolMapPredictions(
 }
 
 export async function enrichGamePredictions(predictions: GamePrediction[], league: League): Promise<GamePrediction[]> {
-  if (league !== "nba" && league !== "nfl" && league !== "mlb") return predictions;
+  if (league !== "nba" && league !== "nfl" && league !== "mlb" && league !== "soccer") return predictions;
   const lg = league;
 
   const injuryMap = await fetchLeagueInjuryMap(lg);

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
 import { getDraftPicks } from "@/data/draftPicks";
@@ -11,6 +12,7 @@ import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
+import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 
 type ViewMode = "games" | "draft";
 
@@ -31,7 +33,7 @@ function DataSourceStatus() {
   if (!isSupabaseConfigured) {
     return (
       <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
-        ESPN NBA · NFL · MLB
+        ESPN NBA · NFL · MLB · Soccer
       </span>
     );
   }
@@ -61,7 +63,7 @@ function DataSourceStatus() {
 function LeaguePicker({ value, onChange }: { value: League; onChange: (l: League) => void }) {
   return (
     <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-      {(["nba", "nfl", "mlb"] as League[]).map((l) => (
+      {(["nba", "nfl", "mlb", "soccer"] as League[]).map((l) => (
         <button
           key={l}
           onClick={() => onChange(l)}
@@ -71,7 +73,7 @@ function LeaguePicker({ value, onChange }: { value: League; onChange: (l: League
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
-          {l.toUpperCase()}
+          {l === "soccer" ? "SOC" : l.toUpperCase()}
         </button>
       ))}
     </div>
@@ -107,6 +109,10 @@ function formatDate(date: Date) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function leagueLabel(league: League): string {
+  return league === "soccer" ? "EPL" : league.toUpperCase();
+}
+
 const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
@@ -134,9 +140,29 @@ const Index = () => {
     refetchInterval: 2 * 60 * 1000,
   });
 
-  const activeQuery = league === "nba" ? nbaQuery : league === "nfl" ? nflQuery : mlbQuery;
+  const soccerQuery = useQuery({
+    queryKey: ["soccer-espn-scoreboard", easternYmd()],
+    queryFn: fetchSoccerGamePredictions,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+
+  const activeQuery =
+    league === "nba"
+      ? nbaQuery
+      : league === "nfl"
+        ? nflQuery
+        : league === "mlb"
+          ? mlbQuery
+          : soccerQuery;
   const leagueGames =
-    league === "nba" ? (nbaQuery.data ?? []) : league === "nfl" ? (nflQuery.data ?? []) : (mlbQuery.data ?? []);
+    league === "nba"
+      ? (nbaQuery.data ?? [])
+      : league === "nfl"
+        ? (nflQuery.data ?? [])
+        : league === "mlb"
+          ? (mlbQuery.data ?? [])
+          : (soccerQuery.data ?? []);
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -182,8 +208,22 @@ const Index = () => {
               <p className="text-[11px] text-muted-foreground">AI-powered matchup intelligence</p>
             </div>
             <span className="sm:hidden font-display font-bold text-base text-foreground tracking-tight">GameLens</span>
+            <Link
+              to="/edge"
+              className="sm:hidden inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-card text-primary shrink-0"
+              aria-label="Edge Card"
+            >
+              <Layers className="w-4 h-4" />
+            </Link>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              to="/edge"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
+            >
+              <Layers className="w-3.5 h-3.5 text-primary" />
+              Edge Card
+            </Link>
             <div className="hidden sm:block">
               <DataSourceStatus />
             </div>
@@ -215,7 +255,7 @@ const Index = () => {
                   className="font-display font-bold text-3xl md:text-4xl text-foreground mb-2"
                 >
                   {viewMode === "draft" ? (
-                    <>{league.toUpperCase()} <span className="text-gradient-primary">Draft Picks</span></>
+                    <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
                   ) : (
                     <>{dateFilter === "today" ? "Today's" : "Tomorrow's"}{" "}<span className="text-gradient-primary">Predictions</span></>
                   )}
@@ -228,7 +268,7 @@ const Index = () => {
                 >
                   {viewMode === "draft" ? (
                     <>
-                      Projected {league.toUpperCase()} Draft order with grades, scouting analysis, and pro comparables.
+                      Projected {leagueLabel(league)} Draft order with grades, scouting analysis, and pro comparables.
                       Click any pick to expand the full breakdown.
                     </>
                   ) : league === "nba" ? (
@@ -244,11 +284,20 @@ const Index = () => {
                       notes, and free Open-Meteo weather hints for outdoor kickoffs. Add{" "}
                       <span className="text-foreground/80">VITE_THE_ODDS_API_KEY</span> for multi-book comparisons.
                     </>
-                  ) : (
+                  ) : league === "mlb" ? (
                     <>
                       Live MLB from ESPN with a separate logic layer: probable-pitcher uncertainty, bullpen/lineup
                       sensitivity, and handedness splits should drive re-scores (see MLB factors on each game). Data
                       vendors (SportsDataIO / Sportradar) add confirmed starters, lineups, and pitch-level context.
+                    </>
+                  ) : (
+                    <>
+                      Premier League from ESPN on a <span className="text-foreground/80">soccer-specific</span> lane:
+                      1X2 de-vig, goals for/against from team enrichment, and{" "}
+                      <span className="text-foreground/80">fixture congestion</span> (last 7 days of EPL finals on ESPN,
+                      or 7d/14d + table with{" "}
+                      <span className="text-foreground/80">VITE_FOOTBALL_DATA_API_TOKEN</span> — dev proxy hides the
+                      token). xG and confirmed XIs still need StatsBomb-style feeds — see each game&apos;s soccer notes.
                     </>
                   )}
                 </motion.p>
@@ -284,7 +333,9 @@ const Index = () => {
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <Zap className="w-3.5 h-3.5 text-primary" />
-                        <span className="text-muted-foreground">High conf (spread lean):</span>
+                        <span className="text-muted-foreground">
+                          {league === "soccer" ? "High conf (rare for 1X2):" : "High conf (spread lean):"}
+                        </span>
                         <span className="text-primary font-semibold">
                           {highConfCount} of {filteredGames.length}
                         </span>
@@ -336,7 +387,9 @@ const Index = () => {
               {viewMode === "draft" ? (
                 draftPicks.length === 0 ? (
                   <div className="rounded-lg border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-                    No mock MLB draft board in this build — wire SportsDataIO / your rankings when ready.
+                    {league === "soccer"
+                      ? "No draft board for soccer in this app — use the Games tab for EPL 1X2 and matchup intel."
+                      : "No mock MLB draft board in this build — wire SportsDataIO / your rankings when ready."}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -356,7 +409,7 @@ const Index = () => {
                 </div>
               ) : activeQuery.isError ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-                  Could not load ESPN {league.toUpperCase()} data (
+                  Could not load ESPN {leagueLabel(league)} data (
                   {activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network;
                   if the API blocks the browser, proxy through Supabase Edge Functions.
                 </div>
@@ -373,9 +426,11 @@ const Index = () => {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="text-4xl mb-3">{league === "nfl" ? "🏈" : league === "mlb" ? "⚾" : "📭"}</div>
+                  <div className="text-4xl mb-3">
+                    {league === "nfl" ? "🏈" : league === "mlb" ? "⚾" : league === "soccer" ? "⚽" : "📭"}
+                  </div>
                   <p className="text-muted-foreground text-sm max-w-md">
-                    No {league.toUpperCase()} games on the ESPN board for{" "}
+                    No {leagueLabel(league)} games on the ESPN board for{" "}
                     {dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are
                     normal — try the other day tab.
                   </p>

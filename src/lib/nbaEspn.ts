@@ -136,7 +136,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       home: leadersToTrends(homeC),
       away: leadersToTrends(awayC),
     },
-    matchupEdges: buildEdges(away, home, spread, odd?.details, prob),
+    matchupEdges: buildEdges(away, home, spread, odd?.details, prob, "nba"),
     upsetPath,
     lastUpdated: new Date().toISOString(),
     situationalTags: tags,

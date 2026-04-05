@@ -54,7 +54,7 @@ function spreadLine(b: Bookmaker | undefined): string | null {
 
 export async function mergeTheOddsApiNotes(
   predictions: GamePrediction[],
-  sportKey: "basketball_nba" | "americanfootball_nfl" | "baseball_mlb"
+  sportKey: "basketball_nba" | "americanfootball_nfl" | "baseball_mlb" | "soccer_epl"
 ): Promise<GamePrediction[]> {
   if (!apiKey) return predictions;
   try {
