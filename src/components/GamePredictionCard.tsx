@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { GamePrediction } from "@/data/mockGames";
+import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock } from "lucide-react";
 
@@ -59,7 +60,9 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
 
         {/* Home */}
         <div className={`flex-1 text-center ${favored === "home" ? "" : "opacity-60"}`}>
-          <div className="text-2xl mb-1">{game.homeTeam.logo}</div>
+          <div className="mb-1 flex justify-center">
+            <TeamLogo logo={game.homeTeam.logo} size="sm" />
+          </div>
           <div className="text-sm font-display font-bold text-foreground">{game.homeTeam.abbreviation}</div>
           <div className="text-xs text-muted-foreground">{game.homeTeam.record}</div>
           <div className="text-lg font-display font-bold mt-1 text-foreground">{game.winProbability.home}%</div>

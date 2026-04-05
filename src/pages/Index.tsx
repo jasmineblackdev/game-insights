@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { GamePrediction, League, GameDate, allGames } from "@/data/mockGames";
+import { GamePrediction, League, GameDate } from "@/data/mockGames";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { GameDetailView } from "@/components/GameDetailView";
 import { Activity, TrendingUp, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
+import { fetchNflGamePredictions } from "@/lib/nflEspn";
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -23,8 +25,8 @@ function DataSourceStatus() {
 
   if (!isSupabaseConfigured) {
     return (
-      <span className="text-xs text-muted-foreground" title="Add VITE_SUPABASE_* to .env.local">
-        Demo data
+      <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
+        ESPN NBA · NFL
       </span>
     );
   }
@@ -105,6 +107,23 @@ const Index = () => {
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
 
+  const nbaQuery = useQuery({
+    queryKey: ["nba-espn-scoreboard", easternYmd()],
+    queryFn: fetchNbaGamePredictions,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+
+  const nflQuery = useQuery({
+    queryKey: ["nfl-espn-scoreboard", easternYmd()],
+    queryFn: fetchNflGamePredictions,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
+  });
+
+  const activeQuery = league === "nba" ? nbaQuery : nflQuery;
+  const leagueGames = league === "nba" ? (nbaQuery.data ?? []) : (nflQuery.data ?? []);
+
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -112,9 +131,7 @@ const Index = () => {
   const todayLabel = `Today · ${formatDate(today)}`;
   const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
 
-  const filteredGames = allGames.filter(
-    (g) => g.league === league && g.gameDate === dateFilter
-  );
+  const filteredGames = leagueGames.filter((g) => g.gameDate === dateFilter);
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
@@ -182,7 +199,17 @@ const Index = () => {
                   transition={{ delay: 0.1 }}
                   className="text-sm text-muted-foreground max-w-lg"
                 >
-                  AI-analyzed matchup breakdowns with confidence scores, injury impact, and plain-English reasoning. Click any game for the full scouting card.
+                  {league === "nba" ? (
+                    <>
+                      Live NBA schedule, team records, and win probabilities from DraftKings moneylines on ESPN
+                      (de-vigged). Team ratings are a record-based estimate until your model runs on Supabase.
+                    </>
+                  ) : (
+                    <>
+                      Live NFL schedule from ESPN: records, scores, and lines when ESPN exposes them. Yards / points
+                      allowed / plays per game are estimates from record — swap in SportsDataIO team stats when ready.
+                    </>
+                  )}
                 </motion.p>
 
                 {/* Quick stats */}
@@ -194,13 +221,15 @@ const Index = () => {
                 >
                   <div className="flex items-center gap-2 text-xs">
                     <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
-                    <span className="text-muted-foreground">Model accuracy L30:</span>
-                    <span className="text-confidence-high font-semibold">67.2%</span>
+                    <span className="text-muted-foreground">Games loaded:</span>
+                    <span className="text-confidence-high font-semibold">{leagueGames.length}</span>
                   </div>
                   <div className="flex items-center gap-2 text-xs">
                     <Zap className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-muted-foreground">High conf picks:</span>
-                    <span className="text-primary font-semibold">{highConfCount} of {filteredGames.length}</span>
+                    <span className="text-muted-foreground">High conf (spread lean):</span>
+                    <span className="text-primary font-semibold">
+                      {highConfCount} of {filteredGames.length}
+                    </span>
                   </div>
                 </motion.div>
               </div>
@@ -216,7 +245,22 @@ const Index = () => {
               </div>
 
               {/* Games Grid */}
-              {filteredGames.length > 0 ? (
+              {activeQuery.isPending ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-border bg-card h-64 animate-pulse bg-muted/30"
+                    />
+                  ))}
+                </div>
+              ) : activeQuery.isError ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
+                  Could not load ESPN {league.toUpperCase()} data (
+                  {activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network;
+                  if the API blocks the browser, proxy through Supabase Edge Functions.
+                </div>
+              ) : filteredGames.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {filteredGames.map((game, i) => (
                     <GamePredictionCard
@@ -229,8 +273,12 @@ const Index = () => {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <div className="text-4xl mb-3">📭</div>
-                  <p className="text-muted-foreground text-sm">No {league.toUpperCase()} games scheduled for {dateFilter === "today" ? "today" : "tomorrow"}.</p>
+                  <div className="text-4xl mb-3">{league === "nfl" ? "🏈" : "📭"}</div>
+                  <p className="text-muted-foreground text-sm max-w-md">
+                    No {league.toUpperCase()} games on the ESPN board for{" "}
+                    {dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). During the NFL offseason this is normal;
+                    try the other day tab or check back on game days.
+                  </p>
                 </div>
               )}
             </motion.div>

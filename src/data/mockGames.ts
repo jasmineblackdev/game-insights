@@ -60,6 +60,8 @@ export interface GamePrediction {
   upsetPath: string;
   lastUpdated: string;
   situationalTags: string[];
+  /** ESPN / client-only sort key */
+  _meta?: { easternYmd: string; sortTime: number };
 }
 
 export const allGames: GamePrediction[] = [

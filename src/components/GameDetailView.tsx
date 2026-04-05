@@ -1,5 +1,6 @@
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { GamePrediction } from "@/data/mockGames";
+import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
@@ -53,7 +54,9 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         <div className="flex items-center gap-6 justify-center py-4">
           <div className={`text-center ${favored === "away" ? "" : "opacity-50"}`}>
-            <div className="text-4xl mb-2">{game.awayTeam.logo}</div>
+            <div className="mb-2 flex justify-center">
+              <TeamLogo logo={game.awayTeam.logo} size="lg" />
+            </div>
             <div className="font-display font-bold text-lg text-foreground">{game.awayTeam.name}</div>
             <div className="text-sm text-muted-foreground">{game.awayTeam.record} · {game.awayTeam.recentForm}</div>
             <div className="text-2xl font-display font-bold mt-2 text-foreground">{game.winProbability.away}%</div>
@@ -62,7 +65,9 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           <ConfidenceMeter level={game.confidence} probability={favoredProb} />
 
           <div className={`text-center ${favored === "home" ? "" : "opacity-50"}`}>
-            <div className="text-4xl mb-2">{game.homeTeam.logo}</div>
+            <div className="mb-2 flex justify-center">
+              <TeamLogo logo={game.homeTeam.logo} size="lg" />
+            </div>
             <div className="font-display font-bold text-lg text-foreground">{game.homeTeam.name}</div>
             <div className="text-sm text-muted-foreground">{game.homeTeam.record} · {game.homeTeam.recentForm}</div>
             <div className="text-2xl font-display font-bold mt-2 text-foreground">{game.winProbability.home}%</div>
@@ -151,25 +156,35 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         {/* Player Trends - Away */}
         <div className="card-shine bg-card rounded-lg border border-border p-5">
-          <h3 className="font-display font-bold text-sm text-foreground mb-3">
-            {game.awayTeam.logo} {game.awayTeam.abbreviation} Player Trends
+          <h3 className="font-display font-bold text-sm text-foreground mb-3 flex items-center gap-2">
+            <TeamLogo logo={game.awayTeam.logo} size="md" />
+            {game.awayTeam.abbreviation} Player Trends
           </h3>
           <div className="divide-y divide-border">
-            {game.playerTrends.away.map((player) => (
-              <PlayerTrendCard key={player.name} player={player} />
-            ))}
+            {game.playerTrends.away.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-3">No leader stats in the feed for this game.</p>
+            ) : (
+              game.playerTrends.away.map((player) => (
+                <PlayerTrendCard key={player.name} player={player} />
+              ))
+            )}
           </div>
         </div>
 
         {/* Player Trends - Home */}
         <div className="card-shine bg-card rounded-lg border border-border p-5">
-          <h3 className="font-display font-bold text-sm text-foreground mb-3">
-            {game.homeTeam.logo} {game.homeTeam.abbreviation} Player Trends
+          <h3 className="font-display font-bold text-sm text-foreground mb-3 flex items-center gap-2">
+            <TeamLogo logo={game.homeTeam.logo} size="md" />
+            {game.homeTeam.abbreviation} Player Trends
           </h3>
           <div className="divide-y divide-border">
-            {game.playerTrends.home.map((player) => (
-              <PlayerTrendCard key={player.name} player={player} />
-            ))}
+            {game.playerTrends.home.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-3">No leader stats in the feed for this game.</p>
+            ) : (
+              game.playerTrends.home.map((player) => (
+                <PlayerTrendCard key={player.name} player={player} />
+              ))
+            )}
           </div>
         </div>
       </div>
