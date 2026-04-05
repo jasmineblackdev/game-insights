@@ -4,7 +4,7 @@ import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
-import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw } from "lucide-react";
+import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign } from "lucide-react";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -188,6 +188,76 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           </div>
         </div>
       </div>
+
+      {/* Betting Lines */}
+      {game.lines && (game.lines.spread || game.lines.total != null || game.lines.homeMl) && (() => {
+        const { spread, total, homeMl, awayMl } = game.lines!;
+        // Model's lean vs market
+        const modelHome = game.winProbability.home;
+        const modelAway = game.winProbability.away;
+        const modelFavorsHome = modelHome >= modelAway;
+        const spreadFavorsHome = (game.lines.spreadNum ?? 0) < 0;
+        const modelVsMarketAgree = modelFavorsHome === spreadFavorsHome;
+
+        return (
+          <div className="card-shine bg-card rounded-lg border border-border p-5">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-4">
+              <DollarSign className="w-4 h-4 text-confidence-high" />
+              Betting Lines
+              <span className="text-[10px] font-normal text-muted-foreground ml-1">via DraftKings</span>
+            </h3>
+
+            <div className="grid grid-cols-3 gap-4 text-center mb-4">
+              {/* Spread */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">SPREAD</div>
+                <div className="text-base font-display font-bold text-foreground">{spread ?? "—"}</div>
+              </div>
+
+              {/* Total */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">TOTAL (O/U)</div>
+                <div className="text-base font-display font-bold text-foreground">
+                  {total != null ? total : "—"}
+                </div>
+              </div>
+
+              {/* Moneylines */}
+              <div className="bg-muted/30 rounded-lg p-3">
+                <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">MONEYLINE</div>
+                <div className="flex items-center justify-center gap-2 text-sm font-bold">
+                  <span className="text-muted-foreground text-[11px]">{game.awayTeam.abbreviation}</span>
+                  <span className={awayMl?.startsWith("-") ? "text-confidence-high" : "text-foreground"}>
+                    {awayMl ?? "—"}
+                  </span>
+                  <span className="text-muted-foreground text-[10px]">/</span>
+                  <span className={homeMl?.startsWith("-") ? "text-confidence-high" : "text-foreground"}>
+                    {homeMl ?? "—"}
+                  </span>
+                  <span className="text-muted-foreground text-[11px]">{game.homeTeam.abbreviation}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Model vs market insight */}
+            <div className={`rounded-lg p-3 text-xs flex items-start gap-2 ${modelVsMarketAgree ? "bg-confidence-high/10 border border-confidence-high/20" : "bg-risk/10 border border-risk/20"}`}>
+              <Zap className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${modelVsMarketAgree ? "text-confidence-high" : "text-risk"}`} />
+              <div>
+                <span className={`font-semibold ${modelVsMarketAgree ? "text-confidence-high" : "text-risk"}`}>
+                  {modelVsMarketAgree ? "Model aligns with market" : "Model diverges from market"} —{" "}
+                </span>
+                <span className="text-secondary-foreground">
+                  Our model gives {modelFavorsHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation}{" "}
+                  a {Math.max(modelHome, modelAway)}% win probability.{" "}
+                  {!modelVsMarketAgree
+                    ? `The market favors ${spreadFavorsHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} — investigate before acting.`
+                    : "Confidence and market agree on direction."}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Efficiency Comparison */}
       <div className="card-shine bg-card rounded-lg border border-border p-5">

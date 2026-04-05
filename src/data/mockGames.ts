@@ -41,6 +41,19 @@ export interface MatchupEdge {
   description: string;
 }
 
+export interface GameLines {
+  /** DraftKings spread string e.g. "LAL -4.5" — home team implied by negative */
+  spread?: string;
+  /** Negative = home team is favorite, positive = away team */
+  spreadNum?: number;
+  /** Over/under total */
+  total?: number;
+  /** American odds for home team, e.g. "-185" */
+  homeMl?: string;
+  /** American odds for away team, e.g. "+155" */
+  awayMl?: string;
+}
+
 export interface GamePrediction {
   id: string;
   league: League;
@@ -60,6 +73,7 @@ export interface GamePrediction {
   upsetPath: string;
   lastUpdated: string;
   situationalTags: string[];
+  lines?: GameLines;
   /** ESPN / client-only sort key */
   _meta?: { easternYmd: string; sortTime: number };
 }
@@ -133,6 +147,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Suns win if Booker breaks cold streak and Lakers bench fails on back-to-back fatigue",
     lastUpdated: "2026-04-04T18:30:00Z",
     situationalTags: ["BACK-TO-BACK", "RIVALRY"],
+    lines: { spread: "LAL -4.5", spreadNum: -4.5, total: 228.5, homeMl: "-185", awayMl: "+155" },
   },
   {
     id: "nba-2",
@@ -196,6 +211,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Bucks win if Giannis dominates paint and Lillard gets hot from deep",
     lastUpdated: "2026-04-04T19:00:00Z",
     situationalTags: ["PLAYOFF PREVIEW", "HIGH MOTIVATION"],
+    lines: { spread: "BOS -6.5", spreadNum: -6.5, total: 224.0, homeMl: "-260", awayMl: "+215" },
   },
 
   // ── NBA TOMORROW ───────────────────────────────────────────────────────────
@@ -264,6 +280,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Warriors win if Curry goes nuclear (40+) and Warriors crash offensive glass",
     lastUpdated: "2026-04-04T20:15:00Z",
     situationalTags: ["ALTITUDE ADVANTAGE", "MUST-WIN (GSW)"],
+    lines: { spread: "DEN -8.5", spreadNum: -8.5, total: 222.5, homeMl: "-340", awayMl: "+275" },
   },
   {
     id: "nba-4",
@@ -329,6 +346,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Could go either way — Luka home dominance vs Wolves defensive wall",
     lastUpdated: "2026-04-04T19:45:00Z",
     situationalTags: ["TRAP GAME", "PLAYOFF SEEDING"],
+    lines: { spread: "MIN -2.5", spreadNum: 2.5, total: 214.5, homeMl: "+115", awayMl: "-135" },
   },
 
   // ── NFL TODAY ──────────────────────────────────────────────────────────────
@@ -398,6 +416,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Ravens win if Lamar rushes for 80+ yards and Chiefs fail to convert red zone trips",
     lastUpdated: "2026-04-04T10:30:00Z",
     situationalTags: ["AFC SHOWDOWN", "PLAYOFF IMPLICATIONS"],
+    lines: { spread: "KC -3", spreadNum: -3, total: 46.5, homeMl: "-165", awayMl: "+140" },
   },
   {
     id: "nfl-2",
@@ -466,6 +485,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Cowboys win if Parsons pressures Purdy into turnovers and Lamb goes for 150+",
     lastUpdated: "2026-04-04T12:00:00Z",
     situationalTags: ["PRIME TIME", "NFC RIVALRY"],
+    lines: { spread: "SF -7", spreadNum: -7, total: 45.5, homeMl: "-310", awayMl: "+250" },
   },
 
   // ── NFL TOMORROW ───────────────────────────────────────────────────────────
@@ -536,6 +556,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Dolphins win if Hill plays through injury and Tua exploits Bills' press coverage",
     lastUpdated: "2026-04-04T14:00:00Z",
     situationalTags: ["AFC EAST RIVALRY", "DIVISIONAL"],
+    lines: { spread: "BUF -4.5", spreadNum: -4.5, total: 44.0, homeMl: "-200", awayMl: "+168" },
   },
   {
     id: "nfl-4",
@@ -602,6 +623,7 @@ export const allGames: GamePrediction[] = [
     upsetPath: "Giants win if Barkley plays and rushes for 120+, forcing Eagles to abandon game plan",
     lastUpdated: "2026-04-04T15:30:00Z",
     situationalTags: ["NFC EAST RIVALRY", "DOMINANT FAVORITE"],
+    lines: { spread: "PHI -13.5", spreadNum: -13.5, total: 40.5, homeMl: "-700", awayMl: "+500" },
   },
 ];
 

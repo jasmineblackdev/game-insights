@@ -1,6 +1,7 @@
-import type { GamePrediction, League, PlayerTrendData, TeamData } from "@/data/mockGames";
+import type { GameLines, GamePrediction, League, PlayerTrendData, TeamData } from "@/data/mockGames";
 import {
   buildEdges,
+  buildLines,
   confidenceFromSpreadNba,
   easternYmd,
   fetchEspnScoreboardEvents,
@@ -137,6 +138,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     upsetPath,
     lastUpdated: new Date().toISOString(),
     situationalTags: tags,
+    lines: odd ? buildLines(odd, away.abbreviation, home.abbreviation) : undefined,
     _meta: {
       easternYmd: easternGameYmd,
       sortTime: new Date(comp.date).getTime(),

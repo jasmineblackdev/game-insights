@@ -1,6 +1,7 @@
 import type {
   ConfidenceLevel,
   GameDate,
+  GameLines,
   GamePrediction,
   MatchupEdge,
   TeamData,
@@ -115,17 +116,19 @@ export interface EspnCompetitor {
   }[];
 }
 
+export interface EspnOdds {
+  details?: string;
+  spread?: number;
+  overUnder?: number;
+  moneyline?: {
+    home?: { close?: { odds?: string }; open?: { odds?: string } };
+    away?: { close?: { odds?: string }; open?: { odds?: string } };
+  };
+}
+
 export interface EspnCompetition {
   date: string;
-  odds?: {
-    details?: string;
-    spread?: number;
-    overUnder?: number;
-    moneyline?: {
-      home?: { close?: { odds?: string }; open?: { odds?: string } };
-      away?: { close?: { odds?: string }; open?: { odds?: string } };
-    };
-  }[];
+  odds?: EspnOdds[];
   status: {
     type: { state: string; completed?: boolean; shortDetail?: string; detail?: string };
   };
@@ -209,6 +212,40 @@ export function buildEdges(
     description: `${away.abbreviation} ${away.record} vs ${home.abbreviation} ${home.record}`,
   });
   return edges.slice(0, 4);
+}
+
+export function buildLines(
+  odd: EspnOdds,
+  awayAbbr: string,
+  homeAbbr: string,
+): GameLines | undefined {
+  const spread = odd?.spread;
+  const total = odd?.overUnder;
+  const homeMl = odd?.moneyline?.home?.close?.odds ?? odd?.moneyline?.home?.open?.odds;
+  const awayMl = odd?.moneyline?.away?.close?.odds ?? odd?.moneyline?.away?.open?.odds;
+
+  // Build a human-readable spread string like "BOS -6.5" or "MIL +6.5"
+  let spreadStr: string | undefined;
+  if (odd?.details) {
+    spreadStr = odd.details;
+  } else if (spread != null) {
+    // spread is from home team's perspective: negative = home is favorite
+    if (spread < 0) {
+      spreadStr = `${homeAbbr} ${spread}`;
+    } else {
+      spreadStr = `${awayAbbr} -${spread}`;
+    }
+  }
+
+  if (!spreadStr && total == null && !homeMl && !awayMl) return undefined;
+
+  return {
+    spread: spreadStr,
+    spreadNum: spread,
+    total: total ?? undefined,
+    homeMl: homeMl ?? undefined,
+    awayMl: awayMl ?? undefined,
+  };
 }
 
 export async function fetchEspnScoreboardEvents(baseUrl: string, datesParam?: string): Promise<EspnEvent[]> {

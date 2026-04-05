@@ -87,6 +87,35 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
         )}
       </div>
 
+      {/* Lines row */}
+      {game.lines && (game.lines.spread || game.lines.total != null || game.lines.homeMl) && (
+        <div className="px-4 py-2 border-t border-border/60 flex items-center gap-3 text-[11px] text-muted-foreground">
+          {game.lines.spread && (
+            <span>
+              Spread <span className="text-foreground font-semibold">{game.lines.spread}</span>
+            </span>
+          )}
+          {game.lines.total != null && (
+            <span>
+              O/U <span className="text-foreground font-semibold">{game.lines.total}</span>
+            </span>
+          )}
+          {game.lines.homeMl && game.lines.awayMl && (
+            <span className="ml-auto">
+              {game.awayTeam.abbreviation}{" "}
+              <span className={`font-semibold ${game.lines.awayMl.startsWith("-") ? "text-confidence-high" : "text-foreground"}`}>
+                {game.lines.awayMl}
+              </span>
+              {" / "}
+              {game.homeTeam.abbreviation}{" "}
+              <span className={`font-semibold ${game.lines.homeMl.startsWith("-") ? "text-confidence-high" : "text-foreground"}`}>
+                {game.lines.homeMl}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Footer */}
       <div className="px-4 py-2.5 border-t border-border flex items-center justify-between">
         <span className="text-xs text-muted-foreground">

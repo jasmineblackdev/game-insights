@@ -2,12 +2,16 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
+import { getDraftPicks } from "@/data/draftPicks";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { GameDetailView } from "@/components/GameDetailView";
-import { Activity, TrendingUp, Zap } from "lucide-react";
+import { DraftPickCard } from "@/components/DraftPickCard";
+import { Activity, TrendingUp, Zap, Tv2, ClipboardList } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
+
+type ViewMode = "games" | "draft";
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -106,6 +110,7 @@ const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
+  const [viewMode, setViewMode] = useState<ViewMode>("games");
 
   const nbaQuery = useQuery({
     queryKey: ["nba-espn-scoreboard", easternYmd()],
@@ -135,8 +140,15 @@ const Index = () => {
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
+  const draftPicks = getDraftPicks(league);
+
   const handleLeagueChange = (l: League) => {
     setLeague(l);
+    setSelectedGame(null);
+  };
+
+  const handleViewModeChange = (m: ViewMode) => {
+    setViewMode(m);
     setSelectedGame(null);
   };
 
@@ -178,7 +190,7 @@ const Index = () => {
             />
           ) : (
             <motion.div
-              key={`list-${league}-${dateFilter}`}
+              key={`list-${league}-${viewMode}-${dateFilter}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -190,8 +202,11 @@ const Index = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="font-display font-bold text-3xl md:text-4xl text-foreground mb-2"
                 >
-                  {dateFilter === "today" ? "Today's" : "Tomorrow's"}{" "}
-                  <span className="text-gradient-primary">Predictions</span>
+                  {viewMode === "draft" ? (
+                    <>{league.toUpperCase()} <span className="text-gradient-primary">Draft Picks</span></>
+                  ) : (
+                    <>{dateFilter === "today" ? "Today's" : "Tomorrow's"}{" "}<span className="text-gradient-primary">Predictions</span></>
+                  )}
                 </motion.h2>
                 <motion.p
                   initial={{ opacity: 0, y: 10 }}
@@ -199,7 +214,12 @@ const Index = () => {
                   transition={{ delay: 0.1 }}
                   className="text-sm text-muted-foreground max-w-lg"
                 >
-                  {league === "nba" ? (
+                  {viewMode === "draft" ? (
+                    <>
+                      Projected {league.toUpperCase()} Draft order with grades, scouting analysis, and pro comparables.
+                      Click any pick to expand the full breakdown.
+                    </>
+                  ) : league === "nba" ? (
                     <>
                       Live NBA schedule, team records, and win probabilities from DraftKings moneylines on ESPN
                       (de-vigged). Team ratings are a record-based estimate until your model runs on Supabase.
@@ -219,33 +239,86 @@ const Index = () => {
                   transition={{ delay: 0.2 }}
                   className="flex items-center gap-6 mt-4"
                 >
-                  <div className="flex items-center gap-2 text-xs">
-                    <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
-                    <span className="text-muted-foreground">Games loaded:</span>
-                    <span className="text-confidence-high font-semibold">{leagueGames.length}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs">
-                    <Zap className="w-3.5 h-3.5 text-primary" />
-                    <span className="text-muted-foreground">High conf (spread lean):</span>
-                    <span className="text-primary font-semibold">
-                      {highConfCount} of {filteredGames.length}
-                    </span>
-                  </div>
+                  {viewMode === "draft" ? (
+                    <>
+                      <div className="flex items-center gap-2 text-xs">
+                        <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
+                        <span className="text-muted-foreground">Projected picks:</span>
+                        <span className="text-confidence-high font-semibold">{draftPicks.length}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Zap className="w-3.5 h-3.5 text-primary" />
+                        <span className="text-muted-foreground">A-grade picks:</span>
+                        <span className="text-primary font-semibold">
+                          {draftPicks.filter((p) => p.grade.startsWith("A")).length} of {draftPicks.length}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 text-xs">
+                        <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
+                        <span className="text-muted-foreground">Games loaded:</span>
+                        <span className="text-confidence-high font-semibold">{leagueGames.length}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Zap className="w-3.5 h-3.5 text-primary" />
+                        <span className="text-muted-foreground">High conf (spread lean):</span>
+                        <span className="text-primary font-semibold">
+                          {highConfCount} of {filteredGames.length}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </motion.div>
               </div>
 
-              {/* Date switcher */}
-              <div className="mb-5">
-                <DatePicker
-                  value={dateFilter}
-                  onChange={handleDateChange}
-                  todayLabel={todayLabel}
-                  tomorrowLabel={tomorrowLabel}
-                />
+              {/* View mode toggle */}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+                  <button
+                    onClick={() => handleViewModeChange("games")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                      viewMode === "games"
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Tv2 className="w-3 h-3" />
+                    Games
+                  </button>
+                  <button
+                    onClick={() => handleViewModeChange("draft")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                      viewMode === "draft"
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <ClipboardList className="w-3 h-3" />
+                    Draft
+                  </button>
+                </div>
+
+                {/* Date switcher only visible in Games mode */}
+                {viewMode === "games" && (
+                  <DatePicker
+                    value={dateFilter}
+                    onChange={handleDateChange}
+                    todayLabel={todayLabel}
+                    tomorrowLabel={tomorrowLabel}
+                  />
+                )}
               </div>
 
-              {/* Games Grid */}
-              {activeQuery.isPending ? (
+              {/* Content */}
+              {viewMode === "draft" ? (
+                <div className="space-y-3">
+                  {draftPicks.map((pick, i) => (
+                    <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
+                  ))}
+                </div>
+              ) : activeQuery.isPending ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {[0, 1, 2, 3].map((i) => (
                     <div
