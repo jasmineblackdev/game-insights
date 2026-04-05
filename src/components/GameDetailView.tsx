@@ -262,7 +262,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
       {/* Efficiency Comparison */}
       <div className="card-shine bg-card rounded-lg border border-border p-5">
         <h3 className="font-display font-bold text-sm text-foreground mb-4">Team Stats Comparison</h3>
-        <div className="grid grid-cols-3 gap-4 text-center">
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
           {(game.league === "nfl"
             ? [
                 { label: "Yds/Game", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating },

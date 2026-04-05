@@ -40,25 +40,29 @@ const NFL_LEADER_METRICS: { leaderName: string; keyMetric: string }[] = [
 ];
 
 function leadersToTrends(c: EspnCompetitor): PlayerTrendData[] {
+  const results: PlayerTrendData[] = [];
+  const seen = new Set<string>();
+
   for (const { leaderName, keyMetric } of NFL_LEADER_METRICS) {
     const row = c.leaders?.find((l) => l.name === leaderName)?.leaders?.[0];
     if (!row?.athlete) continue;
+    const fullName = row.athlete.fullName;
+    if (seen.has(fullName)) continue; // same player won't appear twice
+    seen.add(fullName);
     const v = row.value ?? Number.parseFloat(row.displayValue.replace(/[^\d.-]/g, ""));
     const val = Number.isFinite(v) ? v : 0;
     const pos = row.athlete.position?.abbreviation ?? "—";
-    return [
-      {
-        name: row.athlete.fullName,
-        position: pos,
-        trend: "steady",
-        last5Avg: Math.round(val * 10) / 10,
-        seasonAvg: Math.round(val * 10) / 10,
-        keyMetric,
-        keyMetricValue: row.displayValue,
-      },
-    ];
+    results.push({
+      name: fullName,
+      position: pos,
+      trend: "steady",
+      last5Avg: Math.round(val * 10) / 10,
+      seasonAvg: Math.round(val * 10) / 10,
+      keyMetric,
+      keyMetricValue: row.displayValue,
+    });
   }
-  return [];
+  return results.slice(0, 3);
 }
 
 function buildTeam(c: EspnCompetitor): TeamData {

@@ -33,7 +33,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           <Clock className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-xs text-muted-foreground">{game.gameTime}</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap justify-end">
           {game.situationalTags.map((tag) => (
             <span key={tag} className="text-[10px] font-semibold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
               {tag}
@@ -46,7 +46,9 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       <div className="px-4 py-3 flex items-center gap-4">
         {/* Away */}
         <div className={`flex-1 text-center ${favored === "away" ? "" : "opacity-60"}`}>
-          <div className="text-2xl mb-1">{game.awayTeam.logo}</div>
+          <div className="mb-1 flex justify-center">
+            <TeamLogo logo={game.awayTeam.logo} size="sm" />
+          </div>
           <div className="text-sm font-display font-bold text-foreground">{game.awayTeam.abbreviation}</div>
           <div className="text-xs text-muted-foreground">{game.awayTeam.record}</div>
           <div className="text-lg font-display font-bold mt-1 text-foreground">{game.winProbability.away}%</div>

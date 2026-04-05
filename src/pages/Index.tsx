@@ -163,18 +163,21 @@ const Index = () => {
       <header className="border-b border-border surface-glass sticky top-0 z-50">
         <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center shrink-0">
               <Activity className="w-4.5 h-4.5 text-primary" />
             </div>
-            <div>
+            <div className="hidden sm:block">
               <h1 className="font-display font-bold text-base text-foreground tracking-tight">
                 GameLens
               </h1>
               <p className="text-[11px] text-muted-foreground">AI-powered matchup intelligence</p>
             </div>
+            <span className="sm:hidden font-display font-bold text-base text-foreground tracking-tight">GameLens</span>
           </div>
-          <div className="flex items-center gap-3">
-            <DataSourceStatus />
+          <div className="flex items-center gap-2">
+            <div className="hidden sm:block">
+              <DataSourceStatus />
+            </div>
             <LeaguePicker value={league} onChange={handleLeagueChange} />
           </div>
         </div>
