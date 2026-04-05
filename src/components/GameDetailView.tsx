@@ -11,7 +11,8 @@ import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
-import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud, Layers, Plus } from "lucide-react";
+import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud, Layers, Plus, TrendingUp } from "lucide-react";
+import { getBetWindow, betWindowClass, getUpcomingBetTip } from "@/lib/liveGameState";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -29,6 +30,8 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
   const updatedAt = new Date(game.lastUpdated);
   const timeAgo = Math.round((Date.now() - updatedAt.getTime()) / 60000);
+  const betWindow = getBetWindow(game);
+  const upcomingBetTip = getUpcomingBetTip(game);
 
   return (
     <motion.div
@@ -163,6 +166,82 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           </div>
         ) : null}
       </div>
+
+      {/* Bet Signal */}
+      {(betWindow || upcomingBetTip) && (
+        <div className={`card-shine rounded-lg border p-4 sm:p-5 ${betWindow ? betWindowClass(betWindow.phase) : "bg-card border-border"}`}>
+          <h3 className="font-display font-bold text-sm flex items-center gap-2 mb-3">
+            <TrendingUp className={`w-4 h-4 ${betWindow?.phase === "open" ? "text-confidence-high" : betWindow?.phase === "closing" ? "text-amber-500" : "text-muted-foreground"}`} />
+            <span className={betWindow?.phase === "open" ? "text-confidence-high" : betWindow?.phase === "closing" ? "text-amber-600 dark:text-amber-400" : "text-foreground"}>
+              Bet Signal
+            </span>
+          </h3>
+
+          {betWindow ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-full border ${betWindowClass(betWindow.phase)}`}>
+                  {betWindow.phase === "open" && "● "}
+                  {betWindow.phase === "closing" && "◑ "}
+                  {betWindow.phase === "wait" && "○ "}
+                  {betWindow.label}
+                </span>
+              </div>
+              <p className="text-sm text-secondary-foreground leading-relaxed">{betWindow.tip}</p>
+              <div className="flex items-center gap-2 text-xs">
+                <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className={`font-medium ${betWindow.phase === "open" ? "text-confidence-high" : betWindow.phase === "closing" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                  {betWindow.timing}
+                </span>
+              </div>
+
+              {/* Sport-specific guidance */}
+              <div className="pt-2 border-t border-current/10">
+                {game.league === "nba" && (
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">NBA TIMING GUIDE</p>
+                    <p>Q1 buzzer → check foul counts on star players (2 fouls = significant shift)</p>
+                    <p>Halftime → highest accuracy: pace, rotations, and bench depth all visible</p>
+                    <p>Q3 tight → live spread still moves meaningfully on runs</p>
+                  </div>
+                )}
+                {game.league === "nfl" && (
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">NFL TIMING GUIDE</p>
+                    <p>After Q1 → check if a team is abandoning the run (desperation signal)</p>
+                    <p>Halftime → injury report + adjusted game script = peak accuracy window</p>
+                    <p>Q4 within 7 → two-minute drill shifts ATS result significantly</p>
+                  </div>
+                )}
+                {game.league === "mlb" && (
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">MLB TIMING GUIDE</p>
+                    <p>Innings 4–5 (F5) → starter pitch count + WHIP are now readable</p>
+                    <p>High pitch count early (80+ through 4) = bullpen window opening soon</p>
+                    <p>Innings 6–7 → bullpen matchup data adds an edge before closer usage</p>
+                  </div>
+                )}
+                {game.league === "soccer" && (
+                  <div className="space-y-1 text-[11px] text-muted-foreground">
+                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">SOCCER TIMING GUIDE</p>
+                    <p>15'–45' → opening shape, press intensity, and possession tendency visible</p>
+                    <p>Halftime → substitution hints and tactical shape are most predictive signal</p>
+                    <p>60'–70' → fatigue-driven substitutions create the last live edge window</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : upcomingBetTip ? (
+            <div className="space-y-2">
+              <p className="text-sm text-secondary-foreground">This game hasn't started yet. Come back live for the optimal entry window.</p>
+              <div className="flex items-center gap-2 text-xs">
+                <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="text-muted-foreground font-medium">{upcomingBetTip}</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Two column grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

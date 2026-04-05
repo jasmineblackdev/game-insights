@@ -170,3 +170,279 @@ export function liveAccuracyClass(accuracy: LiveContext["accuracy"]): string {
   if (accuracy === "peak") return "text-primary bg-primary/15 border-primary/25";
   return "text-hot-streak bg-hot-streak/15 border-hot-streak/25";
 }
+
+// ── Bet Window Signal ─────────────────────────────────────────────────────────
+
+export type BetPhase = "wait" | "open" | "closing" | "closed";
+
+export interface BetWindow {
+  /** Current actionability of this game. */
+  phase: BetPhase;
+  /** Short badge label. */
+  label: string;
+  /** Why this window is (or isn't) open. */
+  tip: string;
+  /** When to act / what to wait for. */
+  timing: string;
+}
+
+/**
+ * Returns a bet window signal for live games.
+ * Returns null for upcoming/final games.
+ *
+ * Rationale per sport:
+ *  NBA  — Q1: wait (foul trouble unresolved) → Q2 start / Halftime: open (peak)
+ *          Q3 tight: open · Q3 blowout (15+): closing · Q4: closing/closed
+ *  NFL  — Q1: wait → Q2 / Halftime: open (peak)
+ *          Q3 tight: open · Q3 blowout (17+): closing · Q4: closing/closed
+ *  MLB  — innings 1–3: wait → innings 4–5 (F5): open (peak)
+ *          innings 6–7: closing (bullpen era) · 8+: closed
+ *  Soccer — <15': wait → 15'–45': open · halftime: open (peak)
+ *           45'–65': open (subs window) · 65'+: closing/closed
+ */
+export function getBetWindow(game: GamePrediction): BetWindow | null {
+  if (game.status !== "live") return null;
+  const ls = game._meta?.liveState;
+  if (!ls) return null;
+
+  const { periodNum, isHalftime, homeScore, awayScore } = ls;
+  const margin = Math.abs(homeScore - awayScore);
+  const leader = homeScore >= awayScore ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+
+  // ── NBA ────────────────────────────────────────────────────────────────────
+  if (game.league === "nba") {
+    if (periodNum === 1) {
+      return {
+        phase: "wait",
+        label: "WAIT · Q1 LIVE",
+        tip: "Q1 in progress — foul trouble and rotation depth aren't readable yet. Hold until the buzzer.",
+        timing: "Window opens after Q1 buzzer",
+      };
+    }
+    if (periodNum === 2 && !isHalftime) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Q1 complete. Foul counts, rotation patterns, and early pace are locked in. Best pre-half live value.",
+        timing: "Act before halftime",
+      };
+    }
+    if (isHalftime) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN · HALFTIME",
+        tip: "Halftime is the highest-accuracy NBA window — true pace, foul totals, and bench depth are all visible.",
+        timing: "Act before Q3 tip-off",
+      };
+    }
+    if (periodNum === 3) {
+      if (margin >= 15) {
+        return {
+          phase: "closing",
+          label: "WINDOW CLOSING",
+          tip: `${leader} +${margin} in Q3. Comebacks from 15+ occur <12% of the time — live value is shrinking.`,
+          timing: "Marginal value remaining",
+        };
+      }
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Tight Q3 — live spread reflects real uncertainty. Closeout schemes and foul pace still matter.",
+        timing: "Act before Q4",
+      };
+    }
+    if (periodNum >= 4) {
+      if (margin >= 10) {
+        return {
+          phase: "closed",
+          label: "WINDOW CLOSED",
+          tip: `${leader} +${margin} in Q4. Line has fully moved — no meaningful edge available.`,
+          timing: "No value",
+        };
+      }
+      return {
+        phase: "closing",
+        label: "WINDOW CLOSING",
+        tip: "Q4 crunch time. Foul game and clutch rate still shift the live line — move now or skip.",
+        timing: "Last chance",
+      };
+    }
+  }
+
+  // ── NFL ────────────────────────────────────────────────────────────────────
+  if (game.league === "nfl") {
+    if (periodNum === 1) {
+      return {
+        phase: "wait",
+        label: "WAIT · Q1 LIVE",
+        tip: "Game script still forming. Watch for early injury reports and which team abandons the run first.",
+        timing: "Window opens after Q1",
+      };
+    }
+    if (periodNum === 2 && !isHalftime) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Q1 complete — game script, early injuries, and play-call tendencies are now visible. Best pre-half value.",
+        timing: "Act before halftime",
+      };
+    }
+    if (isHalftime) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN · HALFTIME",
+        tip: "Halftime: optimal NFL window. Injury updates, adjusted game script, and coaching read all factored in.",
+        timing: "Act before 2nd-half kickoff",
+      };
+    }
+    if (periodNum === 3) {
+      if (margin >= 17) {
+        return {
+          phase: "closing",
+          label: "WINDOW CLOSING",
+          tip: `${leader} +${margin} in Q3. 17-pt deficits convert in under 10% of NFL games — value nearly gone.`,
+          timing: "Marginal value only",
+        };
+      }
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Game still in play. 3rd-quarter adjustments and time-of-possession are the live swing factors.",
+        timing: "Act before Q4",
+      };
+    }
+    if (margin >= 14) {
+      return {
+        phase: "closed",
+        label: "WINDOW CLOSED",
+        tip: `${leader} +${margin} in Q4. Line fully corrected — no value.`,
+        timing: "No value",
+      };
+    }
+    return {
+      phase: "closing",
+      label: "WINDOW CLOSING",
+      tip: "Q4 two-minute drill. Clock management kills spread value fast — act now or skip.",
+      timing: "Last chance",
+    };
+  }
+
+  // ── MLB ────────────────────────────────────────────────────────────────────
+  if (game.league === "mlb") {
+    if (periodNum <= 3) {
+      return {
+        phase: "wait",
+        label: "WAIT · EARLY INNINGS",
+        tip: "Starter still settling in. Pitch count, walk rate, and velocity trend aren't readable before inning 4.",
+        timing: "F5 window opens after inning 3",
+      };
+    }
+    if (periodNum <= 5) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN · F5",
+        tip: "F5 window: starter durability, pitch count, and WHIP are now visible. Highest live value before bullpen switchover.",
+        timing: "Act before inning 6",
+      };
+    }
+    if (periodNum <= 7) {
+      return {
+        phase: "closing",
+        label: "WINDOW CLOSING · BULLPEN",
+        tip: "Starters likely exiting. Bullpen availability and matchup data still provide an edge — but it narrows each half-inning.",
+        timing: "Last meaningful window",
+      };
+    }
+    if (margin >= 3) {
+      return {
+        phase: "closed",
+        label: "WINDOW CLOSED",
+        tip: `${leader} +${margin} in the late innings. 3-run leads in 8th+ hold ~87% of the time — no value.`,
+        timing: "No value",
+      };
+    }
+    return {
+      phase: "closing",
+      label: "LAST CHANCE · WALK-OFF RANGE",
+      tip: "Razor-thin margin in the 8th+. Line barely moves but walk-off variance is real — narrow window.",
+      timing: "Narrow value only",
+    };
+  }
+
+  // ── Soccer ────────────────────────────────────────────────────────────────
+  if (game.league === "soccer") {
+    const minute = periodNum;
+    if (isHalftime) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN · HALF",
+        tip: "Halftime: substitution plans and 2nd-half shape are the most reliable predictor. Optimal window.",
+        timing: "Act before 2nd-half kickoff",
+      };
+    }
+    if (minute < 15) {
+      return {
+        phase: "wait",
+        label: "WAIT · KICKOFF",
+        tip: "Opening phase — too early to read shape or intent. Wait 15 minutes for the pattern to emerge.",
+        timing: "Opens at ~15'",
+      };
+    }
+    if (minute <= 45) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Opening shape, press intensity, and set-piece threat are visible. Best pre-halftime live window.",
+        timing: "Act before halftime",
+      };
+    }
+    if (minute <= 65) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Substitution window active — tactical changes and fitness drops are shifting the live odds.",
+        timing: "Act before 70'",
+      };
+    }
+    if (margin >= 2) {
+      return {
+        phase: "closed",
+        label: "WINDOW CLOSED",
+        tip: `${leader} +${margin} after 65' — two-goal lead conversion rate ~94%. No value.`,
+        timing: "No value",
+      };
+    }
+    return {
+      phase: "closing",
+      label: "WINDOW CLOSING",
+      tip: "Late pressure in a close match. Odds move fast — act now or the line snaps shut.",
+      timing: "Last chance",
+    };
+  }
+
+  return null;
+}
+
+/**
+ * For upcoming games: the optimal live timing window to return for a bet.
+ * Shown as a subtle "come back at…" hint on pre-game cards.
+ */
+export function getUpcomingBetTip(game: GamePrediction): string | null {
+  if (game.status !== "upcoming") return null;
+  if (game.league === "nba") return "Best live window: after Q1 buzzer or at halftime";
+  if (game.league === "nfl") return "Best live window: after Q1 or at halftime";
+  if (game.league === "mlb") return "Best live window: innings 4–5 (F5 window)";
+  if (game.league === "soccer") return "Best live window: 15'–45' or at halftime";
+  return null;
+}
+
+/** Tailwind classes for a bet window phase. */
+export function betWindowClass(phase: BetPhase): string {
+  if (phase === "open")
+    return "text-confidence-high bg-confidence-high/10 border-confidence-high/30";
+  if (phase === "closing")
+    return "text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30";
+  if (phase === "wait")
+    return "text-muted-foreground bg-muted/60 border-border";
+  return "text-muted-foreground/60 bg-muted/40 border-border/50";
+}

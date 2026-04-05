@@ -4,8 +4,8 @@ import { GamePrediction } from "@/data/mockGames";
 import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
-import { getLiveContext, liveAccuracyClass } from "@/lib/liveGameState";
-import { ChevronRight, AlertTriangle, Zap, Shield, Clock } from "lucide-react";
+import { getLiveContext, liveAccuracyClass, getBetWindow, betWindowClass, getUpcomingBetTip } from "@/lib/liveGameState";
+import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp } from "lucide-react";
 
 interface GamePredictionCardProps {
   game: GamePrediction;
@@ -27,6 +27,8 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const showEdgeBadge = showModelMarketEdgeBadge(game);
   const updatedAgo = formatDistanceToNow(new Date(game.lastUpdated), { addSuffix: true });
   const liveCtx = getLiveContext(game);
+  const betWindow = getBetWindow(game);
+  const upcomingBetTip = getUpcomingBetTip(game);
 
   return (
     <motion.div
@@ -141,6 +143,27 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           </div>
         )}
       </div>
+
+      {/* Bet Window Signal */}
+      {betWindow && betWindow.phase !== "closed" ? (
+        <div className={`mx-4 mb-3 px-3 py-2.5 rounded-lg border flex items-start gap-2.5 ${betWindowClass(betWindow.phase)}`}>
+          <TrendingUp className={`w-3.5 h-3.5 shrink-0 mt-0.5 ${betWindow.phase === "open" ? "text-confidence-high" : betWindow.phase === "closing" ? "text-amber-500" : "text-muted-foreground"}`} />
+          <div className="min-w-0">
+            <p className={`text-[10px] font-bold tracking-wider leading-none mb-1 ${betWindow.phase === "open" ? "text-confidence-high" : betWindow.phase === "closing" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+              {betWindow.label}
+            </p>
+            <p className="text-[11px] leading-snug line-clamp-2">{betWindow.tip}</p>
+            <p className={`text-[10px] mt-1 font-medium ${betWindow.phase === "open" ? "text-confidence-high/80" : "text-muted-foreground"}`}>
+              {betWindow.timing}
+            </p>
+          </div>
+        </div>
+      ) : upcomingBetTip ? (
+        <div className="mx-4 mb-3 px-3 py-2 rounded-lg border border-border/60 bg-muted/30 flex items-center gap-2">
+          <Clock className="w-3 h-3 shrink-0 text-muted-foreground/60" />
+          <p className="text-[10px] text-muted-foreground/80">{upcomingBetTip}</p>
+        </div>
+      ) : null}
 
       {/* Lines row */}
       {game.lines && (game.lines.spread || game.lines.total != null || game.lines.homeMl) && (
