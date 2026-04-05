@@ -250,10 +250,10 @@ async function fetchTeamMetricsMap(league: League, teamIds: string[]): Promise<M
 function applyTeamPatch(base: TeamData, patch: Partial<TeamData>): TeamData {
   return {
     ...base,
-    ...patch,
-    offensiveRating: patch.offensiveRating ?? base.offensiveRating,
-    defensiveRating: patch.defensiveRating ?? base.defensiveRating,
-    pace: patch.pace ?? base.pace,
+    // Explicit null-checks so a real 0 value from ESPN doesn't get discarded by nullish coalescing.
+    offensiveRating: patch.offensiveRating != null ? patch.offensiveRating : base.offensiveRating,
+    defensiveRating: patch.defensiveRating != null ? patch.defensiveRating : base.defensiveRating,
+    pace: patch.pace != null ? patch.pace : base.pace,
     record: patch.record ?? base.record,
     recentForm: patch.recentForm ?? base.recentForm,
   };
@@ -309,6 +309,17 @@ function pickcenterNote(summary: Record<string, unknown>): string | null {
   return null;
 }
 
+/** Fetch with a hard timeout — prevents weather enrichment from blocking the entire game load. */
+async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function weatherNoteFromNflSummary(summary: Record<string, unknown>): Promise<string | null> {
   const gi = summary.gameInfo as Record<string, unknown> | undefined;
   const venue = gi?.venue as Record<string, unknown> | undefined;
@@ -318,13 +329,13 @@ async function weatherNoteFromNflSummary(summary: Record<string, unknown>): Prom
   if (!city || !state) return null;
   try {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(`${city},${state},USA`)}&count=1&language=en&format=json`;
-    const gr = await fetch(geoUrl);
+    const gr = await fetchWithTimeout(geoUrl, 5000);
     if (!gr.ok) return null;
     const gj = (await gr.json()) as { results?: { latitude: number; longitude: number }[] };
     const loc = gj.results?.[0];
     if (!loc) return null;
     const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,wind_speed_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`;
-    const wr = await fetch(wUrl);
+    const wr = await fetchWithTimeout(wUrl, 5000);
     if (!wr.ok) return null;
     const wj = (await wr.json()) as {
       current?: { temperature_2m?: number; wind_speed_10m?: number };
@@ -343,7 +354,8 @@ async function enrichOne(
   league: League,
   injuryMap: Map<string, PlayerInjury[]>,
   teamPatches: Map<string, Partial<TeamData>>,
-  nbaAdvanced: NbaAdvancedRatingsPayload | null
+  nbaAdvanced: NbaAdvancedRatingsPayload | null,
+  scheduleMap: Map<string, Set<string>>
 ): Promise<GamePrediction> {
   const hid = pred._meta?.homeTeamId;
   const aid = pred._meta?.awayTeamId;
@@ -409,6 +421,37 @@ async function enrichOne(
     }
   }
 
+  // ── Back-to-back detection (NBA + MLB only — sports where fatigue materially shifts odds) ──
+  const situationalTags = [...pred.situationalTags];
+  let confidence = pred.confidence;
+  if ((league === "nba" || league === "mlb") && scheduleMap.size > 0) {
+    const gameDate = pred._meta?.easternYmd;
+    if (gameDate) {
+      const yesterday = previousCalendarYmd(gameDate);
+      const homeB2B = scheduleMap.get(hid)?.has(yesterday) ?? false;
+      const awayB2B = scheduleMap.get(aid)?.has(yesterday) ?? false;
+      if (homeB2B && !situationalTags.includes("HOME B2B")) {
+        situationalTags.push("HOME B2B");
+        notes.push(
+          `${homeTeam.abbreviation} playing on back-to-back tonight — fatigue reduces effective win probability 3–5%.`
+        );
+        // Downgrade HIGH confidence when the fatigued team is the favorite
+        if (pred.winProbability.home >= pred.winProbability.away && confidence === "high") {
+          confidence = "medium";
+        }
+      }
+      if (awayB2B && !situationalTags.includes("AWAY B2B")) {
+        situationalTags.push("AWAY B2B");
+        notes.push(
+          `${awayTeam.abbreviation} on back-to-back (road) — travel compounds fatigue, historically -4 to -6pp on the road.`
+        );
+        if (pred.winProbability.away >= pred.winProbability.home && confidence === "high") {
+          confidence = "medium";
+        }
+      }
+    }
+  }
+
   const topReasons = [...pred.topReasons];
   if (notes.length) {
     const first = notes[0];
@@ -429,6 +472,8 @@ async function enrichOne(
     injuries: { home: homeInj, away: awayInj },
     enrichmentNotes: notes.length ? notes : pred.enrichmentNotes,
     topReasons: topReasons.slice(0, 6),
+    situationalTags,
+    confidence,
     _meta: nextMeta,
   };
 }
@@ -457,8 +502,13 @@ export async function enrichGamePredictions(predictions: GamePrediction[], leagu
     if (p._meta?.homeTeamId) teamIds.push(p._meta.homeTeamId);
     if (p._meta?.awayTeamId) teamIds.push(p._meta.awayTeamId);
   }
-  const teamPatches = await fetchTeamMetricsMap(lg, teamIds);
-  const nbaAdvanced = lg === "nba" ? await fetchNbaAdvancedRatingsViaProxy() : null;
 
-  return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches, nbaAdvanced));
+  // Run team metrics, schedule (B2B), and NBA advanced ratings in parallel.
+  const [teamPatches, scheduleMap, nbaAdvanced] = await Promise.all([
+    fetchTeamMetricsMap(lg, teamIds),
+    lg === "nba" || lg === "mlb" ? fetchTeamScheduleMap(lg, teamIds) : Promise.resolve(new Map<string, Set<string>>()),
+    lg === "nba" ? fetchNbaAdvancedRatingsViaProxy() : Promise.resolve(null),
+  ]);
+
+  return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches, nbaAdvanced, scheduleMap));
 }

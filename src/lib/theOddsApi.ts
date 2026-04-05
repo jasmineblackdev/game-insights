@@ -1,6 +1,5 @@
 import type { GamePrediction } from "@/data/mockGames";
-
-const apiKey = import.meta.env.VITE_THE_ODDS_API_KEY as string | undefined;
+import { fetchOddsForSport, isOddsApiAvailable } from "@/lib/oddsApiFetch";
 
 interface Bookmaker {
   key?: string;
@@ -56,10 +55,14 @@ export async function mergeTheOddsApiNotes(
   predictions: GamePrediction[],
   sportKey: "basketball_nba" | "americanfootball_nfl" | "baseball_mlb" | "soccer_epl"
 ): Promise<GamePrediction[]> {
-  if (!apiKey) return predictions;
+  if (!isOddsApiAvailable()) return predictions;
   try {
-    const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?regions=us&markets=h2h,spreads,totals&oddsFormat=american&apiKey=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+    const res = await fetchOddsForSport({
+      sportKey,
+      markets: "h2h,spreads,totals",
+      regions: "us",
+      oddsFormat: "american",
+    });
     if (!res.ok) return predictions;
     const events = (await res.json()) as OddsEvent[];
     if (!Array.isArray(events)) return predictions;

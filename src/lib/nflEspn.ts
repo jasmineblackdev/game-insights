@@ -2,6 +2,7 @@ import type { GameLines, GamePrediction, League, PlayerTrendData, TeamData } fro
 import {
   buildEdges,
   buildLines,
+  buildSituationalTags,
   confidenceFromSpreadNfl,
   easternYmd,
   fetchEspnScoreboardEvents,
@@ -12,6 +13,7 @@ import {
   mergeScoreboardDays,
   overallRecord,
   parseRecord,
+  parseLiveState,
   sortCompetitors,
   winProbFromOdds,
   winProbFromRecords,
@@ -104,10 +106,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   const easternGameYmd = isoToEasternYmd(comp.date);
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
-  const tags: string[] = [];
-  if (status === "live") tags.push("LIVE");
-  else if (status === "final") tags.push("FINAL");
-  else tags.push("NFL");
+  const tags = buildSituationalTags(status, "nfl", away.record, home.record, prob, spread);
 
   const topReasons = [
     `${home.abbreviation} ${home.record} at home vs ${away.abbreviation} ${away.record} on the road.`,
@@ -160,6 +159,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       eventId: event.id,
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
+      liveState: parseLiveState(comp),
     },
   };
 }

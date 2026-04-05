@@ -7,6 +7,38 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const footballDataToken = env.VITE_FOOTBALL_DATA_API_TOKEN;
+  const oddsServerKey = (env.THE_ODDS_API_KEY ?? "").trim();
+
+  const proxy: Record<string, import("vite").ProxyOptions> = {};
+
+  if (footballDataToken) {
+    proxy["/football-data-api"] = {
+      target: "https://api.football-data.org",
+      changeOrigin: true,
+      rewrite: (p) => p.replace(/^\/football-data-api/, "/v4"),
+      configure: (p) => {
+        p.on("proxyReq", (proxyReq) => {
+          proxyReq.setHeader("X-Auth-Token", footballDataToken);
+        });
+      },
+    };
+  }
+
+  if (mode === "development" && oddsServerKey) {
+    proxy["/__odds-api"] = {
+      target: "https://api.the-odds-api.com",
+      changeOrigin: true,
+      rewrite: (p) => p.replace(/^\/__odds-api\/?/, "/v4/"),
+      configure: (p) => {
+        p.on("proxyReq", (proxyReq) => {
+          const path = proxyReq.path || "";
+          if (path.includes("apiKey=")) return;
+          const join = path.includes("?") ? "&" : "?";
+          proxyReq.path = `${path}${join}apiKey=${encodeURIComponent(oddsServerKey)}`;
+        });
+      },
+    };
+  }
 
   return {
   server: {
@@ -15,22 +47,10 @@ export default defineConfig(({ mode }) => {
     hmr: {
       overlay: false,
     },
-    ...(footballDataToken
-      ? {
-          proxy: {
-            "/football-data-api": {
-              target: "https://api.football-data.org",
-              changeOrigin: true,
-              rewrite: (p) => p.replace(/^\/football-data-api/, "/v4"),
-              configure: (proxy) => {
-                proxy.on("proxyReq", (proxyReq) => {
-                  proxyReq.setHeader("X-Auth-Token", footballDataToken);
-                });
-              },
-            },
-          },
-        }
-      : {}),
+    ...(Object.keys(proxy).length ? { proxy } : {}),
+  },
+  define: {
+    __GAMELENS_ODDS_DEV_PROXY__: JSON.stringify(mode === "development" && Boolean(oddsServerKey)),
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

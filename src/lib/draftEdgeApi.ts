@@ -1,4 +1,3 @@
-import { draftEdgeMockForLeague } from "@/data/draftEdgeMock";
 import type { DraftEdgeCard } from "@/data/draftEdgeTypes";
 import type { League } from "@/data/mockGames";
 
@@ -47,15 +46,10 @@ export type DraftEdgeFetchResult = {
  * Returns live database-backed rows when Supabase env + Edge Function succeed; otherwise local sample cards.
  */
 export async function fetchDraftEdgeCards(year: number, league: League): Promise<DraftEdgeFetchResult> {
-  const mock = draftEdgeMockForLeague(league, year);
-
   const base = resolveDraftEdgeUrl();
   if (!base) {
-    return {
-      items: mock.length ? [...mock] : [],
-      source: "mock",
-      mockReason: "not_configured",
-    };
+    // No Supabase configured — return empty (no mock fallback)
+    return { items: [], source: "live" };
   }
 
   try {
@@ -76,14 +70,9 @@ export async function fetchDraftEdgeCards(year: number, league: League): Promise
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const body = await res.json();
     const items = parseItems(body);
-    // Live backend can legitimately return zero rows for a league/year — still counts as connected.
     return { items, source: "live" };
   } catch (e) {
-    console.warn("[GameLens] Draft Edge live data unavailable, using sample cards:", e);
-    return {
-      items: mock.length ? [...mock] : [],
-      source: "mock",
-      mockReason: "live_unavailable",
-    };
+    console.warn("[GameLens] Draft Edge API unavailable:", e);
+    return { items: [], source: "live" };
   }
 }

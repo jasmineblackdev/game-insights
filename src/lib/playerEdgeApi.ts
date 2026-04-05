@@ -1,10 +1,10 @@
 import {
-  PLAYER_EDGE_MOCK,
   getPlayerEdgeById,
   type PlayerEdgePrediction,
   type PlayerEdgeSportFilter,
   type PlayerEdgeStatFilter,
 } from "@/data/playerEdgeMock";
+import { fetchLivePlayerEdgePredictions } from "@/lib/espnPlayerStats";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
 export type PlayerEdgeAccuracyRollup = {
@@ -108,19 +108,33 @@ export async function fetchPlayerEdgePredictions(
   stat: PlayerEdgeStatFilter
 ): Promise<PlayerEdgeFetchResult> {
   const dataUrl = resolvePlayerEdgeDataUrl();
-  if (!dataUrl) {
-    return { items: ensureGameSort([...PLAYER_EDGE_MOCK]), source: "mock" };
+
+  // Custom or Supabase endpoint configured — use it
+  if (dataUrl) {
+    try {
+      const params: Record<string, string | undefined> = {};
+      if (sport !== "all") params.sport = sport;
+      if (stat !== "all") params.statType = stat;
+      const { items, accuracy } = await fetchPlayerEdgeJson(dataUrl, params);
+      return { items: ensureGameSort(items), accuracy, source: "api" };
+    } catch (e) {
+      console.warn("[GameLens] Player Edge API unavailable, falling back to ESPN stats:", e);
+    }
   }
 
+  // No custom endpoint — fetch live player stats directly from ESPN
   try {
-    const params: Record<string, string | undefined> = {};
-    if (sport !== "all") params.sport = sport;
-    if (stat !== "all") params.statType = stat;
-    const { items, accuracy } = await fetchPlayerEdgeJson(dataUrl, params);
-    return { items: ensureGameSort(items), accuracy, source: "api" };
+    const espnItems = await fetchLivePlayerEdgePredictions();
+    // Filter by sport/stat if requested
+    const filtered = espnItems.filter((p) => {
+      if (sport !== "all" && p.sport !== sport) return false;
+      if (stat !== "all" && p.stat_type !== stat) return false;
+      return true;
+    });
+    return { items: ensureGameSort(filtered), source: "api" };
   } catch (e) {
-    console.warn("[GameLens] Player Edge API unavailable, using mock:", e);
-    return { items: ensureGameSort([...PLAYER_EDGE_MOCK]), source: "mock" };
+    console.warn("[GameLens] ESPN player stats unavailable:", e);
+    return { items: [], source: "api" };
   }
 }
 
@@ -135,7 +149,13 @@ export async function fetchPlayerEdgeProjectionById(id: string): Promise<PlayerE
       console.warn("[GameLens] Player Edge detail fetch failed:", e);
     }
   }
-  return getPlayerEdgeById(id) ?? null;
+  // Try to find in ESPN live data
+  try {
+    const espnItems = await fetchLivePlayerEdgePredictions();
+    return espnItems.find((p) => p.id === id) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** True when a live endpoint will be used (custom URL or Supabase + deploy). */

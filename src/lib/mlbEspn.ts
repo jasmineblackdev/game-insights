@@ -2,6 +2,7 @@ import type { GamePrediction, League, MlbIntel, PlayerTrendData, TeamData } from
 import {
   buildEdges,
   buildLines,
+  buildSituationalTags,
   confidenceFromSpreadMlb,
   easternYmd,
   fetchEspnScoreboardEvents,
@@ -12,6 +13,7 @@ import {
   mergeScoreboardDays,
   overallRecord,
   parseRecord,
+  parseLiveState,
   sortCompetitors,
   winProbFromOdds,
   winProbFromRecords,
@@ -43,7 +45,9 @@ function parseProbablePitchers(comp: EspnCompetition): ProbablePitcher[] {
     const homeAway = (p.homeAway as string) === "home" ? "home" : "away";
     const stats = p.statistics as Array<Record<string, unknown>> | undefined;
     const throwingStat = stats?.find((s) => s.name === "throws" || s.name === "throwingHand");
-    const rawHand = (throwingStat?.displayValue ?? throwingStat?.value ?? "") as string;
+    // Guard: displayValue/value could be non-string if ESPN changes schema
+    const rawHandRaw = throwingStat?.displayValue ?? throwingStat?.value ?? "";
+    const rawHand = typeof rawHandRaw === "string" ? rawHandRaw : "";
     const hand: "L" | "R" | undefined =
       rawHand.toLowerCase().startsWith("l") ? "L" : rawHand.toLowerCase().startsWith("r") ? "R" : undefined;
     return [{ name, hand, homeAway }];
@@ -156,10 +160,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
   const easternGameYmd = isoToEasternYmd(comp.date);
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
-  const tags: string[] = [];
-  if (status === "live") tags.push("LIVE");
-  else if (status === "final") tags.push("FINAL");
-  else tags.push("MLB");
+  const tags = buildSituationalTags(status, "mlb", away.record, home.record, prob, spread);
 
   const pitcherLine =
     mlbIntel.awayProbablePitcher && mlbIntel.homeProbablePitcher
@@ -218,6 +219,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       eventId: event.id,
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
+      liveState: parseLiveState(comp),
     },
   };
 }

@@ -267,15 +267,15 @@ export function PlayerEdgeSection() {
           Player Edge
         </h2>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          AI-ranked player predictions using recent performance, matchup strength, injuries, and projected role.
+          Live player projections built from today's ESPN matchups — real players, real season averages, real opponents.
         </p>
-        <p className="text-[10px] text-muted-foreground max-w-2xl">
-          {isPlayerEdgeLiveConfigured()
-            ? isSupabasePlayerEdgeConfigured()
-              ? "Live props: Supabase Edge `player-edge` (override with VITE_PLAYER_EDGE_API_URL). Errors fall back to mock."
-              : "Live props: custom GET endpoint (VITE_PLAYER_EDGE_API_URL). Errors fall back to mock."
-            : "Mock props board. Add VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY and deploy `player-edge`, or set VITE_PLAYER_EDGE_API_URL."}
-        </p>
+        {isPlayerEdgeLiveConfigured() && (
+          <p className="text-[10px] text-muted-foreground max-w-2xl">
+            {isSupabasePlayerEdgeConfigured()
+              ? "Enhanced props: Supabase Edge `player-edge` active."
+              : "Enhanced props: custom endpoint (VITE_PLAYER_EDGE_API_URL) active."}
+          </p>
+        )}
         {accuracy && accuracy.total > 0 && hitRate !== null ? (
           <div
             className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground max-w-xl leading-relaxed"

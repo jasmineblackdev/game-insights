@@ -286,9 +286,77 @@ export interface EspnCompetition {
   date: string;
   odds?: EspnOdds[];
   status: {
+    /** Current period/quarter/inning (1-based). Present when state === "in". */
+    period?: number;
+    /** Remaining clock for timed sports e.g. "5:32". */
+    displayClock?: string;
     type: { state: string; completed?: boolean; shortDetail?: string; detail?: string };
   };
   competitors: EspnCompetitor[];
+}
+
+/** Snapshot of an in-progress game — parsed once from ESPN competition data. */
+export interface LiveGameState {
+  periodNum: number;
+  periodLabel: string;
+  homeScore: number;
+  awayScore: number;
+  isHalftime: boolean;
+}
+
+/**
+ * Parses live period/score data from an ESPN competition object.
+ * Returns undefined when the game is not in progress.
+ */
+export function parseLiveState(comp: EspnCompetition): LiveGameState | undefined {
+  if (comp.status.type.state !== "in") return undefined;
+  const [awayC, homeC] = sortCompetitors(comp.competitors);
+  const homeScore = Number(homeC.score ?? 0);
+  const awayScore = Number(awayC.score ?? 0);
+  const periodNum = comp.status.period ?? 1;
+  const detail = comp.status.type.shortDetail ?? "";
+  const isHalftime = detail.toLowerCase().includes("half");
+  // shortDetail for live games: "Q2 5:32", "2nd 8:42", "Top 5th", "72'"
+  const periodLabel = detail.replace(/\s+\d+:\d+$/, "").trim() || `Period ${periodNum}`;
+  return { periodNum, periodLabel, homeScore, awayScore, isHalftime };
+}
+
+/**
+ * Derives real situational tags from game/team data available at parse time.
+ * These are the base tags — enrichment (B2B detection, etc.) appends more later.
+ */
+export function buildSituationalTags(
+  status: GamePrediction["status"],
+  league: League,
+  homeRecord: string,
+  awayRecord: string,
+  prob: { home: number; away: number },
+  spread: number | undefined,
+  threeWay?: { home: number; away: number; draw: number }
+): string[] {
+  const tags: string[] = [];
+
+  // Status tag
+  if (status === "live") tags.push("LIVE");
+  else if (status === "final") tags.push("FINAL");
+  else tags.push(league.toUpperCase() === "SOCCER" ? "EPL" : league.toUpperCase());
+
+  // Toss-up — spread within 1.5 pts or prob near 50/50
+  const probGap = Math.abs(prob.home - prob.away);
+  if (!threeWay && spread != null && Math.abs(spread) <= 1.5 && probGap <= 8) {
+    tags.push("TOSS-UP");
+  }
+
+  // Heavy favorite — one side is dominant
+  const topProb = threeWay ? Math.max(threeWay.home, threeWay.away) : Math.max(prob.home, prob.away);
+  if (topProb >= 72) tags.push("HEAVY FAV");
+
+  // Both teams below .500 — variance-heavy matchup
+  const { pct: homePct } = parseRecord(homeRecord);
+  const { pct: awayPct } = parseRecord(awayRecord);
+  if (homePct < 0.45 && awayPct < 0.45) tags.push("BELOW .500");
+
+  return tags;
 }
 
 export interface EspnEvent {
@@ -353,15 +421,24 @@ export function buildEdges(
   if (threeWay) {
     const top = Math.max(threeWay.home, threeWay.away, threeWay.draw);
     const haFav = threeWay.home >= threeWay.away ? ("home" as const) : ("away" as const);
-    const label = top === threeWay.draw ? "1X2 — draw branch" : "1X2 implied lean";
+    const isDrawLargest = top === threeWay.draw;
+    const label = isDrawLargest ? "1X2 — draw leads" : "1X2 implied lean";
     edges.push({
       label,
-      team: top === threeWay.draw ? haFav : threeWay.home >= threeWay.away ? "home" : "away",
-      description:
-        top === threeWay.draw
-          ? `Draw ~${threeWay.draw}% (de-vig) is the largest branch · ${away.abbreviation} ${threeWay.away}% · ${home.abbreviation} ${threeWay.home}%`
-          : `${fav.abbreviation} ~${Math.max(threeWay.home, threeWay.away)}% · draw ~${threeWay.draw}%`,
+      team: isDrawLargest ? haFav : threeWay.home >= threeWay.away ? "home" : "away",
+      description: isDrawLargest
+        ? `Draw ~${threeWay.draw}% (de-vig) is the largest branch · ${away.abbreviation} ${threeWay.away}% · ${home.abbreviation} ${threeWay.home}%`
+        : `${fav.abbreviation} ~${Math.max(threeWay.home, threeWay.away)}% · draw ~${threeWay.draw}%`,
     });
+    // Surface draw explicitly as a separate edge when it's a material outcome (≥28%)
+    // This prevents it from being buried as a footnote when it's actually the best value.
+    if (threeWay.draw >= 28 && !isDrawLargest) {
+      edges.push({
+        label: "Draw — notable branch",
+        team: haFav,
+        description: `Draw at ~${threeWay.draw}% (de-vig) — 1-in-${Math.round(100 / threeWay.draw)} probability. Check draw ML pricing for value.`,
+      });
+    }
   } else {
     edges.push({
       label: "Win probability lean",

@@ -35,7 +35,8 @@ export function spreadImpliedHomeWinPct(game: GamePrediction): number | null {
   const ptsPerPct = PTS_PER_PCT[game.league];
   if (!ptsPerPct) return null; // Skip MLB — runline isn't a sliding win% proxy
   const raw = 50 - sn * ptsPerPct;
-  return Math.round(Math.min(90, Math.max(10, raw)));
+  // [5, 95] range — tighter clips hide real divergences on extreme spreads (e.g. +25 blowout)
+  return Math.round(Math.min(95, Math.max(5, raw)));
 }
 
 /**
@@ -53,10 +54,12 @@ export function spreadVsMoneylineDivergencePp(game: GamePrediction): number | nu
 
 /**
  * Returns true when spread market and moneyline market disagree by >8pp.
- * This is a meaningful discrepancy — one of the two markets is likely stale
- * or reacting to information (injury, weather, sharp action) the other hasn't priced.
+ * Both spread AND moneyline must be present — if either is missing the comparison
+ * is meaningless (you'd be comparing one real market against nothing).
  */
 export function showModelMarketEdgeBadge(game: GamePrediction): boolean {
+  // Require both markets to be present so the divergence is real, not an artifact of missing data.
+  if (!game.lines?.spreadNum || !game.lines?.homeMl || !game.lines?.awayMl) return false;
   const d = spreadVsMoneylineDivergencePp(game);
   return d != null && d > MODEL_MARKET_DIVERGENCE_THRESHOLD_PP;
 }
@@ -66,12 +69,3 @@ export function maxModelMarketDivergencePp(game: GamePrediction): number | null 
   return spreadVsMoneylineDivergencePp(game);
 }
 
-/** @deprecated Use spreadVsMoneylineDivergencePp directly */
-export function modelMarketHomeDivergencePp(game: GamePrediction): number | null {
-  return spreadVsMoneylineDivergencePp(game);
-}
-
-/** @deprecated Use spreadVsMoneylineDivergencePp directly */
-export function modelMarketSpreadDivergencePp(game: GamePrediction): number | null {
-  return spreadVsMoneylineDivergencePp(game);
-}

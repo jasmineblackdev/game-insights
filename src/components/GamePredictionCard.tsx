@@ -4,6 +4,7 @@ import { GamePrediction } from "@/data/mockGames";
 import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
+import { getLiveContext, liveAccuracyClass } from "@/lib/liveGameState";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock } from "lucide-react";
 
 interface GamePredictionCardProps {
@@ -25,6 +26,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
 
   const showEdgeBadge = showModelMarketEdgeBadge(game);
   const updatedAgo = formatDistanceToNow(new Date(game.lastUpdated), { addSuffix: true });
+  const liveCtx = getLiveContext(game);
 
   return (
     <motion.div
@@ -52,11 +54,21 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
               ⚡ EDGE
             </span>
           ) : null}
-          {game.situationalTags.map((tag) => (
-            <span key={tag} className="text-[10px] font-semibold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-              {tag}
+          {liveCtx ? (
+            <span
+              className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${liveAccuracyClass(liveCtx.accuracy)}`}
+              title={liveCtx.tip}
+            >
+              🔴 {liveCtx.badge}
             </span>
-          ))}
+          ) : null}
+          {game.situationalTags
+            .filter((tag) => tag !== "LIVE") // replaced by liveCtx badge
+            .map((tag) => (
+              <span key={tag} className="text-[10px] font-semibold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                {tag}
+              </span>
+            ))}
         </div>
       </div>
 
@@ -107,10 +119,17 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
 
       {/* Quick Insights */}
       <div className="px-4 pb-3 space-y-1.5">
-        <div className="flex items-start gap-2 text-xs">
-          <Zap className="w-3.5 h-3.5 text-confidence-high shrink-0 mt-0.5" />
-          <span className="text-secondary-foreground">{game.topReasons[0]}</span>
-        </div>
+        {liveCtx ? (
+          <div className="flex items-start gap-2 text-xs">
+            <span className="text-[10px] shrink-0 mt-0.5">🔴</span>
+            <span className="text-secondary-foreground">{liveCtx.tip}</span>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2 text-xs">
+            <Zap className="w-3.5 h-3.5 text-confidence-high shrink-0 mt-0.5" />
+            <span className="text-secondary-foreground">{game.topReasons[0]}</span>
+          </div>
+        )}
         <div className="flex items-start gap-2 text-xs">
           <AlertTriangle className="w-3.5 h-3.5 text-risk shrink-0 mt-0.5" />
           <span className="text-secondary-foreground">{game.riskFactors[0]}</span>

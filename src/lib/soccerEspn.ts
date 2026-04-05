@@ -3,6 +3,7 @@ import {
   addCalendarDaysYmd,
   buildEdges,
   buildLines,
+  buildSituationalTags,
   confidenceFromSoccerThreeWay,
   easternYmd,
   fetchEspnScoreboardEvents,
@@ -11,6 +12,7 @@ import {
   mapStatus,
   nextCalendarYmd,
   overallRecord,
+  parseLiveState,
   probThreeWayFromAmerican,
   probThreeWayFromSoccerRecords,
   seasonStrengthFromRecord,
@@ -130,10 +132,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
   const confidence = confidenceFromSoccerThreeWay(threeWay, spread != null ? Math.abs(spread) : undefined);
 
   const gameDate = soccerGameDateBucket(easternGameYmd, todayEastern);
-  const tags: string[] = [];
-  if (status === "live") tags.push("LIVE");
-  else if (status === "final") tags.push("FINAL");
-  else tags.push("EPL", "SOCCER");
+  const tags = buildSituationalTags(status, "soccer", away.record, home.record, prob, spread, threeWay);
   if (gameDate === "week") {
     const short = new Date(`${easternGameYmd}T18:00:00`).toLocaleDateString("en-US", {
       timeZone: "America/New_York",
@@ -199,6 +198,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
       eventId: event.id,
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
+      liveState: parseLiveState(comp),
     },
   };
 }

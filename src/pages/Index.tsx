@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
-import { getDraftPicks } from "@/data/draftPicks";
+import { fetchDraftPicks } from "@/data/draftPicks";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { PlayerEdgeSection } from "@/components/PlayerEdgeSection";
 import { GameDetailView } from "@/components/GameDetailView";
@@ -155,6 +155,7 @@ const Index = () => {
     queryFn: fetchNbaGamePredictions,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
+    refetchIntervalInBackground: false, // pause polling when tab is hidden — saves battery + API calls
   });
 
   const nflQuery = useQuery({
@@ -162,6 +163,7 @@ const Index = () => {
     queryFn: fetchNflGamePredictions,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
+    refetchIntervalInBackground: false,
   });
 
   const mlbQuery = useQuery({
@@ -169,6 +171,7 @@ const Index = () => {
     queryFn: fetchMlbGamePredictions,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
+    refetchIntervalInBackground: false,
   });
 
   const soccerQuery = useQuery({
@@ -176,6 +179,7 @@ const Index = () => {
     queryFn: fetchSoccerGamePredictions,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
+    refetchIntervalInBackground: false,
   });
 
   const activeQuery =
@@ -206,7 +210,13 @@ const Index = () => {
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
-  const draftPicks = getDraftPicks(league);
+  const draftPicksQuery = useQuery({
+    queryKey: ["draft-picks", league],
+    queryFn: () => fetchDraftPicks(league),
+    staleTime: 60 * 60 * 1000, // draft boards don't change minute to minute
+    enabled: viewMode === "draft",
+  });
+  const draftPicks = draftPicksQuery.data ?? [];
 
   const handleLeagueChange = (l: League) => {
     setLeague(l);
@@ -466,7 +476,7 @@ const Index = () => {
                         <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
                       </summary>
                       <p className="text-xs text-muted-foreground mt-2 mb-4">
-                        Expandable rows — mock scouting blurbs, separate from Draft Edge cards above.
+                        Live prospect rankings from ESPN — grades derived from consensus board position.
                       </p>
                       <div className="space-y-3 pb-2">
                         {draftPicks.map((pick, i) => (

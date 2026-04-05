@@ -2,9 +2,11 @@
  * NFL draft / futures lines via the-odds-api.com (outrights markets).
  * DraftKings-style boards are not guaranteed to exist in the catalog year-round;
  * set VITE_THE_ODDS_API_NFL_DRAFT_SPORT_KEY if discovery fails.
+ *
+ * Calls go through oddsApiFetch (Edge / dev proxy / legacy VITE key).
  */
 
-const BASE = "https://api.the-odds-api.com/v4";
+import { fetchOddsForSport, fetchOddsSportsAll, isOddsApiAvailable } from "@/lib/oddsApiFetch";
 
 export type DraftOddsRow = { label: string; american: number };
 
@@ -35,14 +37,9 @@ type OddsEvent = {
   bookmakers?: Bookmaker[];
 };
 
-function getKey(): string | null {
-  const k = (import.meta.env.VITE_THE_ODDS_API_KEY as string | undefined)?.trim();
-  return k || null;
-}
-
-/** True when the app was built with a The Odds API key (NFL draft strip uses this). */
+/** True when Odds API can be reached (Edge proxy, dev proxy, or legacy VITE_THE_ODDS_API_KEY). */
 export function hasTheOddsApiKey(): boolean {
-  return Boolean(getKey());
+  return isOddsApiAvailable();
 }
 
 function envDraftSportKey(): string | null {
@@ -106,11 +103,11 @@ function parseEventToSection(ev: OddsEvent, index: number): DraftOddsSection | n
 /**
  * Discover sport key: explicit env first, then /sports?all=true match nfl+draft.
  */
-export async function resolveNflDraftSportKey(apiKey: string): Promise<string | null> {
+export async function resolveNflDraftSportKey(): Promise<string | null> {
   const fixed = envDraftSportKey();
   if (fixed) return fixed;
 
-  const res = await fetch(`${BASE}/sports/?all=true&apiKey=${encodeURIComponent(apiKey)}`);
+  const res = await fetchOddsSportsAll();
   if (!res.ok) return null;
   const list = (await res.json()) as SportRow[];
   if (!Array.isArray(list)) return null;
@@ -132,13 +129,12 @@ export async function resolveNflDraftSportKey(apiKey: string): Promise<string | 
  * Fetch outrights-style odds for the given sport (NFL draft when available).
  */
 export async function fetchNflDraftOddsBoard(): Promise<DraftOddsFetchResult> {
-  const apiKey = getKey();
-  if (!apiKey) {
+  if (!isOddsApiAvailable()) {
     return { sections: [], note: "no_api_key" };
   }
 
   try {
-    const sportKey = await resolveNflDraftSportKey(apiKey);
+    const sportKey = await resolveNflDraftSportKey();
     if (!sportKey) {
       return {
         sections: [],
@@ -146,8 +142,12 @@ export async function fetchNflDraftOddsBoard(): Promise<DraftOddsFetchResult> {
       };
     }
 
-    const url = `${BASE}/sports/${encodeURIComponent(sportKey)}/odds?regions=us&markets=outrights&oddsFormat=american&apiKey=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+    const res = await fetchOddsForSport({
+      sportKey,
+      markets: "outrights",
+      regions: "us",
+      oddsFormat: "american",
+    });
     if (!res.ok) {
       return { sections: [], sportKey, note: `http_${res.status}` };
     }

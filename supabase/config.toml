@@ -11,3 +11,5 @@ major_version = 17
 # Deploy (linked project): supabase functions deploy draft-edge
 #   supabase functions deploy player-edge
 #   supabase functions deploy nba-stats-proxy
+#   supabase functions deploy odds-api-proxy
+#   supabase secrets set THE_ODDS_API_KEY=...   # server-only; do not use VITE_ prefix

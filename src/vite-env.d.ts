@@ -3,8 +3,13 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
-  /** the-odds-api.com — optional cross-book lines (500 free tier / month) */
+  /**
+   * Legacy: Odds API key in the browser bundle. Prefer server-side `THE_ODDS_API_KEY` + Edge Function
+   * `odds-api-proxy` or dev proxy (see .env.example).
+   */
   readonly VITE_THE_ODDS_API_KEY?: string;
+  /** Optional full URL to `odds-api-proxy` (default: Supabase `/functions/v1/odds-api-proxy`). */
+  readonly VITE_ODDS_API_PROXY_URL?: string;
   /**
    * Optional: The Odds API `sport_key` for NFL draft / outrights when catalog discovery fails.
    * See GET /v4/sports?all=true — keys vary by season.
@@ -27,3 +32,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Injected by Vite `define` when dev server proxies Odds API (see vite.config). */
+declare const __GAMELENS_ODDS_DEV_PROXY__: boolean;
