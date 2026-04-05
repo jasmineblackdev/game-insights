@@ -7,7 +7,7 @@ import { getDraftPicks } from "@/data/draftPicks";
 import { GamePredictionCard } from "@/components/GamePredictionCard";
 import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
-import { Activity, TrendingUp, Zap, Tv2, ClipboardList } from "lucide-react";
+import { Activity, ClipboardList, Layers, TrendingUp, Tv2, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
