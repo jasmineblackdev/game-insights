@@ -25,13 +25,49 @@ import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
 
-function defaultMlbIntel(): MlbIntel {
+interface ProbablePitcher {
+  name: string;
+  hand?: "L" | "R";
+  homeAway: "home" | "away";
+}
+
+function parseProbablePitchers(comp: EspnCompetition): ProbablePitcher[] {
+  const raw = (comp as unknown as Record<string, unknown>).probables as
+    | Array<Record<string, unknown>>
+    | undefined;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((p) => {
+    const athlete = p.athlete as Record<string, unknown> | undefined;
+    const name = (athlete?.displayName ?? athlete?.fullName ?? "") as string;
+    if (!name) return [];
+    const homeAway = (p.homeAway as string) === "home" ? "home" : "away";
+    const stats = p.statistics as Array<Record<string, unknown>> | undefined;
+    const throwingStat = stats?.find((s) => s.name === "throws" || s.name === "throwingHand");
+    const rawHand = (throwingStat?.displayValue ?? throwingStat?.value ?? "") as string;
+    const hand: "L" | "R" | undefined =
+      rawHand.toLowerCase().startsWith("l") ? "L" : rawHand.toLowerCase().startsWith("r") ? "R" : undefined;
+    return [{ name, hand, homeAway }];
+  });
+}
+
+function buildMlbIntel(comp: EspnCompetition): MlbIntel {
+  const pitchers = parseProbablePitchers(comp);
+  const home = pitchers.find((p) => p.homeAway === "home");
+  const away = pitchers.find((p) => p.homeAway === "away");
+  const certainty: MlbIntel["pitcherCertainty"] =
+    home && away ? "probable" : home || away ? "probable" : "unknown";
   return {
-    pitcherCertainty: "unknown",
+    homeProbablePitcher: home?.name,
+    awayProbablePitcher: away?.name,
+    homePitcherHand: home?.hand,
+    awayPitcherHand: away?.hand,
+    pitcherCertainty: certainty,
     modelNotes: [
-      "MLB is driven by confirmed starter, bullpen workload, handedness splits, and lineup quality — re-run when probables confirm.",
-      "Treat tiny batter-vs-pitcher samples as secondary; lean on season wOBA/OPS splits vs LHP/RHP when you add them from Savant or a data vendor.",
-      "Park factors and wind matter for totals; outdoor games in wind deserve a lower total confidence.",
+      home && away
+        ? `Probable starters: ${away.name}${away.hand ? ` (${away.hand}HP)` : ""} vs ${home.name}${home.hand ? ` (${home.hand}HP)` : ""}.`
+        : "Probable starters not yet announced — treat win probability as low-certainty.",
+      "MLB model: starter quality, bullpen workload, handedness splits, and lineup OPS drive the edge.",
+      "Park factors and wind matter for totals; outdoor games in wind lean lower.",
     ],
   };
 }
@@ -52,25 +88,28 @@ const MLB_LEADERS: { leaderName: string; keyMetric: string }[] = [
 ];
 
 function leadersToTrends(c: EspnCompetitor): PlayerTrendData[] {
+  const results: PlayerTrendData[] = [];
+  const seen = new Set<string>();
   for (const { leaderName, keyMetric } of MLB_LEADERS) {
     const row = c.leaders?.find((l) => l.name === leaderName)?.leaders?.[0];
     if (!row?.athlete) continue;
+    const name = row.athlete.fullName;
+    if (seen.has(name)) continue;
+    seen.add(name);
     const v = row.value ?? Number.parseFloat(String(row.displayValue).replace(/[^\d.-]/g, ""));
     const val = Number.isFinite(v) ? v : 0;
     const pos = row.athlete.position?.abbreviation ?? "—";
-    return [
-      {
-        name: row.athlete.fullName,
-        position: pos,
-        trend: "steady",
-        last5Avg: Math.round(val * 10) / 10,
-        seasonAvg: Math.round(val * 10) / 10,
-        keyMetric,
-        keyMetricValue: row.displayValue,
-      },
-    ];
+    results.push({
+      name,
+      position: pos,
+      trend: "steady",
+      last5Avg: Math.round(val * 10) / 10,
+      seasonAvg: Math.round(val * 10) / 10,
+      keyMetric,
+      keyMetricValue: row.displayValue,
+    });
   }
-  return [];
+  return results.slice(0, 3);
 }
 
 function buildTeam(c: EspnCompetitor): TeamData {
@@ -106,7 +145,11 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     prob = winProbFromRecords(parseRecord(away.record).pct, parseRecord(home.record).pct);
   }
 
-  const confidence = confidenceFromSpreadMlb(spread, prob.home);
+  const mlbIntel = buildMlbIntel(comp);
+
+  let confidence = confidenceFromSpreadMlb(spread, prob.home);
+  // Downgrade confidence when starters aren't confirmed — MLB is uniquely pitcher-dependent
+  if (mlbIntel.pitcherCertainty === "unknown" && confidence === "high") confidence = "medium";
 
   const easternGameYmd = isoToEasternYmd(comp.date);
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
@@ -115,15 +158,18 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   else if (status === "final") tags.push("FINAL");
   else tags.push("MLB");
 
-  const mlbIntel = defaultMlbIntel();
+  const pitcherLine =
+    mlbIntel.awayProbablePitcher && mlbIntel.homeProbablePitcher
+      ? `Probable starters: ${mlbIntel.awayProbablePitcher}${mlbIntel.awayPitcherHand ? ` (${mlbIntel.awayPitcherHand}HP)` : ""} vs ${mlbIntel.homeProbablePitcher}${mlbIntel.homePitcherHand ? ` (${mlbIntel.homePitcherHand}HP)` : ""}.`
+      : "Probable starters not yet announced — confidence downgraded until confirmed.";
 
   const topReasons = [
     `${home.abbreviation} ${home.record} hosts ${away.abbreviation} ${away.record}.`,
+    pitcherLine,
     odd?.details
       ? `Market: ${odd.details} (O/U ${odd.overUnder ?? "—"}).`
       : `Implied win chance: ${home.abbreviation} ${prob.home}%, ${away.abbreviation} ${prob.away}%.`,
     `First pitch / status (ET): ${formatGameTime(comp, status)}.`,
-    "Prediction confidence should drop until starters and lineups are confirmed — see MLB factors below.",
   ];
 
   const riskFactors = [

@@ -296,8 +296,7 @@ async function mergeWithEspnCongestion(predictions: GamePrediction[]): Promise<G
 export async function mergeSoccerVendorIntel(predictions: GamePrediction[]): Promise<GamePrediction[]> {
   if (!predictions.some((p) => p.league === "soccer")) return predictions;
 
-  const canTryFd =
-    import.meta.env.DEV ? !!token : !!token;
+  const canTryFd = !!token;
 
   if (canTryFd) {
     try {

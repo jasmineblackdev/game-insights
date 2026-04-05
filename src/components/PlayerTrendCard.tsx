@@ -14,6 +14,7 @@ const trendConfig = {
 export function PlayerTrendCard({ player }: PlayerTrendCardProps) {
   const { icon: Icon, label, colorClass, bgClass } = trendConfig[player.trend];
   const diff = player.last5Avg - player.seasonAvg;
+  const hasDiff = Math.abs(diff) >= 0.1;
 
   return (
     <div className="flex items-center gap-3 py-2">
@@ -26,11 +27,17 @@ export function PlayerTrendCard({ player }: PlayerTrendCardProps) {
           <span className={`text-[10px] font-bold tracking-wider ${colorClass}`}>{label}</span>
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span>L5: <span className="text-foreground font-medium">{player.last5Avg}</span></span>
-          <span>Szn: {player.seasonAvg}</span>
-          <span className={diff > 0 ? "text-confidence-high" : diff < 0 ? "text-destructive" : ""}>
-            {diff > 0 ? "+" : ""}{diff.toFixed(1)}
-          </span>
+          {hasDiff ? (
+            <>
+              <span>L5: <span className="text-foreground font-medium">{player.last5Avg}</span></span>
+              <span>Szn: {player.seasonAvg}</span>
+              <span className={diff > 0 ? "text-confidence-high" : "text-destructive"}>
+                {diff > 0 ? "+" : ""}{diff.toFixed(1)}
+              </span>
+            </>
+          ) : (
+            <span>Season avg: <span className="text-foreground font-medium">{player.seasonAvg}</span></span>
+          )}
         </div>
       </div>
       <div className="text-right">
