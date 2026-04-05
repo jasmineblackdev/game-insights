@@ -26,12 +26,12 @@ export function PlayerTrendCard({ player }: PlayerTrendCardProps) {
           <span className="text-sm font-medium text-foreground truncate">{player.name}</span>
           <span className={`text-[10px] font-bold tracking-wider ${colorClass}`}>{label}</span>
         </div>
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           {hasDiff ? (
             <>
-              <span>L5: <span className="text-foreground font-medium">{player.last5Avg}</span></span>
-              <span>Szn: {player.seasonAvg}</span>
-              <span className={diff > 0 ? "text-confidence-high" : "text-destructive"}>
+              <span className="whitespace-nowrap">L5: <span className="text-foreground font-medium">{player.last5Avg}</span></span>
+              <span className="whitespace-nowrap">Szn: {player.seasonAvg}</span>
+              <span className={`whitespace-nowrap ${diff > 0 ? "text-confidence-high" : "text-destructive"}`}>
                 {diff > 0 ? "+" : ""}{diff.toFixed(1)}
               </span>
             </>

@@ -38,17 +38,19 @@ export function InjuryImpactMeter({ injuries, teamAbbr }: InjuryImpactMeterProps
           style={{ width: `${impactPct}%` }}
         />
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         {injuries.map((injury) => (
-          <div key={injury.name} className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${statusColors[injury.status]}`}>
+          <div key={injury.name} className="text-xs space-y-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${statusColors[injury.status]}`}>
                 {injury.status}
               </span>
-              <span className="text-foreground">{injury.name}</span>
+              <span className="text-foreground font-medium">{injury.name}</span>
               <span className="text-muted-foreground">{injury.position}</span>
             </div>
-            <span className="text-muted-foreground">{injury.detail}</span>
+            {injury.detail && (
+              <div className="text-muted-foreground pl-0 text-[11px] leading-snug">{injury.detail}</div>
+            )}
           </div>
         ))}
       </div>

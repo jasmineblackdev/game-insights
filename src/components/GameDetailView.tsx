@@ -40,16 +40,17 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
     >
       {/* Back + Header */}
       <button
+        type="button"
         onClick={onBack}
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        className="flex items-center gap-2 min-h-10 -ml-1 px-1 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation rounded-md"
       >
-        <ArrowLeft className="w-4 h-4" />
+        <ArrowLeft className="w-4 h-4 shrink-0" />
         Back to games
       </button>
 
       {/* Matchup Header */}
-      <div className="card-shine bg-card rounded-lg border border-border p-6">
-        <div className="flex items-center justify-between mb-2">
+      <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-6">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2">
           <div className="flex items-center gap-2">
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">{game.gameTime}</span>
@@ -74,38 +75,40 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-6 justify-center py-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-center sm:gap-4 md:gap-6 py-4">
           <div className={`text-center ${favored === "away" ? "" : "opacity-50"}`}>
             <div className="mb-2 flex justify-center">
               <TeamLogo logo={game.awayTeam.logo} size="lg" />
             </div>
-            <div className="font-display font-bold text-lg text-foreground">{game.awayTeam.name}</div>
-            <div className="text-sm text-muted-foreground">{game.awayTeam.record} · {game.awayTeam.recentForm}</div>
-            <div className="text-2xl font-display font-bold mt-2 text-foreground">
+            <div className="font-display font-bold text-base sm:text-lg text-foreground px-1">{game.awayTeam.name}</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">{game.awayTeam.record} · {game.awayTeam.recentForm}</div>
+            <div className="text-xl sm:text-2xl font-display font-bold mt-2 text-foreground">
               {tw ? tw.away : game.winProbability.away}%
             </div>
             {tw ? <div className="text-[11px] text-muted-foreground">win (1X2)</div> : null}
           </div>
 
           {tw ? (
-            <div className="flex flex-col items-center gap-2 shrink-0">
+            <div className="flex flex-row sm:flex-col items-center justify-center gap-4 sm:gap-2 shrink-0 py-2 sm:py-0 border-y border-border/60 sm:border-0">
               <div className="text-center">
                 <div className="text-[10px] font-semibold text-muted-foreground tracking-wider">DRAW</div>
-                <div className="text-3xl font-display font-bold text-foreground">{tw.draw}%</div>
+                <div className="text-2xl sm:text-3xl font-display font-bold text-foreground">{tw.draw}%</div>
               </div>
               <ConfidenceMeter level={game.confidence} probability={ringProb} showRing={false} />
             </div>
           ) : (
-            <ConfidenceMeter level={game.confidence} probability={favoredProb} />
+            <div className="flex justify-center py-2 sm:py-0">
+              <ConfidenceMeter level={game.confidence} probability={favoredProb} />
+            </div>
           )}
 
           <div className={`text-center ${favored === "home" ? "" : "opacity-50"}`}>
             <div className="mb-2 flex justify-center">
               <TeamLogo logo={game.homeTeam.logo} size="lg" />
             </div>
-            <div className="font-display font-bold text-lg text-foreground">{game.homeTeam.name}</div>
-            <div className="text-sm text-muted-foreground">{game.homeTeam.record} · {game.homeTeam.recentForm}</div>
-            <div className="text-2xl font-display font-bold mt-2 text-foreground">
+            <div className="font-display font-bold text-base sm:text-lg text-foreground px-1">{game.homeTeam.name}</div>
+            <div className="text-xs sm:text-sm text-muted-foreground">{game.homeTeam.record} · {game.homeTeam.recentForm}</div>
+            <div className="text-xl sm:text-2xl font-display font-bold mt-2 text-foreground">
               {tw ? tw.home : game.winProbability.home}%
             </div>
             {tw ? <div className="text-[11px] text-muted-foreground">win (1X2)</div> : null}
@@ -164,7 +167,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
       {/* Two column grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Reasons */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-confidence-high" />
             {tw && tw.draw >= Math.max(tw.home, tw.away)
@@ -182,7 +185,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         </div>
 
         {/* Risks */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
             <AlertTriangle className="w-4 h-4 text-risk" />
             Risk Factors
@@ -203,7 +206,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         </div>
 
         {/* Key Matchup */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
             <Target className="w-4 h-4 text-primary" />
             Key Matchup
@@ -212,13 +215,18 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
           <div className="space-y-2.5">
             {game.matchupEdges.map((edge) => (
-              <div key={edge.label} className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{edge.label}</span>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold ${edge.team === "home" ? "text-confidence-high" : "text-primary"}`}>
+              <div
+                key={edge.label}
+                className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between text-sm"
+              >
+                <span className="text-muted-foreground shrink-0">{edge.label}</span>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end min-w-0">
+                  <span className={`text-xs font-semibold shrink-0 ${edge.team === "home" ? "text-confidence-high" : "text-primary"}`}>
                     {edge.team === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation}
                   </span>
-                  <span className="text-xs text-secondary-foreground max-w-48 text-right">{edge.description}</span>
+                  <span className="text-xs text-secondary-foreground text-left sm:text-right sm:max-w-[12rem] md:max-w-xs">
+                    {edge.description}
+                  </span>
                 </div>
               </div>
             ))}
@@ -227,7 +235,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         {/* Soccer-specific model framing (different from NBA/NFL/MLB scoring). */}
         {game.soccer && (
-          <div className="card-shine bg-card rounded-lg border border-border p-5 lg:col-span-2">
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
             <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
               <Info className="w-4 h-4 text-primary" />
               Soccer model layer · {game.soccer.competition}
@@ -282,7 +290,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         {/* MLB-specific model layer */}
         {game.mlb && (
-          <div className="card-shine bg-card rounded-lg border border-border p-5 lg:col-span-2">
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
             <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
               <Info className="w-4 h-4 text-primary" />
               MLB pregame model layer
@@ -303,7 +311,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         {/* Enrichment: series, PickCenter, weather, Odds API */}
         {game.enrichmentNotes && game.enrichmentNotes.length > 0 && (
-          <div className="card-shine bg-card rounded-lg border border-border p-5 lg:col-span-2">
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
             <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
               <Cloud className="w-4 h-4 text-muted-foreground" />
               Data feed notes
@@ -320,7 +328,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         )}
 
         {/* Injuries */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
             <Swords className="w-4 h-4 text-destructive" />
             Injury Report
@@ -332,7 +340,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         </div>
 
         {/* Player Trends - Away */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground mb-3 flex items-center gap-2">
             <TeamLogo logo={game.awayTeam.logo} size="md" />
             {game.awayTeam.abbreviation} Player Trends
@@ -349,7 +357,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         </div>
 
         {/* Player Trends - Home */}
-        <div className="card-shine bg-card rounded-lg border border-border p-5">
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
           <h3 className="font-display font-bold text-sm text-foreground mb-3 flex items-center gap-2">
             <TeamLogo logo={game.homeTeam.logo} size="md" />
             {game.homeTeam.abbreviation} Player Trends
@@ -377,27 +385,27 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
 
         if (game.league === "soccer" && tw) {
           return (
-            <div className="card-shine bg-card rounded-lg border border-border p-5">
+            <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
               <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-4">
                 <DollarSign className="w-4 h-4 text-confidence-high" />
                 Betting Lines (1X2)
                 <span className="text-[10px] font-normal text-muted-foreground ml-1">via DraftKings</span>
               </h3>
 
-              <div className="grid grid-cols-3 gap-4 text-center mb-4">
-                <div className="bg-muted/30 rounded-lg p-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 text-center mb-4">
+                <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
                   <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">HANDICAP</div>
                   <div className="text-base font-display font-bold text-foreground">{spread ?? "—"}</div>
                 </div>
-                <div className="bg-muted/30 rounded-lg p-3">
+                <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
                   <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">TOTAL (O/U)</div>
                   <div className="text-base font-display font-bold text-foreground">
                     {total != null ? total : "—"}
                   </div>
                 </div>
-                <div className="bg-muted/30 rounded-lg p-3">
+                <div className="bg-muted/30 rounded-lg p-2 sm:p-3 col-span-2 sm:col-span-1">
                   <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">1X2 PRICES</div>
-                  <div className="flex flex-col gap-1 text-xs font-bold text-foreground">
+                  <div className="flex flex-row sm:flex-col justify-around sm:justify-start gap-1 text-xs font-bold text-foreground">
                     <span>
                       {game.awayTeam.abbreviation}{" "}
                       <span className={awayMl?.startsWith("-") ? "text-confidence-high" : ""}>{awayMl ?? "—"}</span>
@@ -427,22 +435,22 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         }
 
         return (
-          <div className="card-shine bg-card rounded-lg border border-border p-5">
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
             <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-4">
               <DollarSign className="w-4 h-4 text-confidence-high" />
               Betting Lines
               <span className="text-[10px] font-normal text-muted-foreground ml-1">via DraftKings</span>
             </h3>
 
-            <div className="grid grid-cols-3 gap-4 text-center mb-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 text-center mb-4">
               {/* Spread */}
-              <div className="bg-muted/30 rounded-lg p-3">
+              <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
                 <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">SPREAD</div>
                 <div className="text-base font-display font-bold text-foreground">{spread ?? "—"}</div>
               </div>
 
               {/* Total */}
-              <div className="bg-muted/30 rounded-lg p-3">
+              <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
                 <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">TOTAL (O/U)</div>
                 <div className="text-base font-display font-bold text-foreground">
                   {total != null ? total : "—"}
@@ -450,9 +458,9 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
               </div>
 
               {/* Moneylines */}
-              <div className="bg-muted/30 rounded-lg p-3">
+              <div className="bg-muted/30 rounded-lg p-2 sm:p-3 col-span-2 sm:col-span-1">
                 <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">MONEYLINE</div>
-                <div className="flex items-center justify-center gap-2 text-sm font-bold">
+                <div className="flex items-center justify-center gap-2 text-sm font-bold flex-wrap">
                   <span className="text-muted-foreground text-[11px]">{game.awayTeam.abbreviation}</span>
                   <span className={awayMl?.startsWith("-") ? "text-confidence-high" : "text-foreground"}>
                     {awayMl ?? "—"}
@@ -487,7 +495,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
       })()}
 
       {/* Efficiency Comparison */}
-      <div className="card-shine bg-card rounded-lg border border-border p-5">
+      <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
         <h3 className="font-display font-bold text-sm text-foreground mb-1">Team Stats Comparison</h3>
         {game.league === "nba" && (
           <p className="text-[11px] text-muted-foreground mb-3">

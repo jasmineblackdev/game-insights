@@ -52,14 +52,14 @@ export function DraftPickCard({ pick, index }: Props) {
 
         {/* Team + player info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">{pick.teamAbbr}</span>
-            <span className="text-sm font-display font-bold text-foreground">{pick.playerName}</span>
-            <span className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs text-muted-foreground font-medium shrink-0">{pick.teamAbbr}</span>
+            <span className="text-sm font-display font-bold text-foreground truncate max-w-[10rem] sm:max-w-none">{pick.playerName}</span>
+            <span className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded shrink-0">
               {pick.position}
             </span>
           </div>
-          <div className="text-xs text-muted-foreground mt-0.5">{pick.college}</div>
+          <div className="text-xs text-muted-foreground mt-0.5 truncate">{pick.college}</div>
         </div>
 
         {/* Grade + confidence */}

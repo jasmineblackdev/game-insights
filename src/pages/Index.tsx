@@ -15,6 +15,7 @@ import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { cn } from "@/lib/utils";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -62,18 +63,28 @@ function DataSourceStatus() {
   );
 }
 
-function LeaguePicker({ value, onChange }: { value: League; onChange: (l: League) => void }) {
+function LeaguePicker({
+  value,
+  onChange,
+  className,
+}: {
+  value: League;
+  onChange: (l: League) => void;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+    <div className={cn("inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5 shrink-0", className)}>
       {(["nba", "nfl", "mlb", "soccer"] as League[]).map((l) => (
         <button
           key={l}
+          type="button"
           onClick={() => onChange(l)}
-          className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider transition-colors ${
+          className={cn(
+            "min-h-10 sm:min-h-9 min-w-[2.75rem] px-3 py-2 sm:py-1 rounded-full text-xs font-bold tracking-wider transition-colors touch-manipulation",
             value === l
               ? "bg-primary text-primary-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+              : "text-muted-foreground hover:text-foreground active:bg-muted"
+          )}
         >
           {l === "soccer" ? "SOC" : l.toUpperCase()}
         </button>
@@ -88,6 +99,7 @@ function DatePicker({
   todayLabel,
   tomorrowLabel,
   weekLabel,
+  className,
 }: {
   value: GameDate;
   onChange: (d: GameDate) => void;
@@ -95,6 +107,7 @@ function DatePicker({
   tomorrowLabel: string;
   /** EPL: fixtures in the next 7 days (sparse schedule). */
   weekLabel?: string;
+  className?: string;
 }) {
   const tabs = [
     ["today", todayLabel],
@@ -102,16 +115,18 @@ function DatePicker({
     ...(weekLabel ? [["week", weekLabel] as const] : []),
   ] as [GameDate, string][];
   return (
-    <div className="flex items-center gap-1 rounded-full bg-muted p-0.5 flex-wrap">
+    <div className={cn("inline-flex items-center gap-1 rounded-full bg-muted p-0.5 flex-wrap shrink-0", className)}>
       {tabs.map(([d, label]) => (
         <button
           key={d}
+          type="button"
           onClick={() => onChange(d)}
-          className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+          className={cn(
+            "min-h-10 sm:min-h-9 px-3 py-2 sm:py-1 rounded-full text-left text-xs font-semibold transition-colors touch-manipulation max-sm:whitespace-nowrap",
             value === d
               ? "bg-card text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
+              : "text-muted-foreground hover:text-foreground active:bg-muted"
+          )}
         >
           {label}
         </button>
@@ -211,45 +226,49 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border surface-glass sticky top-0 z-50">
-        <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2 sm:gap-3">
+      <header className="border-b border-border surface-glass sticky top-0 z-50 pt-[env(safe-area-inset-top)]">
+        <div className="container max-w-6xl mx-auto py-3 sm:py-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2 min-w-0">
             <img
               src="/GameLens_logo.png"
               alt="GameLens"
-              className="w-[7.75rem] h-11 shrink-0 object-contain"
+              className="h-9 w-auto max-w-[7.25rem] sm:max-w-none sm:h-11 sm:w-[7.75rem] shrink-0 object-contain object-left"
             />
-            <div className="sm:hidden">
-              <UnitSizeCalculator variant="compact" className="h-9 w-9 shrink-0" />
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="sm:hidden flex items-center gap-1.5">
+                <UnitSizeCalculator variant="compact" className="h-10 w-10 shrink-0 touch-manipulation" />
+                <Link
+                  to="/edge"
+                  className="inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg border border-border bg-card text-primary touch-manipulation"
+                  aria-label="Edge Card"
+                >
+                  <Layers className="w-4 h-4" />
+                </Link>
+              </div>
+              <div className="hidden sm:flex items-center gap-2">
+                <UnitSizeCalculator variant="compact" className="h-9 w-9" />
+                <Link
+                  to="/edge"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 sm:py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors touch-manipulation"
+                >
+                  <Layers className="w-3.5 h-3.5 text-primary" />
+                  Edge Card
+                </Link>
+                <DataSourceStatus />
+                <LeaguePicker value={league} onChange={handleLeagueChange} />
+              </div>
             </div>
-            <Link
-              to="/edge"
-              className="sm:hidden inline-flex items-center justify-center w-8 h-8 rounded-lg border border-border bg-card text-primary shrink-0"
-              aria-label="Edge Card"
-            >
-              <Layers className="w-4 h-4" />
-            </Link>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="hidden sm:block">
-              <UnitSizeCalculator variant="compact" className="h-9 w-9" />
+          <div className="sm:hidden space-y-2">
+            <div className="overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:thin]">
+              <LeaguePicker value={league} onChange={handleLeagueChange} />
             </div>
-            <Link
-              to="/edge"
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors"
-            >
-              <Layers className="w-3.5 h-3.5 text-primary" />
-              Edge Card
-            </Link>
-            <div className="hidden sm:block">
-              <DataSourceStatus />
-            </div>
-            <LeaguePicker value={league} onChange={handleLeagueChange} />
+            <DataSourceStatus />
           </div>
         </div>
       </header>
 
-      <main className="container max-w-6xl mx-auto px-4 py-6">
+      <main className="container max-w-6xl mx-auto py-4 sm:py-6">
         <AnimatePresence mode="wait">
           {selectedGame ? (
             <GameDetailView
@@ -269,7 +288,7 @@ const Index = () => {
                 <motion.h2
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="font-display font-bold text-3xl md:text-4xl text-foreground mb-2"
+                  className="font-display font-bold text-2xl sm:text-3xl md:text-4xl text-foreground mb-2 break-words"
                 >
                   {viewMode === "draft" ? (
                     <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Picks</span></>
@@ -290,7 +309,7 @@ const Index = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1 }}
-                  className="text-sm text-muted-foreground max-w-lg"
+                  className="text-sm text-muted-foreground max-w-lg leading-relaxed"
                 >
                   {viewMode === "draft" ? (
                     <>
@@ -315,7 +334,7 @@ const Index = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.2 }}
-                  className="flex items-center gap-6 mt-4"
+                  className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-6 mt-4"
                 >
                   {viewMode === "draft" ? (
                     <>
@@ -364,52 +383,62 @@ const Index = () => {
               </div>
 
               {/* View mode toggle */}
-              <div className="flex items-center gap-3 mb-5">
-                <div className="flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-                  <button
-                    onClick={() => handleViewModeChange("games")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                      viewMode === "games"
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <Tv2 className="w-3 h-3" />
-                    Games
-                  </button>
-                  <button
-                    onClick={() => handleViewModeChange("props")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                      viewMode === "props"
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <User className="w-3 h-3" />
-                    Props
-                  </button>
-                  <button
-                    onClick={() => handleViewModeChange("draft")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                      viewMode === "draft"
-                        ? "bg-card text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    <ClipboardList className="w-3 h-3" />
-                    Draft
-                  </button>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center mb-5">
+                <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible sm:pb-0 [scrollbar-width:thin]">
+                  <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handleViewModeChange("games")}
+                      className={cn(
+                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
+                        viewMode === "games"
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground active:bg-muted"
+                      )}
+                    >
+                      <Tv2 className="w-3 h-3 shrink-0" />
+                      Games
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewModeChange("props")}
+                      className={cn(
+                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
+                        viewMode === "props"
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground active:bg-muted"
+                      )}
+                    >
+                      <User className="w-3 h-3 shrink-0" />
+                      Props
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewModeChange("draft")}
+                      className={cn(
+                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
+                        viewMode === "draft"
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground active:bg-muted"
+                      )}
+                    >
+                      <ClipboardList className="w-3 h-3 shrink-0" />
+                      Draft
+                    </button>
+                  </div>
                 </div>
 
                 {/* Date switcher only visible in Games mode */}
                 {viewMode === "games" && (
-                  <DatePicker
-                    value={dateFilter}
-                    onChange={handleDateChange}
-                    todayLabel={todayLabel}
-                    tomorrowLabel={tomorrowLabel}
-                    weekLabel={league === "soccer" ? "Next 7 days" : undefined}
-                  />
+                  <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible [scrollbar-width:thin] min-w-0 w-full sm:w-auto">
+                    <DatePicker
+                      value={dateFilter}
+                      onChange={handleDateChange}
+                      todayLabel={todayLabel}
+                      tomorrowLabel={tomorrowLabel}
+                      weekLabel={league === "soccer" ? "Next 7 days" : undefined}
+                    />
+                  </div>
                 )}
               </div>
 

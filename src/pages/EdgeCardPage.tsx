@@ -298,15 +298,15 @@ export default function EdgeCardPage() {
   }, [history]);
 
   return (
-    <div className="min-h-screen bg-background pb-36">
-      <header className="border-b border-border surface-glass sticky top-0 z-40">
-        <div className="container max-w-6xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-background pb-[calc(9rem+env(safe-area-inset-bottom))] sm:pb-36">
+      <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
+        <div className="container max-w-6xl mx-auto py-3 sm:py-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
             <Link
               to="/"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation shrink-0"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-4 h-4 shrink-0" />
               Home
             </Link>
             <div className="h-4 w-px bg-border hidden sm:block" />
@@ -318,17 +318,17 @@ export default function EdgeCardPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <UnitSizeCalculator variant="compact" className="h-9 w-9 shrink-0" />
-            <div className="flex items-center gap-1 rounded-full bg-muted p-0.5">
+          <div className="flex items-center gap-2 shrink-0 overflow-x-auto max-w-full pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0 [scrollbar-width:thin]">
+            <UnitSizeCalculator variant="compact" className="h-10 w-10 sm:h-9 sm:w-9 shrink-0 touch-manipulation" />
+            <div className="inline-flex items-center gap-1 rounded-full bg-muted p-0.5 shrink-0">
               {([3, 4, 6, 10] as const).map((n) => (
                 <button
                   key={n}
                   type="button"
                   onClick={() => setCardSize(n)}
                   className={cn(
-                    "px-3 py-1 rounded-full text-xs font-bold transition-colors",
-                    cardSize === n ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    "min-h-10 min-w-10 sm:min-h-9 sm:min-w-9 px-3 py-2 sm:py-1 rounded-full text-xs font-bold transition-colors touch-manipulation",
+                    cardSize === n ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground active:bg-muted"
                   )}
                 >
                   {n}
@@ -339,7 +339,7 @@ export default function EdgeCardPage() {
         </div>
       </header>
 
-      <main className="container max-w-6xl mx-auto px-4 py-6 space-y-8">
+      <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6 sm:space-y-8">
         <section className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
@@ -604,10 +604,10 @@ export default function EdgeCardPage() {
         </section>
       </main>
 
-      <div className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(0,0,0,0.12)]">
-        <div className="container max-w-6xl mx-auto px-4 py-3 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
+      <div className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(0,0,0,0.12)] safe-pb">
+        <div className="container max-w-6xl mx-auto py-3 space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="min-w-0">
               <p className="text-xs font-display font-bold text-foreground">
                 Edge Card {cardSize} · {slip.length} / {cardSize} selected
               </p>
@@ -625,12 +625,24 @@ export default function EdgeCardPage() {
                 </ul>
               ) : null}
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={clearSlip} disabled={!slip.length}>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="touch-manipulation min-h-10 sm:min-h-9"
+                onClick={clearSlip}
+                disabled={!slip.length}
+              >
                 <Trash2 className="w-3.5 h-3.5" />
                 Clear
               </Button>
-              <Button variant="secondary" size="sm" onClick={saveSlipToHistory} disabled={!slip.length}>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="touch-manipulation min-h-10 sm:min-h-9"
+                onClick={saveSlipToHistory}
+                disabled={!slip.length}
+              >
                 Save to history
               </Button>
             </div>

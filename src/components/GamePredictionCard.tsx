@@ -32,7 +32,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.1 }}
       onClick={() => onSelect(game)}
-      className="card-shine bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group"
+      className="card-shine bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
     >
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
@@ -125,19 +125,19 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
 
       {/* Lines row */}
       {game.lines && (game.lines.spread || game.lines.total != null || game.lines.homeMl) && (
-        <div className="px-4 py-2 border-t border-border/60 flex items-center gap-3 text-[11px] text-muted-foreground">
+        <div className="px-4 py-2 border-t border-border/60 flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           {game.lines.spread && (
-            <span>
+            <span className="whitespace-nowrap">
               Spread <span className="text-foreground font-semibold">{game.lines.spread}</span>
             </span>
           )}
           {game.lines.total != null && (
-            <span>
+            <span className="whitespace-nowrap">
               O/U <span className="text-foreground font-semibold">{game.lines.total}</span>
             </span>
           )}
           {game.lines.homeMl && game.lines.awayMl && (
-            <span className="ml-auto">
+            <span className="ml-auto whitespace-nowrap">
               {game.awayTeam.abbreviation}{" "}
               <span className={`font-semibold ${game.lines.awayMl.startsWith("-") ? "text-confidence-high" : "text-foreground"}`}>
                 {game.lines.awayMl}
