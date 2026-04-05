@@ -6,6 +6,11 @@ interface ImportMetaEnv {
   /** the-odds-api.com — optional cross-book lines (500 free tier / month) */
   readonly VITE_THE_ODDS_API_KEY?: string;
   /**
+   * Optional: The Odds API `sport_key` for NFL draft / outrights when catalog discovery fails.
+   * See GET /v4/sports?all=true — keys vary by season.
+   */
+  readonly VITE_THE_ODDS_API_NFL_DRAFT_SPORT_KEY?: string;
+  /**
    * Optional override: absolute URL to GET `{ items, accuracy? }` (query: sport, statType, id).
    * If unset, `VITE_SUPABASE_URL` + anon key target `/functions/v1/player-edge`. Mock fallback on error.
    */

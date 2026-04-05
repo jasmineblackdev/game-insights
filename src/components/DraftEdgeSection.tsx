@@ -11,7 +11,13 @@ import {
   type DraftEdgeDataSource,
   type DraftEdgeMockReason,
 } from "@/lib/draftEdgeApi";
-import { TrendingUp, Users, Target, Zap } from "lucide-react";
+import {
+  fetchNflDraftOddsBoard,
+  formatAmericanOdds,
+  hasTheOddsApiKey,
+  type DraftOddsSection,
+} from "@/lib/draftOddsApi";
+import { TrendingUp, Users, Target, Zap, LineChart } from "lucide-react";
 
 const DRAFT_EDGE_YEAR: Record<League, number> = {
   nfl: 2026,
@@ -274,6 +280,121 @@ function leagueDraftBlurb(league: League): string {
   }
 }
 
+const DRAFT_ODDS_ROWS_CAP = 14;
+
+function DraftSportsbookOddsPanel({ league }: { league: League }) {
+  const enabled = league === "nfl" && hasTheOddsApiKey();
+  const { data, isPending, isError } = useQuery({
+    queryKey: ["draft-odds-nfl"],
+    queryFn: fetchNflDraftOddsBoard,
+    staleTime: 60 * 60 * 1000,
+    enabled,
+  });
+
+  if (!enabled) return null;
+
+  if (isPending) {
+    return (
+      <div className="rounded-lg border border-border bg-card/50 p-4 space-y-2" aria-busy="true">
+        <div className="h-3 w-40 rounded bg-muted animate-pulse" />
+        <div className="h-24 rounded bg-muted/50 animate-pulse" />
+      </div>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-700 dark:text-amber-300">
+        Couldn&apos;t load sportsbook draft lines from The Odds API. Try again later.
+      </div>
+    );
+  }
+
+  if (data.note === "no_api_key") return null;
+
+  if (data.note === "no_sport") {
+    return (
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-700 dark:text-amber-300 space-y-2">
+        <p className="font-semibold text-foreground">Sportsbook board (The Odds API)</p>
+        <p>
+          No active NFL draft sport matched in the API catalog. If your plan includes draft outrights, set{" "}
+          <span className="font-mono text-[10px]">VITE_THE_ODDS_API_NFL_DRAFT_SPORT_KEY</span> to the exact{" "}
+          <span className="font-mono text-[10px]">sport_key</span> from{" "}
+          <span className="font-mono text-[10px]">GET /v4/sports?all=true</span>, then redeploy.
+        </p>
+      </div>
+    );
+  }
+
+  if (!data.sections.length) {
+    const detail =
+      data.note === "empty" || data.note === "no_outcomes"
+        ? "The API returned no outright outcomes for this sport (markets may be offline or not on your plan)."
+        : data.note?.startsWith("http_")
+          ? `Request failed (${data.note.replace("http_", "")}).`
+          : "Unexpected empty response.";
+    return (
+      <div className="rounded-lg border border-border bg-muted/20 p-4 text-xs text-muted-foreground space-y-1">
+        <p className="font-semibold text-foreground flex items-center gap-2">
+          <LineChart className="w-3.5 h-3.5" />
+          Sportsbook board (The Odds API)
+        </p>
+        <p>{detail}</p>
+        {data.sportKey ? (
+          <p className="font-mono text-[10px] opacity-80">
+            sport_key: {data.sportKey}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-primary/25 bg-card/60 p-4 space-y-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-display font-bold text-foreground flex items-center gap-2">
+          <LineChart className="w-4 h-4 text-primary" />
+          Sportsbook board
+        </p>
+        <p className="text-[10px] text-muted-foreground">
+          The Odds API · US · outrights · DraftKings when available
+          {data.sportKey ? (
+            <span className="font-mono ml-1 opacity-80">({data.sportKey})</span>
+          ) : null}
+        </p>
+      </div>
+      <p className="text-[10px] text-muted-foreground leading-relaxed">
+        Book prices for reference only — not GameLens model output. Lines change; this panel caches for about an hour.
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {data.sections.map((sec: DraftOddsSection, i: number) => {
+          const shown = sec.rows.slice(0, DRAFT_ODDS_ROWS_CAP);
+          const more = sec.rows.length - shown.length;
+          return (
+            <div key={`${sec.title}-${i}`} className="rounded-md border border-border bg-background/40 overflow-hidden">
+              <div className="px-3 py-2 border-b border-border flex flex-wrap items-center justify-between gap-2 bg-muted/30">
+                <span className="text-xs font-bold text-foreground">{sec.title}</span>
+                <span className="text-[10px] font-semibold text-muted-foreground">{sec.book}</span>
+              </div>
+              <ul className="divide-y divide-border max-h-[min(22rem,50vh)] overflow-y-auto">
+                {shown.map((row, j) => (
+                  <li key={`${row.label}-${j}`} className="px-3 py-2 flex items-center justify-between gap-3 text-xs">
+                    <span className="text-foreground font-medium leading-snug min-w-0">{row.label}</span>
+                    <span className="tabular-nums font-bold text-confidence-high shrink-0">{formatAmericanOdds(row.american)}</span>
+                  </li>
+                ))}
+              </ul>
+              {more > 0 ? (
+                <p className="px-3 py-1.5 text-[10px] text-muted-foreground border-t border-border">+{more} more</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function DraftDataSourceNote({
   source,
   mockReason,
@@ -351,6 +472,8 @@ export function DraftEdgeSection({ league }: { league: League }) {
         <p className="text-sm text-muted-foreground max-w-2xl leading-relaxed">{leagueDraftBlurb(league)}</p>
         {!isPending ? <DraftDataSourceNote source={data?.source} mockReason={data?.mockReason} /> : null}
       </div>
+
+      <DraftSportsbookOddsPanel league={league} />
 
       <div className="space-y-2">
         <p className="text-[10px] font-semibold tracking-wider text-muted-foreground flex items-center gap-2">
