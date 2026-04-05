@@ -47,7 +47,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           {showEdgeBadge ? (
             <span
               className="text-[10px] font-bold tracking-wide text-amber-600 dark:text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/25"
-              title="Model win % differs from moneyline implied by more than 7 pts"
+              title="Model home win % differs from market (moneyline de-vig and/or spread heuristic) by more than 7 pts"
             >
               ⚡ EDGE
             </span>

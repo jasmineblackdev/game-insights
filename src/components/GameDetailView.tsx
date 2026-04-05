@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { GamePrediction } from "@/data/mockGames";
 import { useEdgeCardOptional } from "@/context/EdgeCardContext";
 import { getFavoredSide, type EdgeSide } from "@/lib/edgeCardScoring";
+import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
@@ -52,7 +54,18 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
             <Clock className="w-3.5 h-3.5 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">{game.gameTime}</span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {showModelMarketEdgeBadge(game) ? (
+              <span
+                className={cn(
+                  "text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border",
+                  "text-amber-600 dark:text-amber-400 bg-amber-500/15 border-amber-500/25"
+                )}
+                title="Model home win % differs from market (ML de-vig / spread heuristic) by more than 7 pts"
+              >
+                ⚡ EDGE
+              </span>
+            ) : null}
             {game.situationalTags.map((tag) => (
               <span key={tag} className="text-[10px] font-semibold tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
                 {tag}

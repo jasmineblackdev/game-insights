@@ -16,9 +16,20 @@ export type PlayerEdgeStatFilter =
   | "shots"
   | "shots_on_target";
 
+export type PlayerRiskTier = "safe" | "balanced" | "high_upside" | "longshot";
+
+export type PlayerConsistencyLabel = "stable" | "medium" | "volatile";
+
 export type PlayerEdgePrediction = PlayerPropInput & {
   /** Lower = earlier kick / tip for default sort tie-breaker */
   game_sort: number;
+  /** 0–100 model confidence (optional; API / future engine). */
+  confidence_score_0_100?: number;
+  /** Transparency bullets — falls back to reason_1 / reason_2 in UI when absent. */
+  explanations?: string[];
+  risk_tier?: PlayerRiskTier;
+  consistency_label?: PlayerConsistencyLabel;
+  trend_note?: string;
 };
 
 const CONF_RANK = { HIGH: 0, MED: 1, LOW: 2 } as const;
@@ -43,6 +54,16 @@ export const PLAYER_EDGE_MOCK: PlayerEdgePrediction[] = [
     reason_2: "Opponent allows strong scoring output to primary wings",
     risk_factor: "Blowout risk may reduce late-game minutes",
     game_sort: 100,
+    confidence_score_0_100: 78,
+    explanations: [
+      "Opponent allows top-10 points to primary wings this month",
+      "Last 5 games: +3.1 pts vs season average",
+      "Starter minutes up ~2 mpg vs prior 10",
+      "Pace environment +2.4 poss vs league avg",
+    ],
+    risk_tier: "balanced",
+    consistency_label: "medium",
+    trend_note: "▲ 4-game increase in scoring volume",
   },
   {
     id: "pred_002",
@@ -63,6 +84,10 @@ export const PLAYER_EDGE_MOCK: PlayerEdgePrediction[] = [
     reason_2: "Minutes slightly down vs prior week",
     risk_factor: "Garbage-time scoring could flip closing stretch",
     game_sort: 110,
+    confidence_score_0_100: 61,
+    risk_tier: "high_upside",
+    consistency_label: "volatile",
+    trend_note: "▼ Slightly lower shot share last 3 games",
   },
   {
     id: "pred_003",

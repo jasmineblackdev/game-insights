@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
@@ -75,10 +76,18 @@ function HubPickCard({
       className="rounded-lg border border-border bg-card/80 p-4 space-y-3 hover:border-primary/25 transition-colors"
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
             {leagueShort(g.league)}
           </span>
+          {showModelMarketEdgeBadge(g) ? (
+            <span
+              className="text-[10px] font-bold tracking-wide text-amber-600 dark:text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-full border border-amber-500/25"
+              title="Model vs market disagreement"
+            >
+              ⚡ EDGE
+            </span>
+          ) : null}
         </div>
         <span className="text-[10px] text-muted-foreground tabular-nums">
           {formatDistanceToNow(new Date(g.lastUpdated), { addSuffix: true })}
