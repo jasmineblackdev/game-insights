@@ -1,15 +1,14 @@
 import type { GamePrediction, League, PlayerTrendData, SoccerIntel, TeamData } from "@/data/mockGames";
 import {
+  addCalendarDaysYmd,
   buildEdges,
   buildLines,
   confidenceFromSoccerThreeWay,
   easternYmd,
   fetchEspnScoreboardEvents,
   formatGameTime,
-  gameDateFromEasternTip,
   isoToEasternYmd,
   mapStatus,
-  mergeScoreboardDays,
   nextCalendarYmd,
   overallRecord,
   probThreeWayFromAmerican,
@@ -20,6 +19,7 @@ import {
   type EspnEvent,
   ymdToParam,
 } from "@/lib/espnShared";
+import type { GameDate } from "@/data/mockGames";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 import { mergeSoccerVendorIntel } from "@/lib/soccerVendorIntel";
@@ -27,6 +27,14 @@ import { mergeSoccerVendorIntel } from "@/lib/soccerVendorIntel";
 export { easternYmd } from "@/lib/espnShared";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard";
+
+/** Map kickoff (US Eastern calendar day) to UI bucket — EPL often has empty "today". */
+function soccerGameDateBucket(easternGameYmd: string, todayEastern: string): GameDate {
+  if (easternGameYmd === todayEastern) return "today";
+  const tom = nextCalendarYmd(todayEastern);
+  if (easternGameYmd === tom) return "tomorrow";
+  return "week";
+}
 
 function soccerTeamHeuristics(tableStrength: number): Pick<TeamData, "offensiveRating" | "defensiveRating" | "pace"> {
   const s = Math.min(0.95, Math.max(0.05, tableStrength));
@@ -94,7 +102,7 @@ function buildTeam(c: EspnCompetitor): TeamData {
   };
 }
 
-function eventToPrediction(event: EspnEvent, todayEastern: string): GamePrediction | null {
+function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: string): GamePrediction | null {
   const comp = event.competitions?.[0];
   if (!comp?.competitors || comp.competitors.length < 2) return null;
 
@@ -102,6 +110,10 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   const away = buildTeam(awayC);
   const home = buildTeam(homeC);
   const status = mapStatus(comp.status.type.state);
+
+  const easternGameYmd = isoToEasternYmd(comp.date);
+  if (easternGameYmd > weekEndYmd) return null;
+  if (easternGameYmd < todayEastern && status !== "live") return null;
 
   const odd = comp.odds?.[0];
   const spread = odd?.spread;
@@ -117,12 +129,20 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   const prob = { home: threeWay.home, away: threeWay.away };
   const confidence = confidenceFromSoccerThreeWay(threeWay, spread != null ? Math.abs(spread) : undefined);
 
-  const easternGameYmd = isoToEasternYmd(comp.date);
-  const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
+  const gameDate = soccerGameDateBucket(easternGameYmd, todayEastern);
   const tags: string[] = [];
   if (status === "live") tags.push("LIVE");
   else if (status === "final") tags.push("FINAL");
   else tags.push("EPL", "SOCCER");
+  if (gameDate === "week") {
+    const short = new Date(`${easternGameYmd}T18:00:00`).toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+    });
+    tags.push(short.toUpperCase());
+  }
 
   const topSide = threeWay.home >= threeWay.away ? home.abbreviation : away.abbreviation;
   const topWin = Math.max(threeWay.home, threeWay.away);
@@ -185,18 +205,13 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
 
 export async function fetchSoccerGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
-  const tomorrow = nextCalendarYmd(today);
-
-  const [e0, e1] = await Promise.all([
-    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(today)),
-    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(tomorrow)),
-  ]);
-
-  const merged = mergeScoreboardDays(e0, e1);
+  const weekEnd = addCalendarDaysYmd(today, 7);
+  const rangeParam = `${ymdToParam(today)}-${ymdToParam(weekEnd)}`;
+  const merged = await fetchEspnScoreboardEvents(SCOREBOARD, rangeParam);
 
   const predictions: GamePrediction[] = [];
   for (const event of merged) {
-    const p = eventToPrediction(event, today);
+    const p = eventToPrediction(event, today, weekEnd);
     if (p) predictions.push(p);
   }
 

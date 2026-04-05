@@ -186,7 +186,13 @@ export default function EdgeCardPage() {
     for (const q of results) {
       if (q.data) merged.push(...q.data);
     }
-    return merged.filter((g) => g.gameDate === "today" && g.status === "upcoming");
+    return merged.filter(
+      (g) =>
+        g.status === "upcoming" &&
+        (g.gameDate === "today" ||
+          g.gameDate === "tomorrow" ||
+          (g.league === "soccer" && g.gameDate === "week"))
+    );
   }, [results]);
 
   const gameById = useMemo(() => new Map(allGames.map((g) => [g.id, g])), [allGames]);

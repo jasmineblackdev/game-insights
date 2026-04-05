@@ -2,7 +2,8 @@ export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
 export type League = "nba" | "nfl" | "mlb" | "soccer";
-export type GameDate = "today" | "tomorrow";
+/** Soccer also uses "week" for fixtures within the next 7 days (sparse EPL calendar). */
+export type GameDate = "today" | "tomorrow" | "week";
 
 export type PitcherCertainty = "confirmed" | "probable" | "unknown";
 

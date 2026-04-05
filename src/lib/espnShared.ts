@@ -32,6 +32,14 @@ export function previousCalendarYmd(ymd: string): string {
   return `${ud.getUTCFullYear()}-${String(ud.getUTCMonth() + 1).padStart(2, "0")}-${String(ud.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** Add signed day delta to YYYY-MM-DD (calendar math in UTC components). */
+export function addCalendarDaysYmd(ymd: string, delta: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const ud = new Date(Date.UTC(y, m - 1, d));
+  ud.setUTCDate(ud.getUTCDate() + delta);
+  return `${ud.getUTCFullYear()}-${String(ud.getUTCMonth() + 1).padStart(2, "0")}-${String(ud.getUTCDate()).padStart(2, "0")}`;
+}
+
 export function ymdToParam(ymd: string): string {
   return ymd.replace(/-/g, "");
 }
