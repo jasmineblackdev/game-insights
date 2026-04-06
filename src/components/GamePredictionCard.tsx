@@ -13,7 +13,8 @@ import {
   betWindowClass,
   getUpcomingBetTip,
 } from "@/lib/liveGameState";
-import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp } from "lucide-react";
+import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp, ArrowRight } from "lucide-react";
+import { buildPredictionVersions, isLiveTriggerMet, phaseColor } from "@/lib/predictionVersions";
 
 interface GamePredictionCardProps {
   game: GamePrediction;
@@ -38,6 +39,13 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const finalCtx = getFinalPredictionContext(game);
   const betWindow = getBetWindow(game);
   const upcomingBetTip = getUpcomingBetTip(game);
+
+  // Prediction versions
+  const versions = buildPredictionVersions(game);
+  const pregameVer = versions.find((v) => v.phase === "pregame");
+  const liveVer = versions.find((v) => v.phase !== "pregame" && v.phase !== "final");
+  const liveTriggerMet = isLiveTriggerMet(game);
+  const showProbShift = liveVer && pregameVer && Math.abs(liveVer.probability - pregameVer.probability) >= 3;
 
   return (
     <motion.div
@@ -78,6 +86,20 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
               title={liveCtx.tip}
             >
               🔴 {liveCtx.badge}
+            </span>
+          ) : null}
+          {/* Prediction phase badge */}
+          {game.status === "upcoming" ? (
+            <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${phaseColor("pregame")}`}>
+              PREGAME EDGE
+            </span>
+          ) : game.status === "live" && liveTriggerMet ? (
+            <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border animate-pulse ${phaseColor("live_q1")}`}>
+              ● LIVE EDGE ACTIVE
+            </span>
+          ) : game.status === "live" ? (
+            <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${phaseColor("pregame")}`}>
+              PREGAME EDGE
             </span>
           ) : null}
           {game.situationalTags
@@ -134,6 +156,17 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
           {tw ? <div className="text-[10px] text-muted-foreground mt-0.5">win</div> : null}
         </div>
       </div>
+
+      {/* Probability shift row (pregame → live) */}
+      {showProbShift && pregameVer && liveVer ? (
+        <div className="px-4 pb-1 flex items-center justify-center gap-2 text-[10px]">
+          <span className="text-muted-foreground">Pregame</span>
+          <span className="font-semibold text-foreground tabular-nums">{pregameVer.probability}%</span>
+          <ArrowRight className="w-3 h-3 text-muted-foreground" />
+          <span className="font-semibold text-confidence-high tabular-nums">{liveVer.probability}%</span>
+          <span className="text-confidence-high">Live</span>
+        </div>
+      ) : null}
 
       {/* Quick Insights */}
       <div className="px-4 pb-3 space-y-1.5">

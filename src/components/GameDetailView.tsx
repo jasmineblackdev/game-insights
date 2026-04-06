@@ -11,7 +11,7 @@ import { TeamLogo } from "./TeamLogo";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { InjuryImpactMeter } from "./InjuryImpactMeter";
 import { PlayerTrendCard } from "./PlayerTrendCard";
-import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud, Layers, Plus, TrendingUp } from "lucide-react";
+import { ArrowLeft, Zap, AlertTriangle, Target, Swords, Clock, RefreshCw, DollarSign, Info, Cloud, Layers, Plus, TrendingUp, History, ArrowRight } from "lucide-react";
 import {
   getBetWindow,
   betWindowClass,
@@ -19,6 +19,7 @@ import {
   getFinalPredictionContext,
   finalPredictionAccuracyClass,
 } from "@/lib/liveGameState";
+import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type PredictionVersion } from "@/lib/predictionVersions";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -38,6 +39,7 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
   const timeAgo = Math.round((Date.now() - updatedAt.getTime()) / 60000);
   const betWindow = getBetWindow(game);
   const upcomingBetTip = getUpcomingBetTip(game);
+  const predictionVersions = buildPredictionVersions(game);
   const finalCtx = getFinalPredictionContext(game);
 
   return (
@@ -258,6 +260,124 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
               </div>
             </div>
           ) : null}
+        </div>
+      )}
+
+      {/* Prediction Timeline */}
+      {predictionVersions.length > 0 && (
+        <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
+          <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-4">
+            <History className="w-4 h-4 text-primary" />
+            Prediction Timeline
+          </h3>
+
+          <div className="space-y-0">
+            {predictionVersions.map((ver, i) => {
+              const isLast = i === predictionVersions.length - 1;
+              const prev = i > 0 ? predictionVersions[i - 1] : null;
+              const shift = prev && ver.phase !== "final"
+                ? ver.probability - prev.probability
+                : null;
+
+              return (
+                <div key={ver.id} className="relative pl-6">
+                  {/* Timeline spine */}
+                  {!isLast && (
+                    <div className="absolute left-[7px] top-6 bottom-0 w-px bg-border" />
+                  )}
+                  {/* Node dot */}
+                  <div className={`absolute left-0 top-1.5 w-3.5 h-3.5 rounded-full border-2 ${
+                    ver.phase === "final"
+                      ? "bg-muted border-border"
+                      : ver.phase === "pregame"
+                        ? "bg-primary/20 border-primary"
+                        : "bg-confidence-high/20 border-confidence-high"
+                  }`} />
+
+                  <div className={`pb-5 ${!isLast ? "" : ""}`}>
+                    {/* Phase header */}
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <span className={`text-[10px] font-bold tracking-wide px-2 py-0.5 rounded-full border ${phaseColor(ver.phase)}`}>
+                        {phaseLabel(ver.phase)}
+                      </span>
+                      {shift !== null && shift !== 0 && (
+                        <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${shift > 0 ? "text-confidence-high" : "text-risk"}`}>
+                          {shift > 0 ? "↑" : "↓"} {Math.abs(shift)}pp
+                        </span>
+                      )}
+                    </div>
+
+                    {ver.phase === "final" ? (
+                      /* Final result block */
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-foreground">{ver.reasons[0]}</p>
+                        {(() => {
+                          const fh = game._meta?.finalHomeScore;
+                          const fa = game._meta?.finalAwayScore;
+                          const pregame = predictionVersions.find(v => v.phase === "pregame");
+                          if (!pregame || fh == null || fa == null) return null;
+                          const homeWon = fh > fa;
+                          const modelPickedHome = pregame.predictedSide === game.homeTeam.abbreviation;
+                          const correct = (modelPickedHome && homeWon) || (!modelPickedHome && !homeWon);
+                          return (
+                            <p className={`text-xs font-medium ${correct ? "text-confidence-high" : "text-amber-600 dark:text-amber-400"}`}>
+                              {correct ? "✓ Model prediction matched the winner" : "✗ Model favored the losing side"}
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    ) : (
+                      /* Pregame / Live prediction block */
+                      <div className="space-y-2">
+                        {/* Probability + confidence */}
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-lg font-display font-bold text-foreground tabular-nums">
+                            {ver.predictedSide} {ver.probability}%
+                          </span>
+                          <span className={`text-[10px] font-bold ${confColor(ver.confidence)}`}>
+                            {ver.confidence}
+                          </span>
+                        </div>
+
+                        {/* Live state snapshot */}
+                        {ver.liveStateSnapshot && (
+                          <div className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground bg-muted/40 rounded px-2 py-0.5">
+                            <span>{game.awayTeam.abbreviation} {ver.liveStateSnapshot.scoreAway}</span>
+                            <span>–</span>
+                            <span>{ver.liveStateSnapshot.scoreHome} {game.homeTeam.abbreviation}</span>
+                            <span className="text-border">·</span>
+                            <span>Period {ver.liveStateSnapshot.period}</span>
+                          </div>
+                        )}
+
+                        {/* Reasons */}
+                        <ul className="space-y-1">
+                          {ver.reasons.map((r, ri) => (
+                            <li key={ri} className="flex items-start gap-2 text-xs text-secondary-foreground">
+                              <span className="text-confidence-high font-bold mt-0.5 shrink-0 text-[10px]">{ri + 1}</span>
+                              <span>{r}</span>
+                            </li>
+                          ))}
+                        </ul>
+
+                        {/* Risks */}
+                        {ver.risks.length > 0 && (
+                          <ul className="space-y-0.5">
+                            {ver.risks.map((r, ri) => (
+                              <li key={ri} className="flex items-start gap-2 text-xs text-muted-foreground">
+                                <span className="text-risk font-bold mt-0.5 shrink-0 text-[10px]">!</span>
+                                <span>{r}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
