@@ -37,6 +37,42 @@ export interface SoccerIntel {
   scheduleSource?: "football-data.org" | "espn-scoreboard";
 }
 
+/**
+ * Structured output from the MLB weighted prediction model.
+ * Stored per-game for display and backtesting.
+ */
+export interface MlbModelOutput {
+  /** Why the model favors one starter over the other. */
+  pitcherEdge: string;
+  /** Handedness-based batting-split assessment. */
+  battingEdge: string;
+  /** Bullpen fatigue differential. */
+  bullpenEdge: string;
+  /** Recent-form differential. */
+  formEdge: string;
+  /** Park-environment note. */
+  parkNote: string;
+  /** Non-null when a significant risk caveat exists. */
+  riskFlag: string | null;
+  /** True when probable pitchers have not been announced. */
+  pendingConfirmation: boolean;
+  /** Internal debug snapshot — not displayed in UI. */
+  _debug: {
+    pitcherScore: number;
+    battingScore: number;
+    bullpenScore: number;
+    formScore: number;
+    restScore: number;
+    combinedDelta: number;
+    hasOdds: boolean;
+    hasStats: boolean;
+    homePitcherEra: number | null;
+    awayPitcherEra: number | null;
+    homePitcherWhip: number | null;
+    awayPitcherWhip: number | null;
+  };
+}
+
 /** MLB-specific pregame signals — populated from ESPN when available. */
 export interface MlbIntel {
   awayProbablePitcher?: string;
@@ -44,8 +80,12 @@ export interface MlbIntel {
   awayPitcherHand?: "L" | "R";
   homePitcherHand?: "L" | "R";
   pitcherCertainty: PitcherCertainty;
+  /** True once the starting lineup is posted (populated when ESPN confirms it). */
+  lineupConfirmed?: boolean;
   /** Bullpen / park / handedness / lineup sensitivity */
   modelNotes: string[];
+  /** Structured output from the MLB weighted prediction model. */
+  modelOutput?: MlbModelOutput;
 }
 
 export interface PlayerInjury {
@@ -150,6 +190,9 @@ export interface GamePrediction {
     /** Final score — populated for status === "final" games. */
     finalHomeScore?: number;
     finalAwayScore?: number;
+    /** ESPN athlete IDs for probable pitchers — used to fetch ERA/WHIP stats. */
+    homePitcherAthleteId?: string;
+    awayPitcherAthleteId?: string;
   };
 }
 

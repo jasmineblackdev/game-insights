@@ -25,11 +25,12 @@ import {
 } from "@/lib/espnShared";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
+import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
 
 /** Run-environment park factor by home team abbreviation. >1 = hitter's park, <1 = pitcher's park. */
-const MLB_PARK_FACTORS: Record<string, { factor: number; note: string }> = {
+export const MLB_PARK_FACTORS: Record<string, { factor: number; note: string }> = {
   COL: { factor: 1.18, note: "Coors Field — extreme hitter's park; run totals and WHIP are inflated." },
   TEX: { factor: 1.10, note: "Globe Life Field — hitter-friendly; warm air and dimensions aid fly balls." },
   CIN: { factor: 1.08, note: "Great American Ball Park — HR-prone; starters need ground-ball tendencies." },
@@ -47,6 +48,7 @@ const MLB_PARK_FACTORS: Record<string, { factor: number; note: string }> = {
 };
 
 interface ProbablePitcher {
+  id?: string;   // ESPN athlete ID — used to fetch ERA/WHIP stats
   name: string;
   hand?: "L" | "R";
   homeAway: "home" | "away";
@@ -61,6 +63,7 @@ function parseProbablePitchers(comp: EspnCompetition): ProbablePitcher[] {
     const athlete = p.athlete as Record<string, unknown> | undefined;
     const name = (athlete?.displayName ?? athlete?.fullName ?? "") as string;
     if (!name) return [];
+    const id = (athlete?.id as string | undefined) ?? undefined;
     const homeAway = (p.homeAway as string) === "home" ? "home" : "away";
     const stats = p.statistics as Array<Record<string, unknown>> | undefined;
     const throwingStat = stats?.find((s) => s.name === "throws" || s.name === "throwingHand");
@@ -69,8 +72,16 @@ function parseProbablePitchers(comp: EspnCompetition): ProbablePitcher[] {
     const rawHand = typeof rawHandRaw === "string" ? rawHandRaw : "";
     const hand: "L" | "R" | undefined =
       rawHand.toLowerCase().startsWith("l") ? "L" : rawHand.toLowerCase().startsWith("r") ? "R" : undefined;
-    return [{ name, hand, homeAway }];
+    return [{ id, name, hand, homeAway }];
   });
+}
+
+function parsePitcherAthleteIds(comp: EspnCompetition): { homeId?: string; awayId?: string } {
+  const pitchers = parseProbablePitchers(comp);
+  return {
+    homeId: pitchers.find((p) => p.homeAway === "home")?.id,
+    awayId: pitchers.find((p) => p.homeAway === "away")?.id,
+  };
 }
 
 function buildMlbIntel(comp: EspnCompetition): MlbIntel {
@@ -192,6 +203,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   }
 
   const mlbIntel = buildMlbIntel(comp);
+  const pitcherIds = parsePitcherAthleteIds(comp);
   const parkEntry = MLB_PARK_FACTORS[home.abbreviation.toUpperCase()];
   if (parkEntry) {
     mlbIntel.modelNotes.push(parkEntry.note);
@@ -278,6 +290,8 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       ...(status === "final" && homeC.score != null && awayC.score != null
         ? { finalHomeScore: Number(homeC.score), finalAwayScore: Number(awayC.score) }
         : {}),
+      ...(pitcherIds.homeId ? { homePitcherAthleteId: pitcherIds.homeId } : {}),
+      ...(pitcherIds.awayId ? { awayPitcherAthleteId: pitcherIds.awayId } : {}),
     },
   };
 }
@@ -303,5 +317,8 @@ export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
 
   let out = await enrichGamePredictions(predictions, "mlb");
   out = await mergeTheOddsApiNotes(out, "baseball_mlb");
+  // Apply the weighted MLB prediction model (pitcher ERA/WHIP, bullpen fatigue, etc.)
+  // Runs after enrichment so B2B tags and injury-adjusted probabilities are in place.
+  out = await applyMlbPredictionModel(out);
   return out;
 }
