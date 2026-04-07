@@ -308,11 +308,11 @@ export function getBetWindow(game: GamePrediction): BetWindow | null {
       };
     }
     if (periodNum >= 4) {
-      if (margin >= 10) {
+      if (margin >= 14) {
         return {
           phase: "closed",
           label: "WINDOW CLOSED",
-          tip: `${leader} +${margin} in Q4. Line has fully moved — no meaningful edge available.`,
+          tip: `${leader} +${margin} in Q4. Line has fully corrected — no meaningful edge available.`,
           timing: "No value",
         };
       }

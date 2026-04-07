@@ -45,7 +45,11 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const pregameVer = versions.find((v) => v.phase === "pregame");
   const liveVer = versions.find((v) => v.phase !== "pregame" && v.phase !== "final");
   const liveTriggerMet = isLiveTriggerMet(game);
-  const showProbShift = liveVer && pregameVer && Math.abs(liveVer.probability - pregameVer.probability) >= 3;
+  const showProbShift =
+    liveVer &&
+    pregameVer &&
+    (Math.abs(liveVer.probability - pregameVer.probability) >= 2 ||
+      liveVer.confidence !== pregameVer.confidence);
 
   return (
     <motion.div

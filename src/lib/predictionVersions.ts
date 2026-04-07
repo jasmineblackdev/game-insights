@@ -114,6 +114,10 @@ export function isLiveTriggerMet(game: GamePrediction): boolean {
   const ls = game._meta?.liveState;
   if (!ls) return false;
 
+  // Freshness gate — stale cached data must not fire the live edge signal
+  const dataAgeMs = Date.now() - new Date(game.lastUpdated).getTime();
+  if (dataAgeMs > 90_000) return false;
+
   const { periodNum, homeScore, awayScore, isHalftime } = ls;
   const diff = Math.abs(homeScore - awayScore);
 

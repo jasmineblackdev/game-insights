@@ -116,6 +116,8 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
   const easternGameYmd = isoToEasternYmd(comp.date);
   if (easternGameYmd > weekEndYmd) return null;
   if (easternGameYmd < todayEastern && status !== "live") return null;
+  // Skip completed games — weekly fixture view is for upcoming/live only
+  if (comp.status.type.state === "post") return null;
 
   const odd = comp.odds?.[0];
   const spread = odd?.spread;

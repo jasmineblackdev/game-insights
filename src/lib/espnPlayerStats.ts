@@ -99,18 +99,19 @@ function overallWinPct(competitor: EspnCompetitorRaw): number {
 
 /**
  * Project a player's output above/below their season average
- * based on the opponent's quality (win% proxy).
+ * based on opponent quality (win% proxy) and home/away context.
  * Weak opponent (< 40%): boost +6-8% above average
  * Strong opponent (> 60%): reduce 6-8% below average
- * Otherwise: neutral ±0-3%
+ * Home players receive a +2.5% usage/comfort boost.
  */
-function projectValue(seasonAvg: number, opponentWinPct: number): number {
+function projectValue(seasonAvg: number, opponentWinPct: number, isHome: boolean): number {
   let multiplier: number;
   if (opponentWinPct < 0.35) multiplier = 1.08;
   else if (opponentWinPct < 0.45) multiplier = 1.04;
   else if (opponentWinPct > 0.65) multiplier = 0.92;
   else if (opponentWinPct > 0.55) multiplier = 0.96;
   else multiplier = 1.0;
+  if (isHome) multiplier *= 1.025;
   return Math.round(seasonAvg * multiplier * 10) / 10;
 }
 
@@ -200,8 +201,9 @@ async function fetchSportPlayerEdge(
 
     for (const competitor of [home, away]) {
       const teamAbbr = competitor.team?.abbreviation ?? "";
-      const oppAbbr = competitor === home ? awayAbbr : homeAbbr;
-      const oppCompetitor = competitor === home ? away : home;
+      const isHome = competitor === home;
+      const oppAbbr = isHome ? awayAbbr : homeAbbr;
+      const oppCompetitor = isHome ? away : home;
       const opponentWinPct = overallWinPct(oppCompetitor);
 
       for (const category of competitor.leaders ?? []) {
@@ -215,7 +217,7 @@ async function fetchSportPlayerEdge(
         const value = topLeader.value ?? Number.parseFloat(topLeader.displayValue);
         if (!Number.isFinite(value) || value <= 0) continue;
 
-        const projected = projectValue(value, opponentWinPct);
+        const projected = projectValue(value, opponentWinPct, isHome);
         const edge = projected - value;
         const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
         const edgeMag = Math.abs(edge);

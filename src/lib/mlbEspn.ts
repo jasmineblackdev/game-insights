@@ -28,6 +28,24 @@ import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
 
+/** Run-environment park factor by home team abbreviation. >1 = hitter's park, <1 = pitcher's park. */
+const MLB_PARK_FACTORS: Record<string, { factor: number; note: string }> = {
+  COL: { factor: 1.18, note: "Coors Field — extreme hitter's park; run totals and WHIP are inflated." },
+  TEX: { factor: 1.10, note: "Globe Life Field — hitter-friendly; warm air and dimensions aid fly balls." },
+  CIN: { factor: 1.08, note: "Great American Ball Park — HR-prone; starters need ground-ball tendencies." },
+  PHI: { factor: 1.06, note: "Citizens Bank Park — slight hitter's edge; right-center gap is generous." },
+  BOS: { factor: 1.04, note: "Fenway Park — Green Monster inflates doubles; modest overall hitter edge." },
+  CHC: { factor: 1.03, note: "Wrigley Field — wind-dependent; out-blowing days flip it to a hitter's park." },
+  HOU: { factor: 0.97, note: "Minute Maid Park — dome; slight pitcher edge on off-days without roof issues." },
+  MIA: { factor: 0.96, note: "loanDepot Park — retractable roof; controlled conditions, slight pitcher edge." },
+  NYM: { factor: 0.95, note: "Citi Field — spacious outfield suppresses HRs; pitcher-friendly." },
+  OAK: { factor: 0.94, note: "Oakland Coliseum — wide foul territory and sea-level air favor pitchers." },
+  SF:  { factor: 0.93, note: "Oracle Park — marine layer and ocean wind create strong pitcher-friendly conditions." },
+  SEA: { factor: 0.92, note: "T-Mobile Park — retractable roof and deep alleys suppress offense." },
+  DET: { factor: 0.96, note: "Comerica Park — deep outfield, slight pitcher advantage on fly balls." },
+  SD:  { factor: 0.84, note: "Petco Park — strongest pitcher's park in MLB; run totals reliably suppressed." },
+};
+
 interface ProbablePitcher {
   name: string;
   hand?: "L" | "R";
@@ -174,12 +192,20 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   }
 
   const mlbIntel = buildMlbIntel(comp);
+  const parkEntry = MLB_PARK_FACTORS[home.abbreviation.toUpperCase()];
+  if (parkEntry) {
+    mlbIntel.modelNotes.push(parkEntry.note);
+  }
 
   let confidence = confidenceFromSpreadMlb(spread, prob.home);
   // MLB is uniquely pitcher-dependent: downgrade all tiers when starters unconfirmed
   if (mlbIntel.pitcherCertainty === "unknown") {
     if (confidence === "high") confidence = "medium";
     else if (confidence === "medium") confidence = "low";
+  }
+  // Extreme park factors increase run-environment variance — downgrade from HIGH
+  if (parkEntry && (parkEntry.factor >= 1.08 || parkEntry.factor <= 0.92)) {
+    if (confidence === "high") confidence = "medium";
   }
 
   const easternGameYmd = isoToEasternYmd(comp.date);
@@ -206,6 +232,11 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     spread != null && Math.abs(spread) <= 1.5
       ? "Tight runline — one swing can flip the cover."
       : "Late scratching of a key bat or reliever changes the script.",
+    ...(parkEntry && parkEntry.factor >= 1.08
+      ? [`Park factor risk: ${home.abbreviation}'s hitter-friendly park inflates run totals — totals bets and runline are higher variance here.`]
+      : parkEntry && parkEntry.factor <= 0.92
+      ? [`Park factor risk: ${home.abbreviation}'s pitcher-friendly park suppresses offense — low-total and starter-lean plays benefit.`]
+      : []),
   ];
 
   const upsetTeam = prob.home >= prob.away ? away.abbreviation : home.abbreviation;

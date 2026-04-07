@@ -58,8 +58,11 @@ function scheduleUrl(league: League, teamId: string): string | null {
 async function fetchTeamGameDates(league: League, teamId: string): Promise<Set<string>> {
   const url = scheduleUrl(league, teamId);
   if (!url) return new Set();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
     if (!res.ok) return new Set();
     const json = (await res.json()) as { events?: { competitions?: { date?: string }[] }[] };
     const dates = new Set<string>();
@@ -69,6 +72,7 @@ async function fetchTeamGameDates(league: League, teamId: string): Promise<Set<s
     }
     return dates;
   } catch {
+    clearTimeout(timer);
     return new Set();
   }
 }
@@ -84,6 +88,29 @@ async function fetchTeamScheduleMap(league: League, teamIds: string[]): Promise<
     slice.forEach((id, j) => out.set(id, results[j] ?? new Set()));
   }
   return out;
+}
+
+// ── Position multipliers (per-sport) ─────────────────────────────────────────
+
+const POSITION_MULTIPLIER: Record<string, Record<string, number>> = {
+  nfl: { QB: 2.5, RB: 1.2, FB: 1.1, WR: 1.1, TE: 1.0, OL: 1.0, OG: 1.0, OT: 1.0, C: 1.0, DE: 1.3, DT: 1.2, LB: 1.1, CB: 1.1, S: 1.1, SS: 1.1, FS: 1.1, K: 0.9, P: 0.7 },
+  mlb: { SP: 2.0, CP: 1.5, RP: 1.2, C: 1.2, SS: 1.3, "2B": 1.1, "3B": 1.1, "1B": 1.0, LF: 1.0, RF: 1.0, CF: 1.1, DH: 0.9 },
+  nba: { PG: 1.5, SG: 1.2, SF: 1.2, PF: 1.2, C: 1.3, G: 1.3, F: 1.2 },
+  soccer: { GK: 1.8, CB: 1.3, LB: 1.1, RB: 1.1, CM: 1.2, DM: 1.2, AM: 1.3, LW: 1.2, RW: 1.2, CF: 1.5, ST: 1.5 },
+};
+
+function applyPositionWeighting(injuries: PlayerInjury[], league: League): PlayerInjury[] {
+  const map = POSITION_MULTIPLIER[league];
+  if (!map) return injuries;
+  return injuries.map((i) => ({
+    ...i,
+    impactScore: Math.round(i.impactScore * (map[i.position.toUpperCase()] ?? 1.0)),
+  }));
+}
+
+/** Sum impactScore for OUT players only — GTD/QUESTIONABLE are too uncertain to shift win probability. */
+function computeInjuryPenalty(injuries: PlayerInjury[]): number {
+  return injuries.filter((i) => i.status === "OUT").reduce((sum, i) => sum + i.impactScore, 0);
 }
 
 export function mapEspnInjuryStatus(raw: string | undefined): InjuryStatus {
@@ -158,7 +185,17 @@ function statVal(stats: { name?: string; value?: number }[] | undefined, name: s
 async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<TeamData>> {
   const url = teamUrl(league, teamId);
   if (!url) return {};
-  const res = await fetch(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: controller.signal });
+  } catch {
+    clearTimeout(timer);
+    return {};
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) return {};
   const json = (await res.json()) as { team?: Record<string, unknown> };
   const team = json.team;
@@ -370,6 +407,9 @@ async function enrichOne(
     const fromSum = injuriesFromSummaryBlocks(summary.injuries, hid, aid);
     homeInj = mergeInjuryLists(homeInj, fromSum.home);
     awayInj = mergeInjuryLists(awayInj, fromSum.away);
+    // Apply position-weighted impact scores after merging all injury sources
+    homeInj = applyPositionWeighting(homeInj, league);
+    awayInj = applyPositionWeighting(awayInj, league);
 
     if (league === "nba" || league === "soccer") {
       const h2h = seasonSeriesNote(summary);
@@ -464,6 +504,21 @@ async function enrichOne(
     }
   }
 
+  // ── Injury-adjusted win probability (non-soccer only — skip 3-way draw model) ──
+  let winProbability = pred.winProbability;
+  if (league !== "soccer") {
+    const homePenalty = computeInjuryPenalty(homeInj);
+    const awayPenalty = computeInjuryPenalty(awayInj);
+    const netPenalty = homePenalty - awayPenalty; // positive = home team hurt more
+    if (Math.abs(netPenalty) >= 6) {
+      const shift = Math.min(Math.round(netPenalty * 0.25), 8);
+      winProbability = {
+        home: Math.max(5, Math.min(95, pred.winProbability.home - shift)),
+        away: Math.max(5, Math.min(95, pred.winProbability.away + shift)),
+      };
+    }
+  }
+
   const nextMeta =
     pred._meta && league === "nba" && nbaStatsApplied && nbaStatsSeason
       ? { ...pred._meta, nbaRatingsFromStats: true as const, nbaStatsSeason }
@@ -478,6 +533,7 @@ async function enrichOne(
     topReasons: topReasons.slice(0, 6),
     situationalTags,
     confidence,
+    winProbability,
     _meta: nextMeta,
   };
 }
