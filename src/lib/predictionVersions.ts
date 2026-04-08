@@ -166,7 +166,19 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
   if (!isLiveTriggerMet(game)) return null;
   const ls = game._meta!.liveState!;
 
-  const liveHomeProb = liveAdjustedHomeProb(game, game.winProbability.home);
+  let liveHomeProb = liveAdjustedHomeProb(game, game.winProbability.home);
+
+  // MLB F5: starter is usually still pitching — blend in the pregame pitcher quality lean.
+  // Weight: 70% score-based + 30% pitcher ERA quality (capped at ±3pp).
+  if (game.league === "mlb") {
+    const pitcherScore = game.mlb?.modelOutput?._debug?.pitcherScore ?? 0;
+    const pitcherAdj = clamp(Math.round(pitcherScore * 3), -3, 3);
+    const scoreDelta = liveHomeProb - game.winProbability.home;
+    liveHomeProb = clamp(
+      Math.round(game.winProbability.home + scoreDelta * 0.70 + pitcherAdj * 0.30),
+      5, 95
+    );
+  }
   const liveAwayProb = 100 - liveHomeProb;
   const pickedHome = liveHomeProb >= liveAwayProb;
   const predictedSide = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
@@ -210,7 +222,22 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
     reasons.push("No key QB injury reported — original prediction confidence intact.");
   } else if (game.league === "mlb") {
     reasons.push(`${periodLabel} complete — ${scoreStr}. Starter command and pitch count established.`);
-    reasons.push("F5 window: WHIP, walks, and velocity trend are now readable for both starters.");
+    // Incorporate pregame pitcher quality from the model output — starter is likely still pitching
+    const debug = game.mlb?.modelOutput?._debug;
+    if (debug?.hasStats) {
+      const ps = debug.pitcherScore;
+      const homeEra = debug.homePitcherEra;
+      const awayEra = debug.awayPitcherEra;
+      if (ps >= 0.15 && homeEra != null) {
+        reasons.push(`${homeAbbr} starter ERA advantage (${homeEra.toFixed(2)}) holding through F5 — pitcher quality lean intact.`);
+      } else if (ps <= -0.15 && awayEra != null) {
+        reasons.push(`${awayAbbr} starter ERA advantage (${awayEra.toFixed(2)}) confirmed through F5 — away pitcher edge reinforced.`);
+      } else {
+        reasons.push("F5 window: WHIP, walks, and velocity trend are now readable for both starters.");
+      }
+    } else {
+      reasons.push("F5 window: WHIP, walks, and velocity trend are now readable for both starters.");
+    }
     reasons.push("Bullpen bridge begins — leverage situations will refine late-inning edge.");
   } else {
     reasons.push(`${periodLabel} — ${scoreStr}. Opening shape and press intensity visible.`);

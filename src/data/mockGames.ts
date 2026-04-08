@@ -5,7 +5,8 @@ export type League = "nba" | "nfl" | "mlb" | "soccer";
 /** Soccer also uses "week" for fixtures within the next 7 days (sparse EPL calendar). */
 export type GameDate = "today" | "tomorrow" | "week";
 
-export type PitcherCertainty = "confirmed" | "probable" | "unknown";
+/** "partial" = one pitcher confirmed, the other still unknown. */
+export type PitcherCertainty = "confirmed" | "probable" | "partial" | "unknown";
 
 /**
  * Soccer is modeled on a different axis than NBA/NFL/MLB: low scoring, draws matter,

@@ -14,8 +14,10 @@ export interface PitcherStats {
   athleteId: string;
   era: number | null;
   whip: number | null;
-  k9: number | null;   // Strikeouts per 9 IP
-  ip: number | null;   // Innings pitched (sample-size guard)
+  k9: number | null;    // Strikeouts per 9 IP
+  bb9: number | null;   // Walks per 9 IP — command quality signal
+  kbb: number | null;   // K/BB ratio — compound command indicator (higher = sharper)
+  ip: number | null;    // Innings pitched (sample-size guard)
 }
 
 type RawStat = { name?: string; value?: number; displayValue?: string };
@@ -36,7 +38,7 @@ export async function fetchPitcherStats(athleteId: string): Promise<PitcherStats
   try {
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
-    if (!res.ok) return { athleteId, era: null, whip: null, k9: null, ip: null };
+    if (!res.ok) return { athleteId, era: null, whip: null, k9: null, bb9: null, kbb: null, ip: null };
 
     const json = (await res.json()) as {
       splits?: {
@@ -48,15 +50,17 @@ export async function fetchPitcherStats(athleteId: string): Promise<PitcherStats
     const pitching = cats.find((c) => /pitch/i.test(c.name ?? ""));
     const stats = pitching?.stats;
 
-    const era = findStat(stats, "ERA", "earnedRunAverage");
+    const era  = findStat(stats, "ERA", "earnedRunAverage");
     const whip = findStat(stats, "WHIP");
-    const ip = findStat(stats, "inningsPitched", "IP");
-    const k9 = findStat(stats, "strikeoutsPerNineInnings", "K/9", "kPer9");
+    const ip   = findStat(stats, "inningsPitched", "IP");
+    const k9   = findStat(stats, "strikeoutsPerNineInnings", "K/9", "kPer9");
+    const bb9  = findStat(stats, "walksPerNineInnings", "BB/9", "bbPer9", "walksAllowed");
+    const kbb  = k9 != null && bb9 != null && bb9 > 0 ? Math.round((k9 / bb9) * 100) / 100 : null;
 
-    return { athleteId, era, whip, k9, ip };
+    return { athleteId, era, whip, k9, bb9, kbb, ip };
   } catch {
     clearTimeout(timer);
-    return { athleteId, era: null, whip: null, k9: null, ip: null };
+    return { athleteId, era: null, whip: null, k9: null, bb9: null, kbb: null, ip: null };
   }
 }
 

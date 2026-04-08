@@ -26,26 +26,12 @@ import {
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
+// MLB_PARK_FACTORS lives in mlbConstants.ts to avoid circular imports
+// (mlbEspn → mlbPredictionModel → mlbEspn would create a cycle).
+export { MLB_PARK_FACTORS } from "@/lib/mlbConstants";
+import { MLB_PARK_FACTORS } from "@/lib/mlbConstants";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard";
-
-/** Run-environment park factor by home team abbreviation. >1 = hitter's park, <1 = pitcher's park. */
-export const MLB_PARK_FACTORS: Record<string, { factor: number; note: string }> = {
-  COL: { factor: 1.18, note: "Coors Field — extreme hitter's park; run totals and WHIP are inflated." },
-  TEX: { factor: 1.10, note: "Globe Life Field — hitter-friendly; warm air and dimensions aid fly balls." },
-  CIN: { factor: 1.08, note: "Great American Ball Park — HR-prone; starters need ground-ball tendencies." },
-  PHI: { factor: 1.06, note: "Citizens Bank Park — slight hitter's edge; right-center gap is generous." },
-  BOS: { factor: 1.04, note: "Fenway Park — Green Monster inflates doubles; modest overall hitter edge." },
-  CHC: { factor: 1.03, note: "Wrigley Field — wind-dependent; out-blowing days flip it to a hitter's park." },
-  HOU: { factor: 0.97, note: "Minute Maid Park — dome; slight pitcher edge on off-days without roof issues." },
-  MIA: { factor: 0.96, note: "loanDepot Park — retractable roof; controlled conditions, slight pitcher edge." },
-  NYM: { factor: 0.95, note: "Citi Field — spacious outfield suppresses HRs; pitcher-friendly." },
-  OAK: { factor: 0.94, note: "Oakland Coliseum — wide foul territory and sea-level air favor pitchers." },
-  SF:  { factor: 0.93, note: "Oracle Park — marine layer and ocean wind create strong pitcher-friendly conditions." },
-  SEA: { factor: 0.92, note: "T-Mobile Park — retractable roof and deep alleys suppress offense." },
-  DET: { factor: 0.96, note: "Comerica Park — deep outfield, slight pitcher advantage on fly balls." },
-  SD:  { factor: 0.84, note: "Petco Park — strongest pitcher's park in MLB; run totals reliably suppressed." },
-};
 
 interface ProbablePitcher {
   id?: string;   // ESPN athlete ID — used to fetch ERA/WHIP stats
@@ -84,21 +70,36 @@ function parsePitcherAthleteIds(comp: EspnCompetition): { homeId?: string; awayI
   };
 }
 
-function buildMlbIntel(comp: EspnCompetition): MlbIntel {
+/**
+ * Teams must submit lineups 60 min before first pitch.
+ * We flag confirmed at 90 min as a buffer for early submissions.
+ * Live / final games are always confirmed.
+ */
+function isLineupConfirmed(status: GamePrediction["status"], sortTime: number): boolean {
+  if (status === "live" || status === "final") return true;
+  const minsUntilGame = (sortTime - Date.now()) / 60_000;
+  return minsUntilGame <= 90;
+}
+
+function buildMlbIntel(comp: EspnCompetition, status: GamePrediction["status"], sortTime: number): MlbIntel {
   const pitchers = parseProbablePitchers(comp);
   const home = pitchers.find((p) => p.homeAway === "home");
   const away = pitchers.find((p) => p.homeAway === "away");
+  // "partial" = only one starter named; "probable" = both named; "unknown" = neither
   const certainty: MlbIntel["pitcherCertainty"] =
-    home && away ? "probable" : home || away ? "probable" : "unknown";
+    home && away ? "probable" : home || away ? "partial" : "unknown";
   return {
     homeProbablePitcher: home?.name,
     awayProbablePitcher: away?.name,
     homePitcherHand: home?.hand,
     awayPitcherHand: away?.hand,
     pitcherCertainty: certainty,
+    lineupConfirmed: isLineupConfirmed(status, sortTime),
     modelNotes: [
       home && away
         ? `Probable starters: ${away.name}${away.hand ? ` (${away.hand}HP)` : ""} vs ${home.name}${home.hand ? ` (${home.hand}HP)` : ""}.`
+        : home || away
+        ? `One starter confirmed (${(home ?? away)!.name}) — opponent TBD. Confidence capped until both are set.`
         : "Probable starters not yet announced — treat win probability as low-certainty.",
       "MLB model: starter quality, bullpen workload, handedness splits, and lineup OPS drive the edge.",
       "Park factors and wind matter for totals; outdoor games in wind lean lower.",
@@ -202,7 +203,8 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     prob = winProbFromMlbCompetitors(homeC, awayC);
   }
 
-  const mlbIntel = buildMlbIntel(comp);
+  const sortTime = new Date(comp.date).getTime();
+  const mlbIntel = buildMlbIntel(comp, status, sortTime);
   const pitcherIds = parsePitcherAthleteIds(comp);
   const parkEntry = MLB_PARK_FACTORS[home.abbreviation.toUpperCase()];
   if (parkEntry) {
