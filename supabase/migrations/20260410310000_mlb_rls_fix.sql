@@ -20,16 +20,18 @@ begin
     -- Idempotent: enable RLS (safe to run multiple times)
     execute format('alter table public.%I enable row level security', tbl);
 
-    -- Drop + recreate policies — safe because tables are service-role-write only
-    execute format('drop policy if exists "public read %1$I" on public.%1$I', tbl);
+    -- Drop + recreate — policy names are "public read {table}" (single identifier via %I)
+    execute format('drop policy if exists %I on public.%I', 'public read ' || tbl, tbl);
     execute format(
-      'create policy "public read %1$I" on public.%1$I for select using (true)',
+      'create policy %I on public.%I for select using (true)',
+      'public read ' || tbl,
       tbl
     );
 
-    execute format('drop policy if exists "service write %1$I" on public.%1$I', tbl);
+    execute format('drop policy if exists %I on public.%I', 'service write ' || tbl, tbl);
     execute format(
-      'create policy "service write %1$I" on public.%1$I for insert with check (auth.role() = ''service_role'')',
+      'create policy %I on public.%I for insert with check (auth.role() = ''service_role'')',
+      'service write ' || tbl,
       tbl
     );
   end loop;

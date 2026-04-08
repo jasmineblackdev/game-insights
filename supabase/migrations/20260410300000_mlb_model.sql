@@ -248,11 +248,17 @@ begin
     'mlb_prediction_inputs_snapshot'
   ] loop
     execute format('alter table public.%I enable row level security', tbl);
+    execute format('drop policy if exists %I on public.%I', 'public read ' || tbl, tbl);
     execute format(
-      'create policy if not exists "public read %1$I" on public.%1$I for select using (true)', tbl
+      'create policy %I on public.%I for select using (true)',
+      'public read ' || tbl,
+      tbl
     );
+    execute format('drop policy if exists %I on public.%I', 'service write ' || tbl, tbl);
     execute format(
-      'create policy if not exists "service write %1$I" on public.%1$I for insert with check (auth.role() = ''service_role'')', tbl
+      'create policy %I on public.%I for insert with check (auth.role() = ''service_role'')',
+      'service write ' || tbl,
+      tbl
     );
   end loop;
 end $$;

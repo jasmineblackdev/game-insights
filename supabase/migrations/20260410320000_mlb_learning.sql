@@ -70,8 +70,11 @@ end $$;
 
 -- ── Accuracy view ─────────────────────────────────────────────────────────────
 -- Rolling 60-day accuracy grouped by model_version and confidence tier.
+-- Drop first: prior migration defined different column order; CREATE OR REPLACE cannot rename columns.
 
-create or replace view public.mlb_prediction_accuracy as
+drop view if exists public.mlb_prediction_accuracy;
+
+create view public.mlb_prediction_accuracy as
 select
   model_version,
   confidence,

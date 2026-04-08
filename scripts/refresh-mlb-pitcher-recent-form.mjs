@@ -3,8 +3,8 @@
  * Upsert `mlb_pitcher_recent_form` from MLB Stats API game logs + ESPN athlete search.
  *
  * Requires (service role — bypasses RLS write policies):
- *   SUPABASE_URL
- *   SUPABASE_SERVICE_ROLE_KEY
+ *   SUPABASE_SERVICE_ROLE_KEY  (Dashboard → Settings → API → service_role secret)
+ *   SUPABASE_URL or VITE_SUPABASE_URL (script loads `.env.local` automatically)
  *
  * Usage:
  *   node scripts/refresh-mlb-pitcher-recent-form.mjs --season=2025
@@ -16,7 +16,30 @@
  * Cron: weekly in-season, or daily the morning of game days.
  */
 
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function loadEnvLocal() {
+  const envPath = join(__dirname, "..", ".env.local");
+  if (!existsSync(envPath)) return;
+  const raw = readFileSync(envPath, "utf8");
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t || t.startsWith("#")) continue;
+    const eq = t.indexOf("=");
+    if (eq < 1) continue;
+    const k = t.slice(0, eq).trim();
+    let v = t.slice(eq + 1).trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    if (process.env[k] === undefined || process.env[k] === "") process.env[k] = v;
+  }
+}
+
+loadEnvLocal();
 
 const MLB = "https://statsapi.mlb.com/api/v1";
 const ESPN_SEARCH = "https://site.api.espn.com/apis/common/v3/search";
@@ -105,10 +128,16 @@ async function main() {
   const season = Number(args.season || new Date().getFullYear());
   const singleDate = typeof args.date === "string" ? args.date : null;
 
-  const supUrl = process.env.SUPABASE_URL?.trim();
+  const supUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").trim();
   const supKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!supUrl || !supKey) {
-    console.error("Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (service role for upsert).");
+  if (!supKey) {
+    console.error(
+      "Missing SUPABASE_SERVICE_ROLE_KEY. Add it to .env.local (Supabase Dashboard → Project Settings → API → service_role)."
+    );
+    process.exit(1);
+  }
+  if (!supUrl) {
+    console.error("Missing SUPABASE_URL or VITE_SUPABASE_URL.");
     process.exit(1);
   }
 

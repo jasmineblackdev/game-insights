@@ -120,16 +120,19 @@ create table public.prediction_accuracy_summary (
   constraint prediction_accuracy_summary_correct_chk check (correct_count >= 0 and correct_count <= sample_size)
 );
 
+-- PG requires index expressions to be immutable; enum::text in coalesce() fails.
+-- NULLS NOT DISTINCT (PG15+) treats nulls as equal for uniqueness, matching prior coalesce semantics.
 create unique index prediction_accuracy_summary_period_idx
   on public.prediction_accuracy_summary (
     period_start,
     period_end,
     rollup_window_days,
-    coalesce(sport, ''),
-    coalesce(outcome_kind::text, ''),
-    coalesce(confidence_bucket, ''),
-    coalesce(prediction_type_tag, '')
-  );
+    sport,
+    outcome_kind,
+    confidence_bucket,
+    prediction_type_tag
+  )
+  nulls not distinct;
 
 comment on table public.prediction_accuracy_summary is
   'Aggregated accuracy by sport, kind, confidence — refresh via refresh_prediction_accuracy_summary().';
