@@ -508,21 +508,91 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
         {/* MLB-specific model layer */}
         {game.mlb && (
           <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
-            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-2">
               <Info className="w-4 h-4 text-primary" />
-              MLB pregame model layer
+              MLB Weighted Model
             </h3>
+
+            {/* Pitcher header */}
             <p className="text-xs text-muted-foreground mb-3">
-              Starter certainty: <span className="text-foreground font-semibold">{game.mlb.pitcherCertainty}</span>
-              {game.mlb.awayProbablePitcher || game.mlb.homeProbablePitcher
+              Starter certainty:{" "}
+              <span className={cn(
+                "font-semibold",
+                game.mlb.pitcherCertainty === "probable" ? "text-confidence-high" :
+                game.mlb.pitcherCertainty === "partial"  ? "text-amber-500" :
+                "text-destructive"
+              )}>{game.mlb.pitcherCertainty}</span>
+              {(game.mlb.awayProbablePitcher || game.mlb.homeProbablePitcher)
                 ? ` · Away: ${game.mlb.awayProbablePitcher ?? "TBD"} (${game.mlb.awayPitcherHand ?? "?"}) · Home: ${game.mlb.homeProbablePitcher ?? "TBD"} (${game.mlb.homePitcherHand ?? "?"})`
-                : " · Probable starters not in this ESPN payload — treat win probability as low-certainty until confirmed."}
+                : " · Probable starters not yet announced."}
             </p>
-            <ul className="space-y-2 text-sm text-secondary-foreground list-disc list-inside">
-              {game.mlb.modelNotes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
+
+            {/* Risk flag banner */}
+            {game.mlb.modelOutput?.riskFlag && (
+              <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/25 rounded-md px-3 py-2 mb-3">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-600 dark:text-amber-400">{game.mlb.modelOutput.riskFlag}</p>
+              </div>
+            )}
+
+            {/* Factor edge rows */}
+            {game.mlb.modelOutput && (() => {
+              const mo = game.mlb!.modelOutput!;
+              const factors: { label: string; value: string; score: number }[] = [
+                { label: "Pitcher (40%)",  value: mo.pitcherEdge,  score: mo._debug.pitcherScore  },
+                { label: "Batting (20%)",  value: mo.battingEdge,  score: mo._debug.battingScore  },
+                { label: "Bullpen (15%)",  value: mo.bullpenEdge,  score: mo._debug.bullpenScore  },
+                { label: "Form (10%)",     value: mo.formEdge,     score: mo._debug.formScore     },
+                { label: "Park (context)", value: mo.parkNote,     score: 0                       },
+              ];
+              return (
+                <div className="space-y-2 mb-3">
+                  {factors.map(({ label, value, score }) => (
+                    <div key={label} className="flex gap-3 items-start">
+                      <div className="flex items-center gap-1 w-28 shrink-0 mt-0.5">
+                        <span className={cn(
+                          "w-1.5 h-1.5 rounded-full shrink-0",
+                          score > 0.08  ? "bg-confidence-high" :
+                          score < -0.08 ? "bg-destructive" :
+                          "bg-muted-foreground"
+                        )} />
+                        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+                      </div>
+                      <p className="text-xs text-secondary-foreground leading-relaxed">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Delta summary */}
+            {game.mlb.modelOutput && (() => {
+              const delta = game.mlb!.modelOutput!._debug.combinedDelta;
+              const hasStats = game.mlb!.modelOutput!._debug.hasStats;
+              return (
+                <div className="flex items-center gap-3 pt-2 border-t border-border/50">
+                  <span className="text-xs text-muted-foreground">Model adj:</span>
+                  <span className={cn(
+                    "text-xs font-semibold tabular-nums",
+                    delta > 0 ? "text-confidence-high" : delta < 0 ? "text-destructive" : "text-muted-foreground"
+                  )}>
+                    {delta > 0 ? "+" : ""}{delta}pp vs base
+                  </span>
+                  {!hasStats && (
+                    <span className="text-xs text-muted-foreground italic">· ERA unavailable — model used record/odds only</span>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Fallback: show modelNotes when modelOutput not yet available */}
+            {!game.mlb.modelOutput && game.mlb.modelNotes.length > 0 && (
+              <ul className="space-y-1.5 text-xs text-muted-foreground list-disc list-inside">
+                {game.mlb.modelNotes.map((note, i) => (
+                  <li key={i}>{note}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
