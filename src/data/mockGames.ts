@@ -118,6 +118,9 @@ export interface TeamData {
   offensiveRating: number;
   defensiveRating: number;
   pace: number;
+  /** MLB: home win% and road win% for home/away form scoring */
+  homeWinPct?: number;
+  roadWinPct?: number;
 }
 
 export interface MatchupEdge {

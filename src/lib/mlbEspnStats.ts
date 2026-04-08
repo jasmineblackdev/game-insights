@@ -65,6 +65,46 @@ export async function fetchPitcherStats(athleteId: string): Promise<PitcherStats
 }
 
 /**
+ * Fetches the number of rest days since the pitcher's last appearance.
+ * Uses the ESPN athlete gamelog endpoint to find the most recent game date.
+ * Returns null on API failure or when no appearances found.
+ *
+ * Short rest (<3 days): ERA typically rises ~0.8 runs/game.
+ * Long rest (5+ days): Small bonus (~-0.15 ERA effective).
+ */
+export async function fetchPitcherRestDays(athleteId: string): Promise<number | null> {
+  const url = `${ATHLETE_BASE}/${athleteId}/gamelog`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+
+    const json = (await res.json()) as {
+      events?: Record<string, { date?: string; atVs?: string }>;
+    };
+    // events is a map of eventId → event object
+    const events = json.events ? Object.values(json.events) : [];
+    const dates = events
+      .map((e) => e.date)
+      .filter((d): d is string => !!d)
+      .map((d) => new Date(d).getTime())
+      .filter((t) => !Number.isNaN(t))
+      .sort((a, b) => b - a); // descending
+
+    if (!dates.length) return null;
+    const lastMs = dates[0];
+    const restDays = Math.floor((Date.now() - lastMs) / 86_400_000);
+    // Sanity guard: ignore stale data (>30 days = off-season or injured list gap)
+    return restDays >= 0 && restDays <= 30 ? restDays : null;
+  } catch {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+/**
  * Fetches pitcher stats for both starters in parallel.
  * Returns null when the athlete ID is unavailable (pitcher not confirmed).
  */

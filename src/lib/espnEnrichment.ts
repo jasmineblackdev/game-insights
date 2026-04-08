@@ -4,6 +4,7 @@ import {
   type NbaAdvancedRatingsPayload,
 } from "@/lib/nbaStatsProxy";
 import { isoToEasternYmd, previousCalendarYmd } from "@/lib/espnShared";
+import { MLB_OUTDOOR_PARKS } from "@/lib/mlbConstants";
 
 const INJURY_URLS: Record<"nba" | "nfl" | "mlb" | "soccer", string> = {
   nba: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
@@ -247,12 +248,25 @@ async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<T
     };
   }
   if (league === "mlb") {
+    const homeItem = items?.find((x) => x.type === "home");
+    const roadItem = items?.find((x) => x.type === "road");
+    const parsePct = (s: string | undefined): number | undefined => {
+      if (!s) return undefined;
+      const m = s.match(/^(\d+)-(\d+)/);
+      if (!m) return undefined;
+      const w = Number(m[1]);
+      const l = Number(m[2]);
+      const n = w + l;
+      return n > 0 ? Math.round((w / n) * 1000) / 1000 : undefined;
+    };
     return {
       record: summary,
       recentForm,
       offensiveRating: ppg != null ? Math.round(ppg * 100) / 100 : undefined,
       defensiveRating: papg != null ? Math.round(papg * 100) / 100 : undefined,
       pace: 9,
+      homeWinPct: parsePct(homeItem?.summary),
+      roadWinPct: parsePct(roadItem?.summary),
     };
   }
   if (league === "soccer") {
@@ -292,6 +306,8 @@ function applyTeamPatch(base: TeamData, patch: Partial<TeamData>): TeamData {
     pace: patch.pace != null ? patch.pace : base.pace,
     record: patch.record ?? base.record,
     recentForm: patch.recentForm ?? base.recentForm,
+    homeWinPct: patch.homeWinPct ?? base.homeWinPct,
+    roadWinPct: patch.roadWinPct ?? base.roadWinPct,
   };
 }
 
@@ -385,6 +401,35 @@ async function weatherNoteFromNflSummary(summary: Record<string, unknown>): Prom
   }
 }
 
+/** MLB outdoor park weather — wind is the main signal (>12 mph affects run totals). */
+async function weatherNoteFromMlbPark(homeAbbr: string): Promise<string | null> {
+  const park = MLB_OUTDOOR_PARKS[homeAbbr.toUpperCase()];
+  if (!park) return null; // indoor/retractable park — skip
+  try {
+    const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${park.lat}&longitude=${park.lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`;
+    const wr = await fetchWithTimeout(wUrl, 4000);
+    if (!wr.ok) return null;
+    const wj = (await wr.json()) as {
+      current?: { temperature_2m?: number; wind_speed_10m?: number; wind_direction_10m?: number };
+    };
+    const t = wj.current?.temperature_2m;
+    const wind = wj.current?.wind_speed_10m;
+    if (t == null && wind == null) return null;
+    const windNote =
+      wind != null && wind >= 12
+        ? ` Wind ${Math.round(wind)} mph — blowing${wind >= 20 ? " strongly" : ""} at ${park.name}; outdoor totals may be impacted.`
+        : "";
+    const tempNote =
+      t != null && t <= 45
+        ? ` Cold conditions (${Math.round(t)}°F) — pitchers typically benefit, scoring leans lower.`
+        : "";
+    if (!windNote && !tempNote) return null;
+    return `Weather at ${park.name}: ${t != null ? `${Math.round(t)}°F` : "—"}, wind ~${wind != null ? Math.round(wind) : "—"} mph.${windNote}${tempNote}`;
+  } catch {
+    return null;
+  }
+}
+
 async function enrichOne(
   pred: GamePrediction,
   league: League,
@@ -422,6 +467,11 @@ async function enrichOne(
       const w = await weatherNoteFromNflSummary(summary);
       if (w) notes.push(w);
     }
+  }
+
+  if (league === "mlb" && pred.status === "upcoming") {
+    const w = await weatherNoteFromMlbPark(pred.homeTeam.abbreviation);
+    if (w) notes.push(w);
   }
 
   const hp = teamPatches.get(hid);
@@ -472,26 +522,39 @@ async function enrichOne(
     const gameDate = pred._meta?.easternYmd;
     if (gameDate) {
       const yesterday = previousCalendarYmd(gameDate);
+      const twoDaysAgo = previousCalendarYmd(yesterday);
       const homeB2B = scheduleMap.get(hid)?.has(yesterday) ?? false;
       const awayB2B = scheduleMap.get(aid)?.has(yesterday) ?? false;
+      // 3-game series: played yesterday AND the day before (bullpen most taxed)
+      const homeConsec = homeB2B && (scheduleMap.get(hid)?.has(twoDaysAgo) ?? false);
+      const awayConsec = awayB2B && (scheduleMap.get(aid)?.has(twoDaysAgo) ?? false);
+
       if (homeB2B && !situationalTags.includes("HOME B2B")) {
         situationalTags.push("HOME B2B");
+        const consecNote = homeConsec ? " (3rd consecutive game — bullpen severely taxed)" : "";
         notes.push(
-          `${homeTeam.abbreviation} playing on back-to-back tonight — fatigue reduces effective win probability 3–5%.`
+          `${homeTeam.abbreviation} playing on back-to-back tonight${consecNote} — fatigue reduces effective win probability 3–5%.`
         );
         // Downgrade HIGH confidence when the fatigued team is the favorite
         if (pred.winProbability.home >= pred.winProbability.away && confidence === "high") {
           confidence = "medium";
         }
       }
+      if (homeConsec && !situationalTags.includes("HOME CONSEC")) {
+        situationalTags.push("HOME CONSEC");
+      }
       if (awayB2B && !situationalTags.includes("AWAY B2B")) {
         situationalTags.push("AWAY B2B");
+        const consecNote = awayConsec ? " (3rd straight — road bullpen severely depleted)" : "";
         notes.push(
-          `${awayTeam.abbreviation} on back-to-back (road) — travel compounds fatigue, historically -4 to -6pp on the road.`
+          `${awayTeam.abbreviation} on back-to-back (road)${consecNote} — travel compounds fatigue, historically -4 to -6pp on the road.`
         );
         if (pred.winProbability.away >= pred.winProbability.home && confidence === "high") {
           confidence = "medium";
         }
+      }
+      if (awayConsec && !situationalTags.includes("AWAY CONSEC")) {
+        situationalTags.push("AWAY CONSEC");
       }
     }
   }
