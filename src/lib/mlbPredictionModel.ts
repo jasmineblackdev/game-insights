@@ -20,8 +20,12 @@
  *   • extreme park (factor ≥1.08 or ≤0.92) → cap HIGH → MED
  */
 
-import type { GamePrediction, ConfidenceLevel, MlbModelOutput } from "@/data/mockGames";
-import { fetchMatchupPitcherStats, fetchPitcherRestDays } from "@/lib/mlbEspnStats";
+import type { GamePrediction, ConfidenceLevel, MlbModelOutput, PitcherCertainty } from "@/data/mockGames";
+import {
+  fetchMatchupPitcherStats,
+  fetchPitcherRestDays,
+  resolveEspnMlbAthleteIdByDisplayName,
+} from "@/lib/mlbEspnStats";
 import type { PitcherStats } from "@/lib/mlbEspnStats";
 import { MLB_PARK_FACTORS } from "@/lib/mlbConstants";
 import { parseRecord } from "@/lib/espnShared";
@@ -342,7 +346,8 @@ function persistSnapshot(
   isPending: boolean,
   riskFlag: string | null,
   parkFactor: number,
-  hasOdds: boolean
+  hasOdds: boolean,
+  pitcherCertaintyRecorded: string | null
 ): void {
   if (!supabase || !game._meta?.eventId || game.status === "final") return;
   const predicted = adjustedProb >= 50 ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
@@ -394,6 +399,19 @@ interface MlbGameContext {
   awayAthleteId: string | undefined;
 }
 
+async function ensureMlbPitcherEspnIds(ctx: MlbGameContext): Promise<MlbGameContext> {
+  const mlb = ctx.game.mlb;
+  let home = ctx.homeAthleteId;
+  let away = ctx.awayAthleteId;
+  if (!home && mlb?.homeProbablePitcher) {
+    home = await resolveEspnMlbAthleteIdByDisplayName(mlb.homeProbablePitcher);
+  }
+  if (!away && mlb?.awayProbablePitcher) {
+    away = await resolveEspnMlbAthleteIdByDisplayName(mlb.awayProbablePitcher);
+  }
+  return { ...ctx, homeAthleteId: home, awayAthleteId: away };
+}
+
 async function modelOneGame(
   ctx: MlbGameContext,
   weights: MlbFactorWeights
@@ -430,14 +448,25 @@ async function modelOneGame(
     ]);
 
   // ── Contextual flags ─────────────────────────────────────────────────────────
-  const tags = game.situationalTags;
+  const userStartersConfirm =
+    game._meta?.userConfirmedMlbStarters === true &&
+    !!mlbIntel.homeProbablePitcher &&
+    !!mlbIntel.awayProbablePitcher;
+  let baseTags = [...game.situationalTags];
+  if (userStartersConfirm) {
+    baseTags = baseTags.filter((t) => t !== "PENDING CONFIRM");
+  }
+  const tags = baseTags;
   const homeB2B = tags.includes("HOME B2B");
   const awayB2B = tags.includes("AWAY B2B");
   const homeConsec = tags.includes("HOME CONSEC");
   const awayConsec = tags.includes("AWAY CONSEC");
-  const pitcherCertainty = mlbIntel.pitcherCertainty;
-  const isPending = pitcherCertainty === "unknown";
-  const isPartial = pitcherCertainty === "partial";
+  const pitcherCertaintyRaw = mlbIntel.pitcherCertainty;
+  const pitcherCertaintyEff: PitcherCertainty = userStartersConfirm
+    ? "confirmed"
+    : pitcherCertaintyRaw;
+  const isPending = pitcherCertaintyEff === "unknown";
+  const isPartial = pitcherCertaintyEff === "partial";
   const hasOdds = !!(game.lines?.homeMl && game.lines?.awayMl);
   const parkEntry = MLB_PARK_FACTORS[game.homeTeam.abbreviation.toUpperCase()];
   const parkFactor = parkEntry?.factor ?? 1.0;
@@ -481,7 +510,7 @@ async function modelOneGame(
   }
 
   const probGap = Math.abs(adjustedProb - 50);
-  const confidence = deriveConfidence(probGap, pitcher.hasStats, pitcherCertainty, extremePark, hasOdds);
+  const confidence = deriveConfidence(probGap, pitcher.hasStats, pitcherCertaintyEff, extremePark, hasOdds);
 
   // ── Risk flag ─────────────────────────────────────────────────────────────────
   let riskFlag: string | null = null;
@@ -490,7 +519,7 @@ async function modelOneGame(
   } else if (isPartial) {
     const known = mlbIntel.homeProbablePitcher ?? mlbIntel.awayProbablePitcher ?? "one starter";
     riskFlag = `Only ${known} confirmed — opponent's starter unknown. Confidence capped until both are set.`;
-  } else if (!mlbIntel.lineupConfirmed) {
+  } else if (!mlbIntel.lineupConfirmed && !userStartersConfirm) {
     riskFlag = "Starting lineup not yet posted — prediction may shift when confirmed.";
   } else if (extremePark && parkFactor >= 1.08) {
     riskFlag = `Hitter-friendly park (${game.homeTeam.abbreviation}) increases run-environment variance.`;
@@ -542,9 +571,18 @@ async function modelOneGame(
 
   // ── Persist snapshot (fire-and-forget) ───────────────────────────────────────
   persistSnapshot(
-    game, homeStats, awayStats,
+    game,
+    homeStats,
+    awayStats,
     { pitcher: pitcher.score, batting: batting.score, bullpen: bullpen.score, form: form.score, rest: rest.score },
-    combinedDelta, adjustedProb, confidence, isPending, riskFlag, parkFactor, hasOdds
+    combinedDelta,
+    adjustedProb,
+    confidence,
+    isPending,
+    riskFlag,
+    parkFactor,
+    hasOdds,
+    pitcherCertaintyEff
   );
 
   const riskFactors = riskFlag && !game.riskFactors.some((r) => r.includes(riskFlag!.slice(0, 30)))
@@ -584,7 +622,8 @@ export async function applyMlbPredictionModel(
   const batchSize = 5;
   for (let i = 0; i < contexts.length; i += batchSize) {
     const batch = contexts.slice(i, i + batchSize);
-    const done = await Promise.all(batch.map((ctx) => modelOneGame(ctx, weights)));
+    const resolved = await Promise.all(batch.map((ctx) => ensureMlbPitcherEspnIds(ctx)));
+    const done = await Promise.all(resolved.map((ctx) => modelOneGame(ctx, weights)));
     results.push(...done);
   }
   return results;

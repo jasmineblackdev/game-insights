@@ -330,12 +330,14 @@ function eventToPrediction(
   };
 }
 
-export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
+/**
+ * Enriched MLB games (ESPN + probables + enrich + odds) **without** the weighted model.
+ * Home tab runs `applyMlbPredictionModel(mergeMlbStarterConfirmations(...))` so verified starters can refresh the model.
+ */
+export async function fetchMlbEnrichedGames(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const tomorrow = nextCalendarYmd(today);
 
-  // Fetch ESPN scoreboard + MLB Stats API probable pitchers in parallel.
-  // MLB Stats API announces pitchers 24–48h earlier than ESPN's probables field.
   const [e0, e1, mlbProbables] = await Promise.all([
     fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(today)),
     fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(tomorrow)),
@@ -354,8 +356,9 @@ export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
 
   let out = await enrichGamePredictions(predictions, "mlb");
   out = await mergeTheOddsApiNotes(out, "baseball_mlb");
-  // Apply the weighted MLB prediction model (pitcher ERA/WHIP, bullpen fatigue, etc.)
-  // Runs after enrichment so B2B tags and injury-adjusted probabilities are in place.
-  out = await applyMlbPredictionModel(out);
   return out;
+}
+
+export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
+  return applyMlbPredictionModel(await fetchMlbEnrichedGames());
 }

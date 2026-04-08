@@ -27,11 +27,16 @@ import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
 
-/** Yards/game, points allowed/game, plays/game — heuristics from record until you ingest real team stats. */
+/**
+ * Pre-enrichment placeholders in PPG / PAPG units so weather and edges stay on the same scale
+ * as ESPN team patches (~17–35). Replaced by real `avgPointsFor` / `avgPointsAgainst` in enrich.
+ */
 function nflRatingHeuristics(pct: number): Pick<TeamData, "offensiveRating" | "defensiveRating" | "pace"> {
+  const ppg = 16 + pct * 14;
+  const papg = 26 - pct * 8;
   return {
-    offensiveRating: Math.round(300 + pct * 95),
-    defensiveRating: Math.round((27 - pct * 11) * 10) / 10,
+    offensiveRating: Math.round(ppg * 10) / 10,
+    defensiveRating: Math.round(papg * 10) / 10,
     pace: Math.round((63 + (pct - 0.5) * 8) * 10) / 10,
   };
 }

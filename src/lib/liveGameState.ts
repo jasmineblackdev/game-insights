@@ -176,21 +176,52 @@ export function liveAccuracyClass(accuracy: LiveContext["accuracy"]): string {
 export interface FinalPredictionContext {
   badge: string;
   tip: string;
-  pickedSide: "home" | "away";
+  pickedSide: "home" | "away" | "draw";
   correct: boolean;
   outcome: "hit" | "miss" | "push";
 }
 
 /**
- * When status is final and `_meta` has scores, compare pre-game win% lean to the winner.
- * Skips soccer 1X2 (threeWay) until draw handling is defined.
+ * When status is final and `_meta` has scores, compare pre-game lean to the result.
+ * Two-way sports: home vs away win probability. Soccer: highest 1X2 bucket (home / draw / away).
  */
 export function getFinalPredictionContext(game: GamePrediction): FinalPredictionContext | null {
   if (game.status !== "final") return null;
-  if (game.threeWay) return null;
   const fh = game._meta?.finalHomeScore;
   const fa = game._meta?.finalAwayScore;
   if (fh == null || fa == null || !Number.isFinite(fh) || !Number.isFinite(fa)) return null;
+
+  if (game.threeWay) {
+    const tw = game.threeWay;
+    type Side = "home" | "away" | "draw";
+    let picked: Side = "home";
+    let best = -1;
+    for (const { side, pct } of [
+      { side: "home" as const, pct: tw.home },
+      { side: "away" as const, pct: tw.away },
+      { side: "draw" as const, pct: tw.draw },
+    ]) {
+      if (pct > best) {
+        best = pct;
+        picked = side;
+      }
+    }
+    const isDraw = fh === fa;
+    const actual: Side = isDraw ? "draw" : fh > fa ? "home" : "away";
+    const correct = picked === actual;
+    const pct = picked === "home" ? tw.home : picked === "away" ? tw.away : tw.draw;
+    const label = (s: Side) =>
+      s === "home" ? game.homeTeam.abbreviation : s === "away" ? game.awayTeam.abbreviation : "Draw";
+    return {
+      badge: correct ? "MODEL ✓" : "UPSET",
+      tip: correct
+        ? `Final ${fh}–${fa}. 1X2 lean ${label(picked)} (${pct}%) matched ${label(actual)}.`
+        : `Final ${fh}–${fa}. Result ${label(actual)}; model leaned ${label(picked)} (${pct}%).`,
+      pickedSide: picked,
+      correct,
+      outcome: correct ? "hit" : "miss",
+    };
+  }
 
   const pickedHome = game.winProbability.home >= game.winProbability.away;
   const picked = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;

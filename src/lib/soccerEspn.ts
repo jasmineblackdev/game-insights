@@ -28,7 +28,18 @@ import { mergeSoccerVendorIntel } from "@/lib/soccerVendorIntel";
 
 export { easternYmd } from "@/lib/espnShared";
 
-const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard";
+const SOCCER_LEAGUES: { slug: string; label: string }[] = [
+  { slug: "eng.1", label: "Premier League (EPL)" },
+  { slug: "esp.1", label: "La Liga" },
+  { slug: "ger.1", label: "Bundesliga" },
+  { slug: "ita.1", label: "Serie A" },
+  { slug: "fra.1", label: "Ligue 1" },
+  { slug: "uefa.champions", label: "UEFA Champions League" },
+];
+
+function scoreboardUrl(slug: string): string {
+  return `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard`;
+}
 
 /** Map kickoff (US Eastern calendar day) to UI bucket — EPL often has empty "today". */
 function soccerGameDateBucket(easternGameYmd: string, todayEastern: string): GameDate {
@@ -104,7 +115,13 @@ function buildTeam(c: EspnCompetitor): TeamData {
   };
 }
 
-function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: string): GamePrediction | null {
+function eventToPrediction(
+  event: EspnEvent,
+  todayEastern: string,
+  weekEndYmd: string,
+  leagueLabel: string,
+  soccerLeagueSlug: string
+): GamePrediction | null {
   const comp = event.competitions?.[0];
   if (!comp?.competitors || comp.competitors.length < 2) return null;
 
@@ -162,7 +179,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
     "Late XI news, suspensions, and congestion-driven rotation can flip the run of play.",
     spread != null && Math.abs(spread) <= 0.25
       ? "Tight handicap (often pick-em) — book sees a coin flip."
-      : "Cup / European minutes are not in EPL-only fixture counts — midweek Europe can still add hidden load.",
+      : "European minutes may add hidden load — check midweek fixtures when odds tighten.",
   ];
 
   const upsetPath = `Draw or ${threeWay.home > threeWay.away ? away.abbreviation : home.abbreviation} if set pieces, transition moments, or a red card skew a low-scoring script — ${topSide} is only ~${topWin}% to take three points.`;
@@ -193,7 +210,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
     lastUpdated: new Date().toISOString(),
     situationalTags: tags,
     lines: odd ? buildLines(odd, away.abbreviation, home.abbreviation) : undefined,
-    soccer: buildSoccerIntel(),
+    soccer: buildSoccerIntel(leagueLabel),
     _meta: {
       easternYmd: easternGameYmd,
       sortTime: new Date(comp.date).getTime(),
@@ -201,6 +218,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string, weekEndYmd: s
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
       liveState: parseLiveState(comp),
+      soccerLeagueSlug,
     },
   };
 }
@@ -209,18 +227,26 @@ export async function fetchSoccerGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const weekEnd = addCalendarDaysYmd(today, 7);
   const rangeParam = `${ymdToParam(today)}-${ymdToParam(weekEnd)}`;
-  const merged = await fetchEspnScoreboardEvents(SCOREBOARD, rangeParam);
+  const boards = await Promise.all(
+    SOCCER_LEAGUES.map((L) => fetchEspnScoreboardEvents(scoreboardUrl(L.slug), rangeParam))
+  );
 
   const predictions: GamePrediction[] = [];
-  for (const event of merged) {
-    const p = eventToPrediction(event, today, weekEnd);
-    if (p) predictions.push(p);
+  for (let i = 0; i < SOCCER_LEAGUES.length; i++) {
+    const L = SOCCER_LEAGUES[i];
+    for (const event of boards[i] ?? []) {
+      const p = eventToPrediction(event, today, weekEnd, L.label, L.slug);
+      if (p) predictions.push(p);
+    }
   }
 
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
   let out = await enrichGamePredictions(predictions, "soccer");
   out = await mergeSoccerVendorIntel(out);
-  out = await mergeTheOddsApiNotes(out, "soccer_epl");
+  const epl = out.filter((p) => !p._meta?.soccerLeagueSlug || p._meta.soccerLeagueSlug === "eng.1");
+  const nonEpl = out.filter((p) => p._meta?.soccerLeagueSlug && p._meta.soccerLeagueSlug !== "eng.1");
+  const mergedOdds = await mergeTheOddsApiNotes(epl, "soccer_epl");
+  out = [...mergedOdds, ...nonEpl].sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
   return out;
 }

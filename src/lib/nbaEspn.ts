@@ -37,23 +37,35 @@ function ratingHeuristics(pct: number): Pick<TeamData, "offensiveRating" | "defe
   };
 }
 
+const NBA_LEADER_METRICS: { leaderName: string; keyMetric: string }[] = [
+  { leaderName: "points", keyMetric: "PTS" },
+  { leaderName: "rebounds", keyMetric: "REB" },
+  { leaderName: "assists", keyMetric: "AST" },
+];
+
 function leadersToTrends(c: EspnCompetitor): PlayerTrendData[] {
-  const pts = c.leaders?.find((l) => l.name === "points")?.leaders?.[0];
-  if (!pts?.athlete) return [];
-  const v = pts.value ?? Number.parseFloat(pts.displayValue);
-  const val = Number.isFinite(v) ? v : 0;
-  const pos = pts.athlete.position?.abbreviation ?? "—";
-  return [
-    {
-      name: pts.athlete.fullName,
+  const results: PlayerTrendData[] = [];
+  const seen = new Set<string>();
+  for (const { leaderName, keyMetric } of NBA_LEADER_METRICS) {
+    const row = c.leaders?.find((l) => l.name === leaderName)?.leaders?.[0];
+    if (!row?.athlete) continue;
+    const fullName = row.athlete.fullName;
+    if (seen.has(fullName)) continue;
+    seen.add(fullName);
+    const v = row.value ?? Number.parseFloat(String(row.displayValue).replace(/[^\d.-]/g, ""));
+    const val = Number.isFinite(v) ? v : 0;
+    const pos = row.athlete.position?.abbreviation ?? "—";
+    results.push({
+      name: fullName,
       position: pos,
       trend: "steady",
       last5Avg: Math.round(val * 10) / 10,
       seasonAvg: Math.round(val * 10) / 10,
-      keyMetric: "PTS",
-      keyMetricValue: pts.displayValue,
-    },
-  ];
+      keyMetric,
+      keyMetricValue: row.displayValue,
+    });
+  }
+  return results.slice(0, 3);
 }
 
 function buildTeam(c: EspnCompetitor): TeamData {

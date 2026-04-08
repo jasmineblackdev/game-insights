@@ -4,16 +4,120 @@ import {
   type NbaAdvancedRatingsPayload,
 } from "@/lib/nbaStatsProxy";
 import { isoToEasternYmd, previousCalendarYmd } from "@/lib/espnShared";
+
+function clampWinPct(n: number): number {
+  return Math.max(5, Math.min(95, Math.round(n)));
+}
+
+/** Positive delta boosts home win% (away drops), then renormalizes to sum 100. */
+function shiftWinProbabilityTwoWay(
+  wp: { home: number; away: number },
+  homeDeltaPp: number
+): { home: number; away: number } {
+  let h = clampWinPct(wp.home + homeDeltaPp);
+  let a = clampWinPct(wp.away - homeDeltaPp);
+  const sum = h + a;
+  if (sum !== 100) {
+    h = Math.round((h / sum) * 100);
+    a = 100 - h;
+  }
+  return { home: h, away: a };
+}
+
+function shiftThreeWayProb(
+  tw: { home: number; away: number; draw: number },
+  homeDelta: number
+): { home: number; away: number; draw: number } {
+  let h = tw.home + homeDelta;
+  let a = tw.away - homeDelta * 0.55;
+  let d = tw.draw - homeDelta * 0.45;
+  h = Math.max(4, Math.min(90, h));
+  a = Math.max(4, Math.min(90, a));
+  d = Math.max(4, Math.min(90, d));
+  const s = h + a + d;
+  const nh = Math.round((h / s) * 100);
+  const na = Math.round((a / s) * 100);
+  return { home: nh, away: na, draw: 100 - nh - na };
+}
+
+function isKickoffThursdayET(sortTime: number): boolean {
+  const w = new Date(sortTime).toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+  return w === "Thu";
+}
+
+function ymdDaysBefore(ymd: string, days: number): string {
+  let d = ymd;
+  for (let i = 0; i < days; i++) d = previousCalendarYmd(d);
+  return d;
+}
+
+function countCompletedGamesInWindow(scheduleDates: Set<string>, gameYmd: string, windowDays: number): number {
+  const start = ymdDaysBefore(gameYmd, windowDays);
+  let n = 0;
+  for (const g of scheduleDates) {
+    if (g >= start && g < gameYmd) n++;
+  }
+  return n;
+}
+
+/** NBA season-series text → rough home win-probability shift in percentage points. */
+function nbaH2hHomeShiftFromSummary(summary: Record<string, unknown>, homeAbbr: string, awayAbbr: string): number {
+  const ss = summary.seasonseries ?? summary.seasonSeries;
+  if (!Array.isArray(ss) || !ss.length) return 0;
+  const entry = ss[0] as { series?: { summary?: string }[] };
+  const text = entry?.series?.[0]?.summary ?? "";
+  if (!text) return 0;
+  const h = homeAbbr.toUpperCase();
+  const a = awayAbbr.toUpperCase();
+  const leadMatch = text.match(new RegExp(`(${h}|${a})\\s+leads?\\s+(\\d+)\\s*[-–]\\s*(\\d+)`, "i"));
+  if (leadMatch) {
+    const leader = leadMatch[1].toUpperCase();
+    const w = Number(leadMatch[2]);
+    const l = Number(leadMatch[3]);
+    if (!Number.isFinite(w) || !Number.isFinite(l) || w + l === 0) return 0;
+    const leadGames = Math.abs(w - l);
+    if (leadGames === 0) return 0;
+    const towardHome = leader === h ? 1 : leader === a ? -1 : 0;
+    if (towardHome === 0) return 0;
+    return towardHome * Math.min(2, Math.round(leadGames * 0.7));
+  }
+  return 0;
+}
 import { MLB_OUTDOOR_PARKS } from "@/lib/mlbConstants";
 
-const INJURY_URLS: Record<"nba" | "nfl" | "mlb" | "soccer", string> = {
+const INJURY_URLS: Record<"nba" | "nfl" | "mlb", string> = {
   nba: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries",
   nfl: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/injuries",
   mlb: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/injuries",
-  soccer: "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/injuries",
 };
 
-function summaryUrl(league: League, eventId: string): string | null {
+/** Top 5 European leagues — merged injury map keyed by ESPN team id. */
+const SOCCER_INJURY_SLUGS = ["eng.1", "esp.1", "ger.1", "ita.1", "fra.1"];
+
+async function fetchMergedSoccerInjuryMap(): Promise<Map<string, PlayerInjury[]>> {
+  const merged = new Map<string, PlayerInjury[]>();
+  for (const slug of SOCCER_INJURY_SLUGS) {
+    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/injuries`);
+    if (!res.ok) continue;
+    const data = (await res.json()) as { injuries?: Record<string, unknown>[] };
+    for (const block of data.injuries ?? []) {
+      const tid = String((block as { id?: string }).id ?? "");
+      if (!tid) continue;
+      const rows = (block as { injuries?: Record<string, unknown>[] }).injuries ?? [];
+      const parsed = rows.map(rowToInjury).filter((x): x is PlayerInjury => x != null);
+      if (!parsed.length) continue;
+      const prev = merged.get(tid) ?? [];
+      merged.set(tid, mergeInjuryLists(prev, parsed));
+    }
+  }
+  return merged;
+}
+
+function soccerSlugOrDefault(slug: string | undefined): string {
+  return slug && slug.length > 0 ? slug : "eng.1";
+}
+
+function summaryUrl(league: League, eventId: string, soccerLeagueSlug?: string): string | null {
   if (league === "nba") {
     return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${eventId}`;
   }
@@ -24,12 +128,13 @@ function summaryUrl(league: League, eventId: string): string | null {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${eventId}`;
   }
   if (league === "soccer") {
-    return `https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/summary?event=${eventId}`;
+    const s = soccerSlugOrDefault(soccerLeagueSlug);
+    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/summary?event=${eventId}`;
   }
   return null;
 }
 
-function teamUrl(league: League, teamId: string): string | null {
+function teamUrl(league: League, teamId: string, soccerLeagueSlug?: string): string | null {
   if (league === "nba") {
     return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${teamId}`;
   }
@@ -40,24 +145,32 @@ function teamUrl(league: League, teamId: string): string | null {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}`;
   }
   if (league === "soccer") {
-    return `https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams/${teamId}`;
+    const s = soccerSlugOrDefault(soccerLeagueSlug);
+    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/teams/${teamId}`;
   }
   return null;
 }
 
-function scheduleUrl(league: League, teamId: string): string | null {
+function scheduleUrl(league: League, teamId: string, soccerLeagueSlug?: string): string | null {
   if (league === "nba") {
     return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${teamId}/schedule`;
   }
+  if (league === "nfl") {
+    return `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${teamId}/schedule`;
+  }
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}/schedule`;
+  }
+  if (league === "soccer") {
+    const s = soccerSlugOrDefault(soccerLeagueSlug);
+    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/teams/${teamId}/schedule`;
   }
   return null;
 }
 
 /** Returns the set of Eastern YYYY-MM-DD dates on which a team played this season. */
-async function fetchTeamGameDates(league: League, teamId: string): Promise<Set<string>> {
-  const url = scheduleUrl(league, teamId);
+async function fetchTeamGameDates(league: League, teamId: string, soccerLeagueSlug?: string): Promise<Set<string>> {
+  const url = scheduleUrl(league, teamId, soccerLeagueSlug);
   if (!url) return new Set();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
@@ -78,14 +191,21 @@ async function fetchTeamGameDates(league: League, teamId: string): Promise<Set<s
   }
 }
 
-async function fetchTeamScheduleMap(league: League, teamIds: string[]): Promise<Map<string, Set<string>>> {
+async function fetchTeamScheduleMap(
+  league: League,
+  teamIds: string[],
+  soccerSlugForTeam?: (teamId: string) => string | undefined
+): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>();
   const unique = [...new Set(teamIds)].filter(Boolean);
-  if (!scheduleUrl(league, unique[0] ?? "")) return out; // Skip unsupported leagues early
+  const probeSlug = league === "soccer" ? soccerSlugForTeam?.(unique[0] ?? "") : undefined;
+  if (!scheduleUrl(league, unique[0] ?? "", probeSlug)) return out;
   const batch = 4;
   for (let i = 0; i < unique.length; i += batch) {
     const slice = unique.slice(i, i + batch);
-    const results = await Promise.all(slice.map((id) => fetchTeamGameDates(league, id)));
+    const results = await Promise.all(
+      slice.map((id) => fetchTeamGameDates(league, id, league === "soccer" ? soccerSlugForTeam?.(id) : undefined))
+    );
     slice.forEach((id, j) => out.set(id, results[j] ?? new Set()));
   }
   return out;
@@ -152,7 +272,7 @@ function rowToInjury(row: Record<string, unknown>): PlayerInjury | null {
   };
 }
 
-async function fetchLeagueInjuryMap(league: "nba" | "nfl" | "mlb" | "soccer"): Promise<Map<string, PlayerInjury[]>> {
+async function fetchLeagueInjuryMap(league: "nba" | "nfl" | "mlb"): Promise<Map<string, PlayerInjury[]>> {
   const map = new Map<string, PlayerInjury[]>();
   const res = await fetch(INJURY_URLS[league]);
   if (!res.ok) return map;
@@ -183,8 +303,12 @@ function statVal(stats: { name?: string; value?: number }[] | undefined, name: s
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
-async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<TeamData>> {
-  const url = teamUrl(league, teamId);
+async function fetchTeamPatch(
+  league: League,
+  teamId: string,
+  soccerLeagueSlug?: string
+): Promise<Partial<TeamData>> {
+  const url = teamUrl(league, teamId, soccerLeagueSlug);
   if (!url) return {};
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
@@ -275,23 +399,42 @@ async function fetchTeamPatch(league: League, teamId: string): Promise<Partial<T
     const pa = statVal(stats, "pointsAgainst");
     const gf = gp != null && gp > 0 && pf != null ? Math.round((pf / gp) * 100) / 100 : undefined;
     const ga = gp != null && gp > 0 && pa != null ? Math.round((pa / gp) * 100) / 100 : undefined;
+    const homeItem = items?.find((x) => x.type === "home");
+    const roadItem = items?.find((x) => x.type === "road");
+    const soccerSplitStrength = (rec: string | undefined): number | undefined => {
+      const m = rec?.trim().match(/^(\d+)-(\d+)-(\d+)$/);
+      if (!m) return undefined;
+      const w = Number(m[1]);
+      const d = Number(m[2]);
+      const l = Number(m[3]);
+      const n = w + d + l;
+      return n > 0 ? (3 * w + d) / (3 * n) : undefined;
+    };
     return {
       record: summary,
       recentForm,
       offensiveRating: gf,
       defensiveRating: ga,
+      homeWinPct: soccerSplitStrength(homeItem?.summary),
+      roadWinPct: soccerSplitStrength(roadItem?.summary),
     };
   }
   return {};
 }
 
-async function fetchTeamMetricsMap(league: League, teamIds: string[]): Promise<Map<string, Partial<TeamData>>> {
+async function fetchTeamMetricsMap(
+  league: League,
+  teamIds: string[],
+  soccerSlugForTeam?: (teamId: string) => string | undefined
+): Promise<Map<string, Partial<TeamData>>> {
   const out = new Map<string, Partial<TeamData>>();
   const unique = [...new Set(teamIds)].filter(Boolean);
   const batch = 6;
   for (let i = 0; i < unique.length; i += batch) {
     const slice = unique.slice(i, i + batch);
-    const patches = await Promise.all(slice.map((id) => fetchTeamPatch(league, id)));
+    const patches = await Promise.all(
+      slice.map((id) => fetchTeamPatch(league, id, league === "soccer" ? soccerSlugForTeam?.(id) : undefined))
+    );
     slice.forEach((id, j) => out.set(id, patches[j] ?? {}));
   }
   return out;
@@ -311,8 +454,12 @@ function applyTeamPatch(base: TeamData, patch: Partial<TeamData>): TeamData {
   };
 }
 
-async function fetchGameSummary(league: League, eventId: string): Promise<Record<string, unknown> | null> {
-  const url = summaryUrl(league, eventId);
+async function fetchGameSummary(
+  league: League,
+  eventId: string,
+  soccerLeagueSlug?: string
+): Promise<Record<string, unknown> | null> {
+  const url = summaryUrl(league, eventId, soccerLeagueSlug);
   if (!url) return null;
   const res = await fetch(url);
   if (!res.ok) return null;
@@ -372,49 +519,54 @@ async function fetchWithTimeout(url: string, ms = 5000): Promise<Response> {
   }
 }
 
-async function weatherNoteFromNflSummary(summary: Record<string, unknown>): Promise<string | null> {
+async function nflWeatherFromSummary(
+  summary: Record<string, unknown>
+): Promise<{ note: string | null; tempF: number | null; windMph: number | null }> {
   const gi = summary.gameInfo as Record<string, unknown> | undefined;
   const venue = gi?.venue as Record<string, unknown> | undefined;
   const addr = venue?.address as Record<string, unknown> | undefined;
   const city = addr?.city as string | undefined;
   const state = addr?.state as string | undefined;
-  if (!city || !state) return null;
+  if (!city || !state) return { note: null, tempF: null, windMph: null };
   try {
     const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(`${city},${state},USA`)}&count=1&language=en&format=json`;
     const gr = await fetchWithTimeout(geoUrl, 5000);
-    if (!gr.ok) return null;
+    if (!gr.ok) return { note: null, tempF: null, windMph: null };
     const gj = (await gr.json()) as { results?: { latitude: number; longitude: number }[] };
     const loc = gj.results?.[0];
-    if (!loc) return null;
+    if (!loc) return { note: null, tempF: null, windMph: null };
     const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,wind_speed_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`;
     const wr = await fetchWithTimeout(wUrl, 5000);
-    if (!wr.ok) return null;
+    if (!wr.ok) return { note: null, tempF: null, windMph: null };
     const wj = (await wr.json()) as {
       current?: { temperature_2m?: number; wind_speed_10m?: number };
     };
-    const t = wj.current?.temperature_2m;
-    const wind = wj.current?.wind_speed_10m;
-    if (t == null && wind == null) return null;
-    return `Weather (${city}): ${t != null ? `${Math.round(t)}°F` : "—"}${wind != null ? `, wind ~${Math.round(wind)} mph` : ""} — strong wind/cold can lean NFL totals lower.`;
+    const t = wj.current?.temperature_2m ?? null;
+    const wind = wj.current?.wind_speed_10m ?? null;
+    if (t == null && wind == null) return { note: null, tempF: null, windMph: null };
+    const note = `Weather (${city}): ${t != null ? `${Math.round(t)}°F` : "—"}${wind != null ? `, wind ~${Math.round(wind)} mph` : ""} — strong wind/cold can lean NFL totals lower.`;
+    return { note, tempF: t, windMph: wind };
   } catch {
-    return null;
+    return { note: null, tempF: null, windMph: null };
   }
 }
 
 /** MLB outdoor park weather — wind is the main signal (>12 mph affects run totals). */
-async function weatherNoteFromMlbPark(homeAbbr: string): Promise<string | null> {
+async function mlbParkWeather(
+  homeAbbr: string
+): Promise<{ note: string | null; tempF: number | null; windMph: number | null }> {
   const park = MLB_OUTDOOR_PARKS[homeAbbr.toUpperCase()];
-  if (!park) return null; // indoor/retractable park — skip
+  if (!park) return { note: null, tempF: null, windMph: null };
   try {
     const wUrl = `https://api.open-meteo.com/v1/forecast?latitude=${park.lat}&longitude=${park.lon}&current=temperature_2m,wind_speed_10m,wind_direction_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`;
     const wr = await fetchWithTimeout(wUrl, 4000);
-    if (!wr.ok) return null;
+    if (!wr.ok) return { note: null, tempF: null, windMph: null };
     const wj = (await wr.json()) as {
       current?: { temperature_2m?: number; wind_speed_10m?: number; wind_direction_10m?: number };
     };
-    const t = wj.current?.temperature_2m;
-    const wind = wj.current?.wind_speed_10m;
-    if (t == null && wind == null) return null;
+    const t = wj.current?.temperature_2m ?? null;
+    const wind = wj.current?.wind_speed_10m ?? null;
+    if (t == null && wind == null) return { note: null, tempF: null, windMph: null };
     const windNote =
       wind != null && wind >= 12
         ? ` Wind ${Math.round(wind)} mph — blowing${wind >= 20 ? " strongly" : ""} at ${park.name}; outdoor totals may be impacted.`
@@ -423,10 +575,11 @@ async function weatherNoteFromMlbPark(homeAbbr: string): Promise<string | null> 
       t != null && t <= 45
         ? ` Cold conditions (${Math.round(t)}°F) — pitchers typically benefit, scoring leans lower.`
         : "";
-    if (!windNote && !tempNote) return null;
-    return `Weather at ${park.name}: ${t != null ? `${Math.round(t)}°F` : "—"}, wind ~${wind != null ? Math.round(wind) : "—"} mph.${windNote}${tempNote}`;
+    if (!windNote && !tempNote) return { note: null, tempF: t, windMph: wind };
+    const note = `Weather at ${park.name}: ${t != null ? `${Math.round(t)}°F` : "—"}, wind ~${wind != null ? Math.round(wind) : "—"} mph.${windNote}${tempNote}`;
+    return { note, tempF: t, windMph: wind };
   } catch {
-    return null;
+    return { note: null, tempF: null, windMph: null };
   }
 }
 
@@ -443,16 +596,19 @@ async function enrichOne(
   const eid = pred._meta?.eventId;
   if (!hid || !aid || !eid) return pred;
 
+  const soccerSlug = league === "soccer" ? pred._meta?.soccerLeagueSlug : undefined;
+
   let homeInj = injuryMap.get(hid) ?? [];
   let awayInj = injuryMap.get(aid) ?? [];
   const notes = [...(pred.enrichmentNotes ?? [])];
+  let summaryForWeather: Record<string, unknown> | null = null;
 
-  const summary = await fetchGameSummary(league, eid);
+  const summary = await fetchGameSummary(league, eid, soccerSlug);
   if (summary) {
+    summaryForWeather = summary;
     const fromSum = injuriesFromSummaryBlocks(summary.injuries, hid, aid);
     homeInj = mergeInjuryLists(homeInj, fromSum.home);
     awayInj = mergeInjuryLists(awayInj, fromSum.away);
-    // Apply position-weighted impact scores after merging all injury sources
     homeInj = applyPositionWeighting(homeInj, league);
     awayInj = applyPositionWeighting(awayInj, league);
 
@@ -462,16 +618,6 @@ async function enrichOne(
     }
     const pc = pickcenterNote(summary);
     if (pc) notes.push(pc);
-
-    if (league === "nfl" && pred.status === "upcoming") {
-      const w = await weatherNoteFromNflSummary(summary);
-      if (w) notes.push(w);
-    }
-  }
-
-  if (league === "mlb" && pred.status === "upcoming") {
-    const w = await weatherNoteFromMlbPark(pred.homeTeam.abbreviation);
-    if (w) notes.push(w);
   }
 
   const hp = teamPatches.get(hid);
@@ -515,6 +661,24 @@ async function enrichOne(
     }
   }
 
+  let winProbability = pred.winProbability;
+  let threeWay = pred.threeWay;
+
+  if (
+    league === "nba" &&
+    nbaStatsApplied &&
+    homeTeam.offensiveRating != null &&
+    homeTeam.defensiveRating != null &&
+    awayTeam.offensiveRating != null &&
+    awayTeam.defensiveRating != null
+  ) {
+    const netH = homeTeam.offensiveRating - homeTeam.defensiveRating;
+    const netA = awayTeam.offensiveRating - awayTeam.defensiveRating;
+    const diff = netH - netA;
+    const delta = Math.max(-6, Math.min(6, Math.round(diff * 0.35)));
+    winProbability = shiftWinProbabilityTwoWay(winProbability, delta);
+  }
+
   // ── Back-to-back detection (NBA + MLB only — sports where fatigue materially shifts odds) ──
   const situationalTags = [...pred.situationalTags];
   let confidence = pred.confidence;
@@ -556,6 +720,83 @@ async function enrichOne(
       if (awayConsec && !situationalTags.includes("AWAY CONSEC")) {
         situationalTags.push("AWAY CONSEC");
       }
+
+      let b2bHomeShift = 0;
+      if (awayB2B) b2bHomeShift += 3;
+      if (homeB2B) b2bHomeShift -= 3;
+      if (b2bHomeShift !== 0 && (league === "nba" || league === "mlb")) {
+        winProbability = shiftWinProbabilityTwoWay(winProbability, b2bHomeShift);
+      }
+    }
+  }
+
+  if (league === "nfl" && pred.status === "upcoming" && pred._meta?.sortTime && isKickoffThursdayET(pred._meta.sortTime)) {
+    if (!situationalTags.includes("SHORT WEEK")) {
+      situationalTags.push("SHORT WEEK");
+      notes.push("Thursday Night Football — short week; road team historically carries ~2–3pp disadvantage.");
+    }
+    winProbability = shiftWinProbabilityTwoWay(winProbability, 2);
+  }
+
+  if (summary && league === "nba") {
+    const hShift = nbaH2hHomeShiftFromSummary(summary, homeTeam.abbreviation, awayTeam.abbreviation);
+    if (hShift !== 0) winProbability = shiftWinProbabilityTwoWay(winProbability, hShift);
+  }
+
+  if (league === "nfl" && pred.status === "upcoming" && summaryForWeather) {
+    const wx = await nflWeatherFromSummary(summaryForWeather);
+    if (wx.note) notes.push(wx.note);
+    const bad = (wx.tempF != null && wx.tempF < 35) || (wx.windMph != null && wx.windMph > 15);
+    if (bad) {
+      const hPapg = homeTeam.defensiveRating ?? 24;
+      const aPapg = awayTeam.defensiveRating ?? 24;
+      let towardHome = 0;
+      if (hPapg + 2 < aPapg) towardHome = 2;
+      else if (aPapg + 2 < hPapg) towardHome = -2;
+      if (towardHome !== 0) winProbability = shiftWinProbabilityTwoWay(winProbability, towardHome);
+    }
+  }
+
+  if (league === "mlb" && pred.status === "upcoming") {
+    const wx = await mlbParkWeather(homeTeam.abbreviation);
+    if (wx.note) notes.push(wx.note);
+    if (wx.windMph != null && wx.windMph >= 15) {
+      winProbability = shiftWinProbabilityTwoWay(winProbability, 2);
+    }
+  }
+
+  let soccerOut = pred.soccer;
+  if (league === "soccer") {
+    if (threeWay && homeTeam.homeWinPct != null && awayTeam.roadWinPct != null) {
+      const splitDiff = homeTeam.homeWinPct - awayTeam.roadWinPct;
+      const delta = Math.max(-4, Math.min(4, Math.round(splitDiff * 12)));
+      if (delta !== 0) {
+        threeWay = shiftThreeWayProb(threeWay, delta);
+        winProbability = { home: threeWay.home, away: threeWay.away };
+      }
+    }
+    if (scheduleMap.size > 0 && pred._meta?.easternYmd) {
+      const gy = pred._meta.easternYmd;
+      const h7 = countCompletedGamesInWindow(scheduleMap.get(hid) ?? new Set(), gy, 7);
+      const a7 = countCompletedGamesInWindow(scheduleMap.get(aid) ?? new Set(), gy, 7);
+      const h14 = countCompletedGamesInWindow(scheduleMap.get(hid) ?? new Set(), gy, 14);
+      const a14 = countCompletedGamesInWindow(scheduleMap.get(aid) ?? new Set(), gy, 14);
+      const base = pred.soccer ?? { competition: "", modelNotes: [], dataGaps: [] };
+      soccerOut = {
+        ...base,
+        congestion: { homeLast7: h7, awayLast7: a7, homeLast14: h14, awayLast14: a14 },
+        scheduleSource: "espn-scoreboard",
+      };
+      const conDiff = h7 - a7;
+      if (threeWay && Math.abs(conDiff) >= 2) {
+        const mag = Math.min(3, Math.round(Math.abs(conDiff) * 0.7));
+        const towardHome = conDiff < 0 ? mag : -mag;
+        threeWay = shiftThreeWayProb(threeWay, towardHome);
+        winProbability = { home: threeWay.home, away: threeWay.away };
+        notes.push(
+          `Fixture load (7d): ${homeTeam.abbreviation} ${h7} vs ${awayTeam.abbreviation} ${a7} — congestion shifts rotation risk.`
+        );
+      }
     }
   }
 
@@ -567,19 +808,35 @@ async function enrichOne(
     }
   }
 
-  // ── Injury-adjusted win probability (non-soccer only — skip 3-way draw model) ──
-  let winProbability = pred.winProbability;
   if (league !== "soccer") {
     const homePenalty = computeInjuryPenalty(homeInj);
     const awayPenalty = computeInjuryPenalty(awayInj);
-    const netPenalty = homePenalty - awayPenalty; // positive = home team hurt more
+    const netPenalty = homePenalty - awayPenalty;
     if (Math.abs(netPenalty) >= 6) {
       const shift = Math.min(Math.round(netPenalty * 0.25), 8);
-      winProbability = {
-        home: Math.max(5, Math.min(95, pred.winProbability.home - shift)),
-        away: Math.max(5, Math.min(95, pred.winProbability.away + shift)),
-      };
+      winProbability = shiftWinProbabilityTwoWay(winProbability, -shift);
     }
+  } else if (threeWay) {
+    const homePenalty = computeInjuryPenalty(homeInj);
+    const awayPenalty = computeInjuryPenalty(awayInj);
+    const netPenalty = homePenalty - awayPenalty;
+    if (Math.abs(netPenalty) >= 6) {
+      const mag = Math.min(Math.round(netPenalty * 0.22), 8);
+      threeWay = shiftThreeWayProb(threeWay, -mag);
+      winProbability = { home: threeWay.home, away: threeWay.away };
+    }
+  }
+
+  let keyMatchup = pred.keyMatchup;
+  if (
+    league === "nfl" &&
+    pred.keyMatchup?.includes("fill in after ESPN") &&
+    homeTeam.offensiveRating != null &&
+    homeTeam.defensiveRating != null &&
+    awayTeam.offensiveRating != null &&
+    awayTeam.defensiveRating != null
+  ) {
+    keyMatchup = `${awayTeam.abbreviation} offense (${awayTeam.offensiveRating.toFixed(1)} PPG) vs ${homeTeam.abbreviation} defense (${homeTeam.defensiveRating.toFixed(1)} PAPG); ${homeTeam.abbreviation} (${homeTeam.offensiveRating.toFixed(1)} PPG) vs ${awayTeam.abbreviation} (${awayTeam.defensiveRating.toFixed(1)} PAPG).`;
   }
 
   const nextMeta =
@@ -619,18 +876,30 @@ export async function enrichGamePredictions(predictions: GamePrediction[], leagu
   if (league !== "nba" && league !== "nfl" && league !== "mlb" && league !== "soccer") return predictions;
   const lg = league;
 
-  const injuryMap = await fetchLeagueInjuryMap(lg);
   const teamIds: string[] = [];
   for (const p of predictions) {
     if (p._meta?.homeTeamId) teamIds.push(p._meta.homeTeamId);
     if (p._meta?.awayTeamId) teamIds.push(p._meta.awayTeamId);
   }
 
-  // Run team metrics, schedule (B2B), and NBA advanced ratings in parallel.
-  const [teamPatches, scheduleMap, nbaAdvanced] = await Promise.all([
-    fetchTeamMetricsMap(lg, teamIds),
-    lg === "nba" || lg === "mlb" ? fetchTeamScheduleMap(lg, teamIds) : Promise.resolve(new Map<string, Set<string>>()),
+  const soccerSlugForTeam = (tid: string): string | undefined => {
+    for (const p of predictions) {
+      if (p._meta?.homeTeamId === tid) return p._meta?.soccerLeagueSlug;
+      if (p._meta?.awayTeamId === tid) return p._meta?.soccerLeagueSlug;
+    }
+    return undefined;
+  };
+
+  const injuryMapPromise =
+    lg === "soccer" ? fetchMergedSoccerInjuryMap() : fetchLeagueInjuryMap(lg as "nba" | "nfl" | "mlb");
+
+  const wantSchedule = lg === "nba" || lg === "mlb" || lg === "nfl" || lg === "soccer";
+
+  const [teamPatches, scheduleMap, nbaAdvanced, injuryMap] = await Promise.all([
+    fetchTeamMetricsMap(lg, teamIds, lg === "soccer" ? soccerSlugForTeam : undefined),
+    wantSchedule ? fetchTeamScheduleMap(lg, teamIds, lg === "soccer" ? soccerSlugForTeam : undefined) : Promise.resolve(new Map<string, Set<string>>()),
     lg === "nba" ? fetchNbaAdvancedRatings() : Promise.resolve(null),
+    injuryMapPromise,
   ]);
 
   return poolMapPredictions(predictions, 5, (p) => enrichOne(p, lg, injuryMap, teamPatches, nbaAdvanced, scheduleMap));

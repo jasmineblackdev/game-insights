@@ -118,3 +118,50 @@ export async function fetchMatchupPitcherStats(
   ]);
   return { home, away };
 }
+
+/** In-memory cache for one page load — avoids duplicate search calls per pitcher. */
+const mlbAthleteSearchCache = new Map<string, string | undefined>();
+
+/**
+ * Resolve ESPN MLB athlete id from display name when probables came from MLB Stats API
+ * (no ESPN athlete id on the scoreboard yet). Uses ESPN site search.
+ */
+export async function resolveEspnMlbAthleteIdByDisplayName(displayName: string): Promise<string | undefined> {
+  const q = displayName.trim();
+  if (!q) return undefined;
+  const key = q.toLowerCase();
+  if (mlbAthleteSearchCache.has(key)) return mlbAthleteSearchCache.get(key);
+
+  const url = `https://site.api.espn.com/apis/common/v3/search?query=${encodeURIComponent(q)}&limit=12`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) {
+      mlbAthleteSearchCache.set(key, undefined);
+      return undefined;
+    }
+    const json = (await res.json()) as {
+      results?: { type?: string; athletes?: { id?: string; league?: { abbreviation?: string } }[] }[];
+    };
+    for (const block of json.results ?? []) {
+      if (block.type !== "athlete" && block.type !== "player") continue;
+      for (const a of block.athletes ?? []) {
+        const id = a.id != null ? String(a.id) : "";
+        if (!id) continue;
+        const lg = (a.league?.abbreviation ?? "").toUpperCase();
+        if (lg === "MLB" || lg === "") {
+          mlbAthleteSearchCache.set(key, id);
+          return id;
+        }
+      }
+    }
+    mlbAthleteSearchCache.set(key, undefined);
+    return undefined;
+  } catch {
+    clearTimeout(timer);
+    mlbAthleteSearchCache.set(key, undefined);
+    return undefined;
+  }
+}

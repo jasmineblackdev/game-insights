@@ -197,6 +197,10 @@ export interface GamePrediction {
     /** ESPN athlete IDs for probable pitchers — used to fetch ERA/WHIP stats. */
     homePitcherAthleteId?: string;
     awayPitcherAthleteId?: string;
+    /** ESPN soccer league path segment e.g. eng.1, esp.1 — team/summary URLs. */
+    soccerLeagueSlug?: string;
+    /** Client-only: user marked probable starters as verified (localStorage). */
+    userConfirmedMlbStarters?: boolean;
   };
 }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -14,7 +14,9 @@ import { ClipboardList, Layers, TrendingUp, Tv2, User, Zap } from "lucide-react"
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
-import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
+import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
+import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
+import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { cn } from "@/lib/utils";
 
@@ -149,6 +151,7 @@ const Index = () => {
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
   const [viewMode, setViewMode] = useState<ViewMode>("games");
+  const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
 
   const nbaQuery = useQuery({
     queryKey: ["nba-espn-scoreboard", easternYmd()],
@@ -166,12 +169,19 @@ const Index = () => {
     refetchIntervalInBackground: false,
   });
 
-  const mlbQuery = useQuery({
-    queryKey: ["mlb-espn-scoreboard", easternYmd()],
-    queryFn: fetchMlbGamePredictions,
+  const mlbBaseQuery = useQuery({
+    queryKey: ["mlb-espn-enriched", easternYmd()],
+    queryFn: fetchMlbEnrichedGames,
     staleTime: 2 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
     refetchIntervalInBackground: false,
+  });
+
+  const mlbModeledQuery = useQuery({
+    queryKey: ["mlb-modeled", mlbBaseQuery.dataUpdatedAt, mlbConfirmTick],
+    queryFn: () => applyMlbPredictionModel(mergeMlbStarterConfirmations(mlbBaseQuery.data ?? [])),
+    enabled: mlbBaseQuery.isSuccess,
+    staleTime: Infinity,
   });
 
   const soccerQuery = useQuery({
@@ -182,13 +192,18 @@ const Index = () => {
     refetchIntervalInBackground: false,
   });
 
+  const mlbListPending = mlbBaseQuery.isPending || (mlbBaseQuery.isSuccess && mlbModeledQuery.isPending);
   const activeQuery =
     league === "nba"
       ? nbaQuery
       : league === "nfl"
         ? nflQuery
         : league === "mlb"
-          ? mlbQuery
+          ? {
+              isPending: mlbListPending,
+              isError: mlbBaseQuery.isError || mlbModeledQuery.isError,
+              error: mlbBaseQuery.error ?? mlbModeledQuery.error,
+            }
           : soccerQuery;
   const leagueGames =
     league === "nba"
@@ -196,8 +211,22 @@ const Index = () => {
       : league === "nfl"
         ? (nflQuery.data ?? [])
         : league === "mlb"
-          ? (mlbQuery.data ?? [])
+          ? (mlbModeledQuery.data ?? [])
           : (soccerQuery.data ?? []);
+
+  useEffect(() => {
+    if (!selectedGame || selectedGame.league !== "mlb") return;
+    const next = leagueGames.find((g) => g.id === selectedGame.id);
+    if (!next) return;
+    if (
+      next.winProbability.home !== selectedGame.winProbability.home ||
+      next.confidence !== selectedGame.confidence ||
+      next.mlb?.modelOutput?.pendingConfirmation !== selectedGame.mlb?.modelOutput?.pendingConfirmation ||
+      next.mlb?.modelOutput?.riskFlag !== selectedGame.mlb?.modelOutput?.riskFlag
+    ) {
+      setSelectedGame(next);
+    }
+  }, [leagueGames, selectedGame]);
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -286,6 +315,7 @@ const Index = () => {
               key="detail"
               game={selectedGame}
               onBack={() => setSelectedGame(null)}
+              onMlbStartersConfirmChange={() => setMlbConfirmTick((n) => n + 1)}
             />
           ) : (
             <motion.div

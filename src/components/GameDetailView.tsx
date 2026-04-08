@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -20,13 +21,17 @@ import {
   finalPredictionAccuracyClass,
 } from "@/lib/liveGameState";
 import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type PredictionVersion } from "@/lib/predictionVersions";
+import { Switch } from "@/components/ui/switch";
+import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/mlbStarterConfirm";
 
 interface GameDetailViewProps {
   game: GamePrediction;
   onBack: () => void;
+  /** Bump after toggling “starters verified” so the home tab can re-run the MLB model. */
+  onMlbStartersConfirmChange?: () => void;
 }
 
-export function GameDetailView({ game, onBack }: GameDetailViewProps) {
+export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: GameDetailViewProps) {
   const edge = useEdgeCardOptional();
   const tw = game.threeWay;
   const favoredSide = getFavoredSide(game);
@@ -41,6 +46,20 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
   const upcomingBetTip = getUpcomingBetTip(game);
   const predictionVersions = buildPredictionVersions(game);
   const finalCtx = getFinalPredictionContext(game);
+
+  const [mlbStartersChecked, setMlbStartersChecked] = useState(() =>
+    game.league === "mlb" ? isMlbStartersUserConfirmed(game.id) : false
+  );
+  useEffect(() => {
+    if (game.league === "mlb") setMlbStartersChecked(isMlbStartersUserConfirmed(game.id));
+    else setMlbStartersChecked(false);
+  }, [game.id, game.league]);
+
+  const mlbCanUserConfirmStarters =
+    game.league === "mlb" &&
+    game.status === "upcoming" &&
+    !!game.mlb?.homeProbablePitcher &&
+    !!game.mlb?.awayProbablePitcher;
 
   return (
     <motion.div
@@ -526,6 +545,26 @@ export function GameDetailView({ game, onBack }: GameDetailViewProps) {
                 ? ` · Away: ${game.mlb.awayProbablePitcher ?? "TBD"} (${game.mlb.awayPitcherHand ?? "?"}) · Home: ${game.mlb.homeProbablePitcher ?? "TBD"} (${game.mlb.homePitcherHand ?? "?"})`
                 : " · Probable starters not yet announced."}
             </p>
+
+            {mlbCanUserConfirmStarters && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3 p-3 rounded-md border border-border bg-muted/30">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Switch
+                    id="mlb-starters-confirm"
+                    checked={mlbStartersChecked}
+                    onCheckedChange={(checked) => {
+                      setMlbStartersChecked(checked);
+                      setMlbStartersUserConfirmed(game.id, checked);
+                      onMlbStartersConfirmChange?.();
+                    }}
+                  />
+                  <label htmlFor="mlb-starters-confirm" className="text-xs text-foreground cursor-pointer leading-snug">
+                    I’ve verified both listed starters match the official source (team / park report). Re-run model with
+                    confirmed-starter confidence.
+                  </label>
+                </div>
+              </div>
+            )}
 
             {/* Risk flag banner */}
             {game.mlb.modelOutput?.riskFlag && (
