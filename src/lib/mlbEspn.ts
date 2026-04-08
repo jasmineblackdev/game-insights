@@ -26,6 +26,7 @@ import {
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
+import { fetchMlbProbablePitchers, type MlbProbableMatchup } from "@/lib/mlbStatsApi";
 // MLB_PARK_FACTORS lives in mlbConstants.ts to avoid circular imports
 // (mlbEspn → mlbPredictionModel → mlbEspn would create a cycle).
 export { MLB_PARK_FACTORS } from "@/lib/mlbConstants";
@@ -81,26 +82,49 @@ function isLineupConfirmed(status: GamePrediction["status"], sortTime: number): 
   return minsUntilGame <= 90;
 }
 
-function buildMlbIntel(comp: EspnCompetition, status: GamePrediction["status"], sortTime: number): MlbIntel {
-  const pitchers = parseProbablePitchers(comp);
-  const home = pitchers.find((p) => p.homeAway === "home");
-  const away = pitchers.find((p) => p.homeAway === "away");
-  // "partial" = only one starter named; "probable" = both named; "unknown" = neither
+function buildMlbIntel(
+  comp: EspnCompetition,
+  status: GamePrediction["status"],
+  sortTime: number,
+  mlbStatsMatchup?: MlbProbableMatchup
+): MlbIntel {
+  const espnPitchers = parseProbablePitchers(comp);
+  const espnHome = espnPitchers.find((p) => p.homeAway === "home");
+  const espnAway = espnPitchers.find((p) => p.homeAway === "away");
+
+  // Merge: ESPN takes precedence (has athlete ID for ERA lookup).
+  // MLB Stats API fills gaps where ESPN hasn't populated probables yet.
+  const homeName = espnHome?.name ?? mlbStatsMatchup?.home?.name;
+  const awayName = espnAway?.name ?? mlbStatsMatchup?.away?.name;
+  const homeHand = espnHome?.hand ?? mlbStatsMatchup?.home?.hand;
+  const awayHand = espnAway?.hand ?? mlbStatsMatchup?.away?.hand;
+
+  // Note the source so the UI can signal when names came from MLB Stats API early
+  const homeFromMlbApi = !espnHome && !!mlbStatsMatchup?.home;
+  const awayFromMlbApi = !espnAway && !!mlbStatsMatchup?.away;
+  const anyFromMlbApi = homeFromMlbApi || awayFromMlbApi;
+
   const certainty: MlbIntel["pitcherCertainty"] =
-    home && away ? "probable" : home || away ? "partial" : "unknown";
+    homeName && awayName ? "probable"
+    : homeName || awayName ? "partial"
+    : "unknown";
+
+  const pitcherLine =
+    homeName && awayName
+      ? `Probable starters: ${awayName}${awayHand ? ` (${awayHand}HP)` : ""} vs ${homeName}${homeHand ? ` (${homeHand}HP)` : ""}${anyFromMlbApi ? " (MLB Stats API — ESPN ID pending)" : ""}.`
+      : homeName || awayName
+      ? `One starter confirmed (${(homeName ?? awayName)!}) — opponent TBD. Confidence capped until both are set.`
+      : "Probable starters not yet announced — treat win probability as low-certainty.";
+
   return {
-    homeProbablePitcher: home?.name,
-    awayProbablePitcher: away?.name,
-    homePitcherHand: home?.hand,
-    awayPitcherHand: away?.hand,
+    homeProbablePitcher: homeName,
+    awayProbablePitcher: awayName,
+    homePitcherHand: homeHand,
+    awayPitcherHand: awayHand,
     pitcherCertainty: certainty,
     lineupConfirmed: isLineupConfirmed(status, sortTime),
     modelNotes: [
-      home && away
-        ? `Probable starters: ${away.name}${away.hand ? ` (${away.hand}HP)` : ""} vs ${home.name}${home.hand ? ` (${home.hand}HP)` : ""}.`
-        : home || away
-        ? `One starter confirmed (${(home ?? away)!.name}) — opponent TBD. Confidence capped until both are set.`
-        : "Probable starters not yet announced — treat win probability as low-certainty.",
+      pitcherLine,
       "MLB model: starter quality, bullpen workload, handedness splits, and lineup OPS drive the edge.",
       "Park factors and wind matter for totals; outdoor games in wind lean lower.",
     ],
@@ -184,7 +208,11 @@ function buildTeam(c: EspnCompetitor): TeamData {
   };
 }
 
-function eventToPrediction(event: EspnEvent, todayEastern: string): GamePrediction | null {
+function eventToPrediction(
+  event: EspnEvent,
+  todayEastern: string,
+  mlbProbables?: Map<string, MlbProbableMatchup>
+): GamePrediction | null {
   const comp = event.competitions?.[0];
   if (!comp?.competitors || comp.competitors.length < 2) return null;
 
@@ -204,7 +232,11 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   }
 
   const sortTime = new Date(comp.date).getTime();
-  const mlbIntel = buildMlbIntel(comp, status, sortTime);
+  // Look up MLB Stats API probable pitchers by date + home team abbreviation
+  const easternGameYmdLocal = isoToEasternYmd(comp.date);
+  const mlbStatsKey = `${easternGameYmdLocal}-${home.abbreviation.toUpperCase()}`;
+  const mlbStatsMatchup = mlbProbables?.get(mlbStatsKey);
+  const mlbIntel = buildMlbIntel(comp, status, sortTime, mlbStatsMatchup);
   const pitcherIds = parsePitcherAthleteIds(comp);
   const parkEntry = MLB_PARK_FACTORS[home.abbreviation.toUpperCase()];
   if (parkEntry) {
@@ -222,7 +254,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
     if (confidence === "high") confidence = "medium";
   }
 
-  const easternGameYmd = isoToEasternYmd(comp.date);
+  const easternGameYmd = easternGameYmdLocal;
   const gameDate = gameDateFromEasternTip(easternGameYmd, todayEastern);
   const tags = buildSituationalTags(status, "mlb", away.record, home.record, prob, spread);
 
@@ -302,16 +334,19 @@ export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const tomorrow = nextCalendarYmd(today);
 
-  const [e0, e1] = await Promise.all([
+  // Fetch ESPN scoreboard + MLB Stats API probable pitchers in parallel.
+  // MLB Stats API announces pitchers 24–48h earlier than ESPN's probables field.
+  const [e0, e1, mlbProbables] = await Promise.all([
     fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(today)),
     fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(tomorrow)),
+    fetchMlbProbablePitchers(today, tomorrow),
   ]);
 
   const merged = mergeScoreboardDays(e0, e1);
 
   const predictions: GamePrediction[] = [];
   for (const event of merged) {
-    const p = eventToPrediction(event, today);
+    const p = eventToPrediction(event, today, mlbProbables);
     if (p) predictions.push(p);
   }
 
