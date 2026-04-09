@@ -7,7 +7,8 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const footballDataToken = env.VITE_FOOTBALL_DATA_API_TOKEN;
-  const oddsServerKey = (env.THE_ODDS_API_KEY ?? "").trim();
+  /** Dev proxy: prefer server-only key; fall back to VITE_THE_ODDS_API_KEY if that is all you set. */
+  const oddsServerKey = (env.THE_ODDS_API_KEY ?? env.VITE_THE_ODDS_API_KEY ?? "").trim();
 
   const proxy: Record<string, import("vite").ProxyOptions> = {};
 
