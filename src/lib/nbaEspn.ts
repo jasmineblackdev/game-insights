@@ -11,6 +11,7 @@ import {
   isoToEasternYmd,
   mapStatus,
   mergeScoreboardDays,
+  marketMlSnapshot,
   overallRecord,
   parseRecord,
   parseLiveState,
@@ -23,6 +24,8 @@ import {
   nextCalendarYmd,
 } from "@/lib/espnShared";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
+import { applyAdvancedIntelligenceToGames } from "@/lib/advancedIntelligenceLayer";
+import { applyPredictionQualityPipeline } from "@/lib/predictionQualityPipeline";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 export { easternYmd } from "@/lib/espnShared";
@@ -162,6 +165,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       ...(status === "final" && homeC.score != null && awayC.score != null
         ? { finalHomeScore: Number(homeC.score), finalAwayScore: Number(awayC.score) }
         : {}),
+      marketMl: marketMlSnapshot(odd),
     },
   };
 }
@@ -187,5 +191,5 @@ export async function fetchNbaGamePredictions(): Promise<GamePrediction[]> {
 
   let out = await enrichGamePredictions(predictions, "nba");
   out = await mergeTheOddsApiNotes(out, "basketball_nba");
-  return out;
+  return applyPredictionQualityPipeline(await applyAdvancedIntelligenceToGames(out));
 }

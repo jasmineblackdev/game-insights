@@ -11,6 +11,7 @@ import {
   isoToEasternYmd,
   mapStatus,
   mergeScoreboardDays,
+  marketMlSnapshot,
   overallRecord,
   parseRecord,
   parseLiveState,
@@ -23,6 +24,8 @@ import {
   nextCalendarYmd,
 } from "@/lib/espnShared";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
+import { applyAdvancedIntelligenceToGames } from "@/lib/advancedIntelligenceLayer";
+import { applyPredictionQualityPipeline } from "@/lib/predictionQualityPipeline";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 
 const SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
@@ -168,6 +171,7 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
       ...(status === "final" && homeC.score != null && awayC.score != null
         ? { finalHomeScore: Number(homeC.score), finalAwayScore: Number(awayC.score) }
         : {}),
+      marketMl: marketMlSnapshot(odd),
     },
   };
 }
@@ -193,5 +197,5 @@ export async function fetchNflGamePredictions(): Promise<GamePrediction[]> {
 
   let out = await enrichGamePredictions(predictions, "nfl");
   out = await mergeTheOddsApiNotes(out, "americanfootball_nfl");
-  return out;
+  return applyPredictionQualityPipeline(await applyAdvancedIntelligenceToGames(out));
 }

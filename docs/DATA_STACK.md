@@ -107,7 +107,7 @@ Odds comparison, line movement, news/sentiment, accuracy dashboards by sport (Sp
 |--------|------|
 | ESPN site API | Live scoreboards, injuries, summaries (browser; proxy if blocked). |
 | football-data.org | Optional EPL congestion + table (token + dev proxy). |
-| The Odds API | Optional cross-book notes. |
+| The Odds API | Optional US-book spreads + MLB **F5 (first 5 innings)** leg lines; soccer uses **per-league** keys mapped from ESPN slugs (`src/lib/oddsSportKeys.ts`). List keys anytime with `GET /v4/sports/?all=true` (free, no quota). |
 
 Treat this as **demo/iteration** until data is normalized through Supabase per the pipeline above.
 

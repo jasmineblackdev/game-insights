@@ -11,6 +11,7 @@ import {
   isoToEasternYmd,
   mapStatus,
   mergeScoreboardDays,
+  marketMlSnapshot,
   overallRecord,
   lastTenRecordSummary,
   parseRecord,
@@ -24,6 +25,7 @@ import {
   nextCalendarYmd,
 } from "@/lib/espnShared";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
+import { ODDS_API_MLB_LEG_MARKETS } from "@/lib/oddsSportKeys";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { fetchMlbProbablePitchers, type MlbProbableMatchup } from "@/lib/mlbStatsApi";
@@ -326,6 +328,7 @@ function eventToPrediction(
         : {}),
       ...(pitcherIds.homeId ? { homePitcherAthleteId: pitcherIds.homeId } : {}),
       ...(pitcherIds.awayId ? { awayPitcherAthleteId: pitcherIds.awayId } : {}),
+      marketMl: marketMlSnapshot(odd),
     },
   };
 }
@@ -355,7 +358,7 @@ export async function fetchMlbEnrichedGames(): Promise<GamePrediction[]> {
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
   let out = await enrichGamePredictions(predictions, "mlb");
-  out = await mergeTheOddsApiNotes(out, "baseball_mlb");
+  out = await mergeTheOddsApiNotes(out, "baseball_mlb", { extraMarkets: ODDS_API_MLB_LEG_MARKETS });
   return out;
 }
 

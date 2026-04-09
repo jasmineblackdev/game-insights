@@ -1,4 +1,4 @@
-import type { ConfidenceLevel, GamePrediction, League } from "@/data/mockGames";
+import type { ConfidenceLevel, GamePrediction, League, VolatilityLabel } from "@/data/mockGames";
 import type { DraftEdgeCard, DraftEdgeCardKind } from "@/data/draftEdgeTypes";
 
 export type EdgeSide = "home" | "away";
@@ -39,6 +39,8 @@ export interface EdgeSlipSnapshot {
   topRisk: string;
   keyEdge: string;
   lastUpdated: string;
+  /** From layered quality pipeline — used for card-level volatility / calibration only. */
+  volatilityLabel?: VolatilityLabel;
 }
 
 export interface PlayerPropSlipSnapshot {
@@ -389,6 +391,10 @@ function marketVolatility(game: GamePrediction, side: EdgeSide): number {
     if (d >= 2) v += 5;
   }
 
+  const qv = game._meta?.quality?.volatility?.volatility_label;
+  if (qv === "high") v += 14;
+  else if (qv === "medium") v += 5;
+
   return v;
 }
 
@@ -453,8 +459,46 @@ export function candidateToSlipItem(c: EdgeCandidate): TeamEdgeSlipItem {
       topRisk: game.riskFactors[0] ?? "",
       keyEdge: game.matchupEdges[0]?.description ?? game.keyMatchup,
       lastUpdated: game.lastUpdated,
+      volatilityLabel: game._meta?.quality?.volatility?.volatility_label,
     },
   };
+}
+
+/** Same-game team + prop overlap and multi-prop clusters — 0 = independent, 100 = highly coupled. */
+export function computeSlipCorrelationScore(items: EdgeSlipItem[]): { score: number; warnings: string[] } {
+  let score = 0;
+  const warnings: string[] = [];
+  const teamItems = items.filter(isTeamSlipItem);
+  const propItems = items.filter(isPlayerPropSlipItem);
+
+  for (const t of teamItems) {
+    for (const p of propItems) {
+      if (p.gameId !== t.gameId) continue;
+      if (p.snapshot.teamAbbr === t.snapshot.pickedAbbr) {
+        score += 40;
+        warnings.push(
+          `Same-game stack: ${t.snapshot.pickedAbbr} side + ${p.snapshot.playerName} prop share outcome risk.`
+        );
+      } else {
+        score += 14;
+      }
+    }
+  }
+
+  for (let a = 0; a < propItems.length; a++) {
+    for (let b = a + 1; b < propItems.length; b++) {
+      const p = propItems[a];
+      const q = propItems[b];
+      if (p.gameId !== q.gameId) continue;
+      score += 20;
+      if (p.playerId === q.playerId) {
+        score += 35;
+        warnings.push(`Multiple props on ${p.snapshot.playerName} — legs are tightly correlated.`);
+      }
+    }
+  }
+
+  return { score: Math.min(100, score), warnings: [...new Set(warnings)].slice(0, 4) };
 }
 
 function passesConfidence(game: GamePrediction, min: EdgeHubFilters["minConfidence"]): boolean {
@@ -545,6 +589,10 @@ export function slipAggregateConfidence(items: { confidence: ConfidenceLevel }[]
 /** Short warnings for the fixed Edge Card drawer (mixed team + player props). */
 export function edgeSlipWarningLines(items: EdgeSlipItem[]): string[] {
   const lines: string[] = [];
+  const { score: corrScore, warnings: corrWarn } = computeSlipCorrelationScore(items);
+  if (corrScore >= 48) {
+    lines.push(...corrWarn.slice(0, 2));
+  }
   let lowConf = 0;
   let pitcherNote = 0;
   let injuryNote = 0;

@@ -64,11 +64,30 @@ export const SHARED_DB_ENTITIES = [
 
 /** Extensions per sport (in addition to shared core). */
 export const SPORT_SPECIFIC_DB_ENTITIES: Record<League, readonly string[]> = {
-  nba: ["rotations", "usage_trends"],
-  nfl: ["depth_charts", "qb_metrics"],
-  mlb: ["probable_pitchers", "bullpen_usage", "team_splits"],
-  soccer: ["fixtures", "lineups", "xg_metrics", "congestion_metrics"],
+  nba: ["rotations", "usage_trends", "advanced_team_metrics (shared)"],
+  nfl: ["depth_charts", "qb_metrics", "advanced_team_metrics (shared)"],
+  mlb: ["probable_pitchers", "bullpen_usage", "team_splits", "advanced_team_metrics (shared)"],
+  soccer: ["fixtures", "lineups", "xg_metrics", "congestion_metrics", "advanced_team_metrics (shared)"],
 };
+
+/** Cross-sport advanced layer (Supabase) — populated by ETL; optional at runtime. */
+export const ADVANCED_INTELLIGENCE_ENTITIES = [
+  "advanced_team_metrics",
+  "advanced_player_metrics",
+  "matchup_history",
+  "lineup_strength_scores",
+  "fatigue_scores",
+  "advanced_prediction_inputs",
+] as const;
+
+/** Calibration & analytics tables (optional reads; service-role writes). See prediction_quality_layers migration. */
+export const PREDICTION_QUALITY_ENTITIES = [
+  "prediction_confidence_calibration",
+  "prediction_quality_snapshots",
+  "prediction_market_signals",
+  "prediction_correlation_scores",
+  "prediction_model_blends",
+] as const;
 
 /** Product capabilities mirrored across every sport in the app. */
 export const SHARED_PRODUCT_FEATURES = [

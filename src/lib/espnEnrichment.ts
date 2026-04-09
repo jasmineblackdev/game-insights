@@ -10,7 +10,7 @@ function clampWinPct(n: number): number {
 }
 
 /** Positive delta boosts home win% (away drops), then renormalizes to sum 100. */
-function shiftWinProbabilityTwoWay(
+export function shiftWinProbabilityTwoWay(
   wp: { home: number; away: number },
   homeDeltaPp: number
 ): { home: number; away: number } {
@@ -24,7 +24,7 @@ function shiftWinProbabilityTwoWay(
   return { home: h, away: a };
 }
 
-function shiftThreeWayProb(
+export function shiftThreeWayProb(
   tw: { home: number; away: number; draw: number },
   homeDelta: number
 ): { home: number; away: number; draw: number } {
@@ -92,7 +92,15 @@ const INJURY_URLS: Record<"nba" | "nfl" | "mlb", string> = {
 };
 
 /** Top 5 European leagues — merged injury map keyed by ESPN team id. */
-const SOCCER_INJURY_SLUGS = ["eng.1", "esp.1", "ger.1", "ita.1", "fra.1"];
+const SOCCER_INJURY_SLUGS = [
+  "eng.1",
+  "esp.1",
+  "ger.1",
+  "ita.1",
+  "usa.1",
+  "uefa.champions",
+  "uefa.europa",
+];
 
 async function fetchMergedSoccerInjuryMap(): Promise<Map<string, PlayerInjury[]>> {
   const merged = new Map<string, PlayerInjury[]>();
@@ -598,6 +606,8 @@ async function enrichOne(
 
   const soccerSlug = league === "soccer" ? pred._meta?.soccerLeagueSlug : undefined;
 
+  let mlbWeatherMeta: { tempF: number | null; windMph: number | null } | undefined;
+
   let homeInj = injuryMap.get(hid) ?? [];
   let awayInj = injuryMap.get(aid) ?? [];
   const notes = [...(pred.enrichmentNotes ?? [])];
@@ -759,6 +769,7 @@ async function enrichOne(
 
   if (league === "mlb" && pred.status === "upcoming") {
     const wx = await mlbParkWeather(homeTeam.abbreviation);
+    mlbWeatherMeta = { tempF: wx.tempF, windMph: wx.windMph };
     if (wx.note) notes.push(wx.note);
     if (wx.windMph != null && wx.windMph >= 15) {
       winProbability = shiftWinProbabilityTwoWay(winProbability, 2);
@@ -840,8 +851,14 @@ async function enrichOne(
   }
 
   const nextMeta =
-    pred._meta && league === "nba" && nbaStatsApplied && nbaStatsSeason
-      ? { ...pred._meta, nbaRatingsFromStats: true as const, nbaStatsSeason }
+    pred._meta != null
+      ? {
+          ...pred._meta,
+          ...(league === "mlb" && mlbWeatherMeta ? { mlbWeather: mlbWeatherMeta } : {}),
+          ...(league === "nba" && nbaStatsApplied && nbaStatsSeason
+            ? { nbaRatingsFromStats: true as const, nbaStatsSeason }
+            : {}),
+        }
       : pred._meta;
 
   return {

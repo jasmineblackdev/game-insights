@@ -4,6 +4,7 @@ import type {
   GameLines,
   GamePrediction,
   League,
+  MarketMlSnapshot,
   MatchupEdge,
   TeamData,
 } from "@/data/mockGames";
@@ -44,13 +45,31 @@ export function ymdToParam(ymd: string): string {
   return ymd.replace(/-/g, "");
 }
 
+/**
+ * Kickoff instant → calendar date in America/New_York (fixture bucketing for Today / Tomorrow / Week).
+ * Treats timezone-less ESPN datetimes as UTC so browsers in any local TZ agree with ET labels.
+ */
+/** Normalize ESPN kickoff strings so `Date` parsing is consistent across client timezones. */
+export function normalizeEspnIso(iso: string): string {
+  const t = iso.trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(t) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(t)) {
+    return `${t}Z`;
+  }
+  return t;
+}
+
 export function isoToEasternYmd(iso: string): string {
+  const normalized = normalizeEspnIso(iso);
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date(iso));
+  }).format(new Date(normalized));
+}
+
+export function parseEspnIsoToUtcMs(iso: string): number {
+  return new Date(normalizeEspnIso(iso)).getTime();
 }
 
 export function parseRecord(summary: string | undefined): { w: number; l: number; pct: number } {
@@ -282,8 +301,25 @@ export interface EspnOdds {
   };
 }
 
+/** Opening vs closing ML for market-intelligence / CLV support (ESPN book feed). */
+export function marketMlSnapshot(odd: EspnOdds | undefined): MarketMlSnapshot | undefined {
+  if (!odd?.moneyline) return undefined;
+  const h = odd.moneyline.home;
+  const a = odd.moneyline.away;
+  const d = odd.moneyline.draw;
+  const out: MarketMlSnapshot = {};
+  if (h?.open?.odds) out.homeOpen = h.open.odds;
+  if (h?.close?.odds) out.homeClose = h.close.odds;
+  if (a?.open?.odds) out.awayOpen = a.open.odds;
+  if (a?.close?.odds) out.awayClose = a.close.odds;
+  if (d?.open?.odds) out.drawOpen = d.open.odds;
+  if (d?.close?.odds) out.drawClose = d.close.odds;
+  return Object.keys(out).length ? out : undefined;
+}
+
 export interface EspnCompetition {
   date: string;
+  venue?: { id?: string; fullName?: string; address?: { city?: string; country?: string } };
   odds?: EspnOdds[];
   status: {
     /** Current period/quarter/inning (1-based). Present when state === "in". */
@@ -332,14 +368,16 @@ export function buildSituationalTags(
   awayRecord: string,
   prob: { home: number; away: number },
   spread: number | undefined,
-  threeWay?: { home: number; away: number; draw: number }
+  threeWay?: { home: number; away: number; draw: number },
+  /** Soccer list badge (UCL, EPL, MLS, …) — avoids mislabeling all fixtures as EPL. */
+  soccerListTag?: string
 ): string[] {
   const tags: string[] = [];
 
   // Status tag
   if (status === "live") tags.push("LIVE");
   else if (status === "final") tags.push("FINAL");
-  else tags.push(league.toUpperCase() === "SOCCER" ? "EPL" : league.toUpperCase());
+  else tags.push(league === "soccer" ? soccerListTag ?? "SOC" : league.toUpperCase());
 
   // Toss-up — spread within 1.5 pts or prob near 50/50
   const probGap = Math.abs(prob.home - prob.away);
@@ -415,7 +453,7 @@ export function formatGameTime(comp: EspnCompetition, status: GamePrediction["st
   if (status === "live") {
     return comp.status.type.shortDetail ?? comp.status.type.detail ?? "Live";
   }
-  const t = new Date(comp.date);
+  const t = new Date(normalizeEspnIso(comp.date));
   return (
     t.toLocaleTimeString("en-US", {
       timeZone: "America/New_York",
@@ -523,6 +561,48 @@ export async function fetchEspnScoreboardEvents(baseUrl: string, datesParam?: st
   if (!res.ok) throw new Error(`ESPN scoreboard ${res.status}`);
   const data = (await res.json()) as EspnScoreboard;
   return data.events ?? [];
+}
+
+/**
+ * ESPN soccer scoreboards: try `dates=start-end` (and optional limit). If empty, merge per-day
+ * requests across [startYmd, endYmd] so sparse leagues still fill the week window.
+ */
+export async function fetchEspnSoccerScoreboardRange(
+  baseUrl: string,
+  startYmd: string,
+  endYmd: string
+): Promise<EspnEvent[]> {
+  const rangeParam = `${ymdToParam(startYmd)}-${ymdToParam(endYmd)}`;
+  const tryUrls = [`${baseUrl}?dates=${rangeParam}&limit=500`, `${baseUrl}?dates=${rangeParam}`];
+
+  for (const url of tryUrls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = (await res.json()) as EspnScoreboard;
+      const ev = data.events ?? [];
+      if (ev.length > 0) return ev;
+    } catch {
+      /* try next */
+    }
+  }
+
+  const byId = new Map<string, EspnEvent>();
+  let ymd = startYmd;
+  for (;;) {
+    try {
+      const res = await fetch(`${baseUrl}?dates=${ymdToParam(ymd)}&limit=500`);
+      if (res.ok) {
+        const data = (await res.json()) as EspnScoreboard;
+        for (const e of data.events ?? []) byId.set(e.id, e);
+      }
+    } catch {
+      /* skip day */
+    }
+    if (ymd === endYmd) break;
+    ymd = addCalendarDaysYmd(ymd, 1);
+  }
+  return [...byId.values()];
 }
 
 export function mergeScoreboardDays(a: EspnEvent[], b: EspnEvent[]): EspnEvent[] {

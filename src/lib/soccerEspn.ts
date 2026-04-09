@@ -6,42 +6,47 @@ import {
   buildSituationalTags,
   confidenceFromSoccerThreeWay,
   easternYmd,
-  fetchEspnScoreboardEvents,
+  fetchEspnSoccerScoreboardRange,
   formatGameTime,
   isoToEasternYmd,
   mapStatus,
   nextCalendarYmd,
   overallRecord,
+  parseEspnIsoToUtcMs,
   parseLiveState,
   probThreeWayFromAmerican,
   probThreeWayFromSoccerRecords,
   seasonStrengthFromRecord,
   sortCompetitors,
+  marketMlSnapshot,
   type EspnCompetitor,
   type EspnEvent,
-  ymdToParam,
 } from "@/lib/espnShared";
 import type { GameDate } from "@/data/mockGames";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
-import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
+import { applyAdvancedIntelligenceToGames } from "@/lib/advancedIntelligenceLayer";
+import { applyPredictionQualityPipeline } from "@/lib/predictionQualityPipeline";
+import { mergeSoccerOddsFromTheOddsApi } from "@/lib/theOddsApi";
 import { mergeSoccerVendorIntel } from "@/lib/soccerVendorIntel";
 
 export { easternYmd } from "@/lib/espnShared";
 
-const SOCCER_LEAGUES: { slug: string; label: string }[] = [
-  { slug: "eng.1", label: "Premier League (EPL)" },
-  { slug: "esp.1", label: "La Liga" },
-  { slug: "ger.1", label: "Bundesliga" },
-  { slug: "ita.1", label: "Serie A" },
-  { slug: "fra.1", label: "Ligue 1" },
-  { slug: "uefa.champions", label: "UEFA Champions League" },
+/** Supported competitions — ESPN `soccer/{slug}/scoreboard`. Order: fetch priority only. */
+const SOCCER_LEAGUES: { slug: string; label: string; listTag: string }[] = [
+  { slug: "uefa.champions", label: "UEFA Champions League", listTag: "UCL" },
+  { slug: "uefa.europa", label: "UEFA Europa League", listTag: "UEL" },
+  { slug: "eng.1", label: "Premier League", listTag: "EPL" },
+  { slug: "esp.1", label: "La Liga", listTag: "LALIGA" },
+  { slug: "ger.1", label: "Bundesliga", listTag: "BUND" },
+  { slug: "ita.1", label: "Serie A", listTag: "SERIEA" },
+  { slug: "usa.1", label: "MLS", listTag: "MLS" },
 ];
 
 function scoreboardUrl(slug: string): string {
   return `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard`;
 }
 
-/** Map kickoff (US Eastern calendar day) to UI bucket — EPL often has empty "today". */
+/** Map kickoff (US Eastern calendar day) to UI bucket — Today / Tomorrow / Next 7 days. */
 function soccerGameDateBucket(easternGameYmd: string, todayEastern: string): GameDate {
   if (easternGameYmd === todayEastern) return "today";
   const tom = nextCalendarYmd(todayEastern);
@@ -82,20 +87,20 @@ function leadersToTrendsSoccer(c: EspnCompetitor): PlayerTrendData[] {
   ];
 }
 
-function buildSoccerIntel(): SoccerIntel {
+function buildSoccerIntel(competition: string): SoccerIntel {
   return {
-    competition: "Premier League (EPL)",
+    competition,
     modelNotes: [
       "Possession style & field tilt: distinguish patient buildup vs transition-heavy sides — shapes how the game state evolves, not just who is favored.",
       "xG for/against and last-5 xG trend beat raw goals for signal; finishing runs hot/cold — track over/underperformance vs xG when you have event data.",
       "Fixture congestion (7/14-day load), travel, and rotation risk often swing lineup quality more than casual models admit.",
       "Style-vs-style: press vs press resistance, low block vs cross volume, transition vs turnover vulnerability — this is the explanation layer fans feel.",
-      "Set-piece threat (aerial dominance, fouls conceded high up) moves many tight EPL results.",
+      "Set-piece threat (aerial dominance, fouls conceded high up) moves many tight results.",
       "Show draw probability explicitly and keep confidence conservative — low scores mean higher randomness.",
     ],
     dataGaps: [
       "StatsBomb xG, confirmed XIs, and set-piece models are not wired — headline 1X2 is still de-vig from the book.",
-      "Wire football-data.org (token) or SportsDataIO for richer schedules & lineups; without a token we still estimate last-7-day EPL load from ESPN finals on the scoreboard.",
+      `Wire football-data.org (token) or SportsDataIO for richer schedules & lineups; without a token we still estimate fixture load from ESPN finals on the scoreboard (${competition}).`,
     ],
   };
 }
@@ -120,7 +125,8 @@ function eventToPrediction(
   todayEastern: string,
   weekEndYmd: string,
   leagueLabel: string,
-  soccerLeagueSlug: string
+  soccerLeagueSlug: string,
+  listTag: string
 ): GamePrediction | null {
   const comp = event.competitions?.[0];
   if (!comp?.competitors || comp.competitors.length < 2) return null;
@@ -133,8 +139,9 @@ function eventToPrediction(
   const easternGameYmd = isoToEasternYmd(comp.date);
   if (easternGameYmd > weekEndYmd) return null;
   if (easternGameYmd < todayEastern && status !== "live") return null;
-  // Skip completed games — weekly fixture view is for upcoming/live only
   if (comp.status.type.state === "post") return null;
+
+  const venueName = comp.venue?.fullName?.trim() || null;
 
   const odd = comp.odds?.[0];
   const spread = odd?.spread;
@@ -151,9 +158,10 @@ function eventToPrediction(
   const confidence = confidenceFromSoccerThreeWay(threeWay, spread != null ? Math.abs(spread) : undefined);
 
   const gameDate = soccerGameDateBucket(easternGameYmd, todayEastern);
-  const tags = buildSituationalTags(status, "soccer", away.record, home.record, prob, spread, threeWay);
+  const tags = buildSituationalTags(status, "soccer", away.record, home.record, prob, spread, threeWay, listTag);
+  const sortTime = parseEspnIsoToUtcMs(comp.date);
   if (gameDate === "week") {
-    const short = new Date(`${easternGameYmd}T18:00:00`).toLocaleDateString("en-US", {
+    const short = new Date(sortTime).toLocaleDateString("en-US", {
       timeZone: "America/New_York",
       weekday: "short",
       month: "short",
@@ -166,7 +174,7 @@ function eventToPrediction(
   const topWin = Math.max(threeWay.home, threeWay.away);
 
   const topReasons = [
-    `${home.abbreviation} ${home.record} hosts ${away.abbreviation} ${away.record} (W-D-L).`,
+    `${home.abbreviation} ${home.record} hosts ${away.abbreviation} ${away.record} (W-D-L) · ${leagueLabel}.`,
     `1X2 de-vig (approx.): ${away.abbreviation} ${threeWay.away}% · Draw ${threeWay.draw}% · ${home.abbreviation} ${threeWay.home}%.`,
     odd?.details
       ? `Market line: ${odd.details}${odd.overUnder != null ? ` · O/U ${odd.overUnder}` : ""}.`
@@ -213,12 +221,22 @@ function eventToPrediction(
     soccer: buildSoccerIntel(leagueLabel),
     _meta: {
       easternYmd: easternGameYmd,
-      sortTime: new Date(comp.date).getTime(),
+      sortTime,
       eventId: event.id,
       homeTeamId: homeC.team.id,
       awayTeamId: awayC.team.id,
       liveState: parseLiveState(comp),
       soccerLeagueSlug,
+      soccerFixture: {
+        matchId: event.id,
+        competition: leagueLabel,
+        homeTeam: home.name,
+        awayTeam: away.name,
+        startTimeIso: comp.date,
+        venue: venueName,
+        status,
+      },
+      marketMl: marketMlSnapshot(odd),
     },
   };
 }
@@ -226,27 +244,37 @@ function eventToPrediction(
 export async function fetchSoccerGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const weekEnd = addCalendarDaysYmd(today, 7);
-  const rangeParam = `${ymdToParam(today)}-${ymdToParam(weekEnd)}`;
-  const boards = await Promise.all(
-    SOCCER_LEAGUES.map((L) => fetchEspnScoreboardEvents(scoreboardUrl(L.slug), rangeParam))
-  );
 
-  const predictions: GamePrediction[] = [];
-  for (let i = 0; i < SOCCER_LEAGUES.length; i++) {
-    const L = SOCCER_LEAGUES[i];
-    for (const event of boards[i] ?? []) {
-      const p = eventToPrediction(event, today, weekEnd, L.label, L.slug);
-      if (p) predictions.push(p);
+  const byEventId = new Map<string, GamePrediction>();
+
+  for (const L of SOCCER_LEAGUES) {
+    let raw: EspnEvent[] = [];
+    try {
+      raw = await fetchEspnSoccerScoreboardRange(scoreboardUrl(L.slug), today, weekEnd);
+    } catch (e) {
+      console.warn(
+        `[GameLens soccer] Scoreboard request failed for ${L.label} (${L.slug}) — ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+    if (raw.length === 0) {
+      console.warn(
+        `[GameLens soccer] No fixtures from ESPN for ${L.label} (${L.slug}) between ${today} and ${weekEnd} (US Eastern dates). The public scoreboard may omit this competition for this window or require a narrower date query.`
+      );
+    }
+
+    for (const event of raw) {
+      const p = eventToPrediction(event, today, weekEnd, L.label, L.slug, L.listTag);
+      if (!p) continue;
+      byEventId.set(event.id, p);
     }
   }
 
-  predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
+  const predictions = [...byEventId.values()].sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
   let out = await enrichGamePredictions(predictions, "soccer");
   out = await mergeSoccerVendorIntel(out);
-  const epl = out.filter((p) => !p._meta?.soccerLeagueSlug || p._meta.soccerLeagueSlug === "eng.1");
-  const nonEpl = out.filter((p) => p._meta?.soccerLeagueSlug && p._meta.soccerLeagueSlug !== "eng.1");
-  const mergedOdds = await mergeTheOddsApiNotes(epl, "soccer_epl");
-  out = [...mergedOdds, ...nonEpl].sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
-  return out;
+  out = await mergeSoccerOddsFromTheOddsApi(out);
+  out = await applyAdvancedIntelligenceToGames(out);
+  out = await applyPredictionQualityPipeline(out);
+  return out.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 }

@@ -43,7 +43,9 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   // Prediction versions
   const versions = buildPredictionVersions(game);
   const pregameVer = versions.find((v) => v.phase === "pregame");
-  const liveVer = versions.find((v) => v.phase !== "pregame" && v.phase !== "final");
+  const liveVer =
+    versions.find((v) => v.phase === "live_q1" || v.phase === "live_f5" || v.phase === "live_15min") ??
+    versions.find((v) => v.phase === "late_news");
   const liveTriggerMet = isLiveTriggerMet(game);
   const showProbShift =
     liveVer &&

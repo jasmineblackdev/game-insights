@@ -18,6 +18,7 @@ import type { GamePrediction } from "@/data/mockGames";
 
 export type PredictionPhase =
   | "pregame"
+  | "late_news"   // Lineup / injury / line move triggered refresh (same fetch cycle)
   | "live_q1"     // NBA / NFL: after Q1 complete
   | "live_f5"     // MLB: after 5 innings complete
   | "live_15min"  // Soccer: 15'–30' pattern read
@@ -25,6 +26,7 @@ export type PredictionPhase =
 
 export type TriggerType =
   | "scheduled"
+  | "late_news_signal"
   | "end_q1_signal"
   | "end_f5_signal"
   | "early_pattern_signal"
@@ -80,6 +82,31 @@ function probToConf(p: number): "HIGH" | "MED" | "LOW" {
  * for games that were already live when first loaded; that is acceptable since
  * we preserve the original reasons/risks from ESPN).
  */
+/** When quality pipeline flags material late info, surface an extra snapshot before live reads. */
+export function buildLateNewsVersion(game: GamePrediction): PredictionVersion | null {
+  if (!game._meta?.quality?.late_news_refresh) return null;
+  const pickedHome = game.winProbability.home >= game.winProbability.away;
+  const predictedSide = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+  const probability = pickedHome ? game.winProbability.home : game.winProbability.away;
+  const flags = game._meta.quality.risk_flags;
+  const head = flags.length
+    ? `Model refreshed after late-news signals (${flags.slice(0, 3).join(", ")}).`
+    : "Model refreshed after late-news signals.";
+  return {
+    id: `${game.id}-late-news`,
+    gameId: game.id,
+    sport: game.league.toUpperCase(),
+    phase: "late_news",
+    triggerType: "late_news_signal",
+    predictedSide,
+    probability,
+    confidence: mapConf(game.confidence),
+    reasons: [head, ...game.topReasons.slice(0, 2)],
+    risks: game.riskFactors.slice(0, 3),
+    createdAt: game._meta.quality.version_timestamp ?? game.lastUpdated,
+  };
+}
+
 export function buildPregameVersion(game: GamePrediction): PredictionVersion {
   const pickedHome = game.winProbability.home >= game.winProbability.away;
   const predictedSide = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
@@ -297,6 +324,8 @@ export function buildFinalVersion(game: GamePrediction): PredictionVersion | nul
  */
 export function buildPredictionVersions(game: GamePrediction): PredictionVersion[] {
   const versions: PredictionVersion[] = [buildPregameVersion(game)];
+  const late = buildLateNewsVersion(game);
+  if (late) versions.push(late);
   const live = buildLiveVersion(game);
   if (live) versions.push(live);
   const final = buildFinalVersion(game);
@@ -318,6 +347,7 @@ export function phaseLabel(phase: PredictionPhase): string {
 
 export function phaseColor(phase: PredictionPhase): string {
   if (phase === "pregame") return "text-primary bg-primary/10 border-primary/25";
+  if (phase === "late_news") return "text-amber-700 dark:text-amber-400 bg-amber-500/10 border-amber-500/25";
   if (phase === "final")   return "text-muted-foreground bg-muted/40 border-border/50";
   return "text-confidence-high bg-confidence-high/10 border-confidence-high/30";
 }

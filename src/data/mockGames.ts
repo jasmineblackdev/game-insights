@@ -57,6 +57,8 @@ export interface MlbModelOutput {
   riskFlag: string | null;
   /** True when probable pitchers have not been announced. */
   pendingConfirmation: boolean;
+  /** ISO time when this model output was computed (backtests / API consumers). */
+  lastUpdated?: string;
   /** Internal debug snapshot — not displayed in UI. */
   _debug: {
     pitcherScore: number;
@@ -71,6 +73,21 @@ export interface MlbModelOutput {
     awayPitcherEra: number | null;
     homePitcherWhip: number | null;
     awayPitcherWhip: number | null;
+    /** Layered historical / season / trend / context (internal analytics only). */
+    layerDebug?: {
+      historicalBaselineEra: { home: number | null; away: number | null };
+      seasonEra: { home: number | null; away: number | null };
+      recentEraL5: { home: number | null; away: number | null };
+      blendedEra: { home: number | null; away: number | null };
+      battingUsedDbSplits: boolean;
+      bullpenUsedFatigueRows: boolean;
+      todayContext: {
+        pitchersConfirmed: boolean;
+        lineupConfirmed: boolean;
+        parkFactor: number;
+        weatherVolatile: boolean;
+      };
+    };
   };
 }
 
@@ -127,6 +144,82 @@ export interface MatchupEdge {
   label: string;
   team: "home" | "away";
   description: string;
+}
+
+/** ESPN book open/close moneylines for a fixture (when both sides exist). */
+export interface MarketMlSnapshot {
+  homeOpen?: string;
+  homeClose?: string;
+  awayOpen?: string;
+  awayClose?: string;
+  drawOpen?: string;
+  drawClose?: string;
+}
+
+export type VolatilityLabel = "low" | "medium" | "high";
+
+/**
+ * Layered quality / calibration metadata — populated by predictionQualityPipeline.
+ * UI may ignore; used for Edge Card risk, versions, and future analytics persistence.
+ */
+export interface PredictionQualityMeta {
+  pipelineVersion: 1;
+  modelBlend?: {
+    historical_baseline: number;
+    recent_trend: number;
+    matchup: number;
+    market: number;
+    live: number;
+    blended_adjustment_pp: number;
+  };
+  market?: {
+    opening_implied_home?: number | null;
+    closing_implied_home?: number | null;
+    line_movement_home_pp?: number | null;
+    model_implied_home?: number;
+    clv_delta?: number | null;
+    market_signal_strength?: number;
+    sharp_move_hint?: boolean;
+  };
+  calibration?: {
+    raw_confidence: ConfidenceLevel;
+    bucket: ConfidenceLevel;
+    empirical_hit_rate?: number | null;
+    calibration_window?: string;
+  };
+  injury?: {
+    injury_importance_score: number;
+    replacement_penalty: number;
+    total_injury_impact_score: number;
+  };
+  fatigue?: {
+    fatigue_score: number;
+    fatigue_penalty: number;
+    travel_penalty: number;
+    rest_days_home?: number;
+    rest_days_away?: number;
+  };
+  style?: {
+    style_matchup_score: number;
+    style_notes: string[];
+    style_risk_flag: boolean;
+  };
+  volatility?: {
+    volatility_score: number;
+    volatility_label: VolatilityLabel;
+  };
+  schedule?: {
+    opponent_strength_score: number;
+    recent_schedule_difficulty: number;
+  };
+  correlation?: {
+    correlation_score: number;
+    card_risk_penalty: number;
+  };
+  risk_flags: string[];
+  /** True when material late info should surface an extra prediction version. */
+  late_news_refresh?: boolean;
+  version_timestamp?: string;
 }
 
 export interface GameLines {
@@ -201,6 +294,21 @@ export interface GamePrediction {
     soccerLeagueSlug?: string;
     /** Client-only: user marked probable starters as verified (localStorage). */
     userConfirmedMlbStarters?: boolean;
+    /** Populated after park weather fetch during MLB enrichment (model confidence). */
+    mlbWeather?: { tempF: number | null; windMph: number | null };
+    /** Soccer: normalized fixture row after multi-competition merge (ET kickoff date in easternYmd). */
+    soccerFixture?: {
+      matchId: string;
+      competition: string;
+      homeTeam: string;
+      awayTeam: string;
+      startTimeIso: string;
+      venue: string | null;
+      status: "upcoming" | "live" | "final";
+    };
+    marketMl?: MarketMlSnapshot;
+    /** Layered scoring outputs (market, calibration, volatility, etc.). */
+    quality?: PredictionQualityMeta;
   };
 }
 

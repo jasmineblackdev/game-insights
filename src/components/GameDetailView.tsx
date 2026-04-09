@@ -310,7 +310,9 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                       ? "bg-muted border-border"
                       : ver.phase === "pregame"
                         ? "bg-primary/20 border-primary"
-                        : "bg-confidence-high/20 border-confidence-high"
+                        : ver.phase === "late_news"
+                          ? "bg-amber-500/20 border-amber-500"
+                          : "bg-confidence-high/20 border-confidence-high"
                   }`} />
 
                   <div className={`pb-5 ${!isLast ? "" : ""}`}>

@@ -12,7 +12,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:odds-draft": "node scripts/verify-odds-nfl-draft.mjs",
-    "mlb:sync-pitcher-recent-form": "node scripts/refresh-mlb-pitcher-recent-form.mjs"
+    "mlb:sync-pitcher-recent-form": "node scripts/refresh-mlb-pitcher-recent-form.mjs",
+    "mlb:refresh-derivatives": "node scripts/refresh-mlb-derivative-tables.mjs",
+    "odds:list-sports": "node scripts/list-odds-sports.mjs",
+    "advanced:log-prediction-input": "node scripts/log-advanced-prediction-input.mjs",
+    "advanced:batch-log-prediction-input": "node scripts/batch-log-advanced-prediction-input.mjs",
+    "advanced:etl-team-metrics": "node scripts/etl-advanced-team-metrics.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -14,10 +14,10 @@
  * probabilities are already in place. Pitcher ERA/WHIP/K/BB are fetched fresh.
  *
  * Prediction gating:
- *   • pitcherCertainty === "unknown"  → pendingConfirmation = true, cap at LOW
- *   • pitcherCertainty === "partial"  → one starter unknown, cap at MED
- *   • lineup not confirmed            → risk flag added
- *   • extreme park (factor ≥1.08 or ≤0.92) → cap HIGH → MED
+ *   • pendingConfirmation until both probable pitchers are confirmed AND lineup is confirmed
+ *   • pitcherCertainty === "unknown"  → cap at LOW
+ *   • pitcherCertainty === "partial"  → cap at MED
+ *   • lineup / volatile weather / extreme park → cap HIGH at MED
  */
 
 import type { GamePrediction, ConfidenceLevel, MlbModelOutput, PitcherCertainty } from "@/data/mockGames";
@@ -30,7 +30,22 @@ import type { PitcherStats } from "@/lib/mlbEspnStats";
 import { MLB_PARK_FACTORS } from "@/lib/mlbConstants";
 import { parseRecord } from "@/lib/espnShared";
 import { supabase } from "@/lib/supabase";
+import { applyAdvancedIntelligenceToGames } from "@/lib/advancedIntelligenceLayer";
+import { applyPredictionQualityPipeline } from "@/lib/predictionQualityPipeline";
 import { fetchMlbModelWeights, writeGameOutcome, type MlbFactorWeights } from "@/lib/mlbModelWeights";
+import {
+  blendPitcherEra,
+  blendTeamOps,
+  bullpenEmergencyNote,
+  fetchBullpenFatigueRow,
+  fetchLineupStrengthRow,
+  fetchPitcherLogBaselines,
+  fetchPitcherRecentFormRow,
+  fetchTeamBattingSplit,
+  type BullpenFatigueRow,
+  type LineupStrengthRow,
+  type PitcherRecentFormRow,
+} from "@/lib/mlbHistoricalFeatures";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,67 +62,52 @@ function lastTenPct(record: string): number | null {
   return t > 0 ? w / t : null;
 }
 
-// ── Supabase: recent pitcher form ─────────────────────────────────────────────
-
-/** Try to read last-5-start ERA from Supabase. Returns null when not seeded. */
-async function fetchRecentEra(pitcherId: string | undefined): Promise<number | null> {
-  if (!supabase || !pitcherId) return null;
-  try {
-    const { data } = await supabase
-      .from("mlb_pitcher_recent_form")
-      .select("last_5_starts_era")
-      .eq("pitcher_id", pitcherId)
-      .maybeSingle();
-    const v = data?.last_5_starts_era;
-    return typeof v === "number" && v > 0 ? v : null;
-  } catch {
-    return null;
-  }
-}
-
 // ── Factor scorers ─────────────────────────────────────────────────────────────
+
+const MLB_MODEL_SCHEMA_VERSION = "2.0";
+const MLB_PREDICTION_VERSION = "2.0-historical";
+
+function pitcherMicroAdjust(form: PitcherRecentFormRow | null): number {
+  let m = 0;
+  if (form?.last_5_starts_fip != null && form?.last_3_starts_fip != null) {
+    m += clamp((form.last_5_starts_fip - form.last_3_starts_fip) / 12, -0.04, 0.04);
+  }
+  if (form?.avg_pitch_count != null && form.avg_pitch_count > 103) m -= 0.035;
+  if (form?.avg_innings_pitched != null && form.avg_innings_pitched < 4.8) m -= 0.025;
+  return m;
+}
 
 /**
  * Pitcher score: -1 (away SP dominant) to +1 (home SP dominant).
- *
- * Layers:
- *   60% ERA gap (primary)
- *   25% WHIP gap (secondary)
- *   15% K/BB ratio gap (command quality — changes faster within a season)
- *
- * If Supabase `mlb_pitcher_recent_form` is seeded, recent ERA (L5 starts) is
- * blended: 50% season ERA + 50% recent ERA per the model spec.
- * Falls back to season ERA only when recent data is unavailable.
+ * Expects pre-blended ERA (50% season / 30% L5 / 20% historical log or league prior).
  */
 function scorePitcher(
   homeStats: PitcherStats | null,
   awayStats: PitcherStats | null,
-  homeRecentEra: number | null,
-  awayRecentEra: number | null,
+  homeEraBlended: number | null,
+  awayEraBlended: number | null,
   homeName: string | undefined,
   awayName: string | undefined,
   homeRestDays: number | null,
-  awayRestDays: number | null
+  awayRestDays: number | null,
+  homeForm: PitcherRecentFormRow | null,
+  awayForm: PitcherRecentFormRow | null,
+  blendLabel: string
 ): { score: number; edge: string; hasStats: boolean } {
   const hName = homeName ?? "Home SP";
   const aName = awayName ?? "Away SP";
 
-  // Blend season + recent (50/50 per spec) when recent data is available
-  const homeEraBlended =
-    homeStats?.era != null && homeRecentEra != null
-      ? (homeStats.era + homeRecentEra) / 2
-      : homeStats?.era ?? null;
-  const awayEraBlended =
-    awayStats?.era != null && awayRecentEra != null
-      ? (awayStats.era + awayRecentEra) / 2
-      : awayStats?.era ?? null;
-
   const homeSample = homeStats?.ip ?? 0;
   const awaySample = awayStats?.ip ?? 0;
 
-  // Small-sample guard: require ≥8 IP for ERA to be meaningful
-  const homeEraValid = homeEraBlended != null && homeSample >= 8;
-  const awayEraValid = awayEraBlended != null && awaySample >= 8;
+  const homeEraValid =
+    homeEraBlended != null &&
+    ((homeSample >= 8 && homeStats?.era != null) ||
+      (homeForm?.last_5_starts_era != null && homeForm.last_5_starts_era > 0 && homeForm.last_5_starts_era < 30));
+  const awayEraValid =
+    awayEraBlended != null &&
+    ((awaySample >= 8 && awayStats?.era != null) ||
+      (awayForm?.last_5_starts_era != null && awayForm.last_5_starts_era > 0 && awayForm.last_5_starts_era < 30));
 
   if (!homeEraValid && !awayEraValid) {
     return {
@@ -120,26 +120,22 @@ function scorePitcher(
     };
   }
 
-  // ERA score: each 1-run gap ≈ 0.25 score units (league avg ~4.0)
   let eraScore = 0;
   if (homeEraValid && awayEraValid) {
-    eraScore = clamp((awayEraBlended - homeEraBlended!) / 4.0, -0.8, 0.8);
+    eraScore = clamp((awayEraBlended! - homeEraBlended!) / 4.0, -0.8, 0.8);
   } else if (homeEraValid) {
     eraScore = clamp((4.0 - homeEraBlended!) / 8.0, -0.4, 0.4);
   } else {
     eraScore = clamp((awayEraBlended! - 4.0) / 8.0, -0.4, 0.4);
   }
 
-  // WHIP score: 0.2-pt gap ≈ 0.25 units
   let whipScore = 0;
   if (homeStats?.whip != null && awayStats?.whip != null) {
     whipScore = clamp((awayStats.whip - homeStats.whip) / 0.8, -0.6, 0.6);
   }
 
-  // K/BB ratio score: command quality, more reactive to recent form
   let kbbScore = 0;
   if (homeStats?.kbb != null && awayStats?.kbb != null) {
-    // Typical K/BB range: 1.5–5.0. A 1-unit gap ≈ 0.20 score.
     kbbScore = clamp((homeStats.kbb - awayStats.kbb) / 5.0, -0.3, 0.3);
   }
 
@@ -155,21 +151,19 @@ function scorePitcher(
     score = eraScore;
   }
 
-  // Rest-day adjustment: short rest hurts ERA performance, extra rest helps slightly
-  // Short rest (<3 days) → ERA rises ~0.8 runs/game → apply ∓0.10 score adjustment
-  // Long rest (5+ days) → small benefit → apply ∓0.05 score adjustment
   const restAdj = (restDays: number | null, isHome: boolean): number => {
     if (restDays == null) return 0;
     const sign = isHome ? 1 : -1;
-    if (restDays <= 2) return sign * -0.10; // short rest hurts the team
-    if (restDays >= 5) return sign * 0.05;  // extra rest helps slightly
+    if (restDays <= 2) return sign * -0.10;
+    if (restDays >= 5) return sign * 0.05;
     return 0;
   };
   const homeRestAdj = restAdj(homeRestDays, true);
   const awayRestAdj = restAdj(awayRestDays, false);
-  score = clamp(score + homeRestAdj + awayRestAdj, -1, 1);
+  const micro = pitcherMicroAdjust(homeForm) - pitcherMicroAdjust(awayForm);
+  score = clamp(score + homeRestAdj + awayRestAdj + micro, -1, 1);
 
-  const recentNote = homeRecentEra != null || awayRecentEra != null ? " (blended L5/season)" : "";
+  const recentNote = blendLabel ? ` (${blendLabel})` : "";
   const homeRestNote =
     homeRestDays != null && homeRestDays <= 2 ? ` ${hName} on short rest (${homeRestDays}d).` :
     homeRestDays != null && homeRestDays >= 5 ? ` ${hName} extra-rested (${homeRestDays}d).` : "";
@@ -188,22 +182,17 @@ function scorePitcher(
       : `Starting pitcher data partially available — lean is modest.${homeRestNote}${awayRestNote}`;
   }
 
+  const fipNudge =
+    homeForm?.last_5_starts_fip != null && awayForm?.last_5_starts_fip != null
+      ? ` Recent FIP: ${hName} ${homeForm.last_5_starts_fip.toFixed(2)} vs ${aName} ${awayForm.last_5_starts_fip.toFixed(2)}.`
+      : "";
+  if (fipNudge && homeEraValid && awayEraValid) edge += fipNudge;
+
   return { score, edge, hasStats: true };
 }
 
-/**
- * Batting/handedness score: league-average platoon effect.
- *
- * Historical MLB data (team-level, mixed lineups):
- *   • LHP starters suppress opposing offense by ~0.30 runs/game vs RHP
- *     (partly selection bias — LHP rotation spots tend to be high-quality;
- *      partly preparation: teams face LHP in ~30% of starts, less drill time)
- *   • Platoon advantage translates to ~1-2pp win probability at team level
- *
- * This will be replaced by real split data once mlb_team_batting_splits is seeded.
- * Score range: ±0.10 per pitcher (home-positive = home lineup has advantage).
- */
-function scoreBatting(
+/** Handedness-only fallback when splits are not seeded. */
+function scoreBattingHeuristic(
   awayPitcherHand: "L" | "R" | undefined,
   homePitcherHand: "L" | "R" | undefined
 ): { score: number; edge: string } {
@@ -214,7 +203,6 @@ function scoreBatting(
   let score = 0;
   const notes: string[] = [];
 
-  // Away LHP → home lineup sees a less common hand → slight away advantage
   if (awayPitcherHand === "L") {
     score -= 0.10;
     notes.push("Away LHP suppresses home lineup — league average: ~0.3 fewer runs/game vs LHP.");
@@ -222,7 +210,6 @@ function scoreBatting(
     notes.push("Away RHP — standard handedness; no platoon adjustment for home lineup.");
   }
 
-  // Home LHP → away lineup sees a less common hand → slight home advantage
   if (homePitcherHand === "L") {
     score += 0.10;
     notes.push("Home LHP suppresses away lineup — away team faces the less-prepared hand.");
@@ -235,31 +222,107 @@ function scoreBatting(
 }
 
 /**
- * Bullpen score: from B2B and CONSEC situational tags set during enrichment.
- * B2B games deplete bullpen depth — relievers average ~20% fewer available
- * innings on B2B days based on historical leverage patterns.
- * CONSEC (3rd straight game) amplifies this: bullpen is severely taxed.
+ * Team batting vs opponent starter handedness: 50% season split / 25% L14 / 25% league prior
+ * when `mlb_team_batting_splits` is seeded; else heuristic.
+ */
+function scoreBatting(
+  awayPitcherHand: "L" | "R" | undefined,
+  homePitcherHand: "L" | "R" | undefined,
+  homeOpsBlend: number | null,
+  awayOpsBlend: number | null,
+  usedDbSplits: boolean,
+  homeAbbr: string,
+  awayAbbr: string,
+  homeLineup: LineupStrengthRow | null,
+  awayLineup: LineupStrengthRow | null
+): { score: number; edge: string } {
+  if (usedDbSplits && homeOpsBlend != null && awayOpsBlend != null) {
+    let score = clamp((homeOpsBlend - awayOpsBlend) * 2.8, -0.2, 0.2);
+    const hPen = (homeLineup?.star_absence_penalty ?? 0) * 0.014;
+    const aPen = (awayLineup?.star_absence_penalty ?? 0) * 0.014;
+    score = clamp(score + aPen - hPen, -0.22, 0.22);
+    const better = score > 0.02 ? homeAbbr : score < -0.02 ? awayAbbr : null;
+    const vsHand =
+      better === homeAbbr
+        ? awayPitcherHand === "L"
+          ? "LHP"
+          : awayPitcherHand === "R"
+            ? "RHP"
+            : "starter"
+        : homePitcherHand === "L"
+          ? "LHP"
+          : homePitcherHand === "R"
+            ? "RHP"
+            : "starter";
+    const edge = better
+      ? `${better} lineup stronger vs ${vsHand} (layered OPS: ${homeAbbr} ${homeOpsBlend.toFixed(3)} vs ${awayAbbr} ${awayOpsBlend.toFixed(3)}).`
+      : `Batting vs handedness is close (${homeAbbr} OPS blend ${homeOpsBlend.toFixed(3)} vs ${awayAbbr} ${awayOpsBlend.toFixed(3)}).`;
+    return { score, edge };
+  }
+  return scoreBattingHeuristic(awayPitcherHand, homePitcherHand);
+}
+
+function normBullpenQuality(r: BullpenFatigueRow | null): number {
+  const x = r?.season_bullpen_quality_score;
+  return x != null ? clamp(x / 10, 0, 1) : 0.5;
+}
+
+function normBullpenFatigue(r: BullpenFatigueRow | null): number {
+  const x = r?.fatigue_score;
+  return x != null ? clamp(x / 10, 0, 1) : 0.5;
+}
+
+/**
+ * Bullpen: B2B/CONSEC tags plus optional 50% season pen quality / 50% fatigue rows from Supabase.
  */
 function scoreBullpen(
   homeB2B: boolean,
   awayB2B: boolean,
   homeConsec: boolean,
-  awayConsec: boolean
+  awayConsec: boolean,
+  homeFat: BullpenFatigueRow | null,
+  awayFat: BullpenFatigueRow | null,
+  homeAbbr: string,
+  awayAbbr: string
 ): { score: number; edge: string } {
   const homeScore = homeConsec ? -0.45 : homeB2B ? -0.30 : 0;
   const awayScore = awayConsec ? 0.45 : awayB2B ? 0.30 : 0;
-  const score = clamp(homeScore + awayScore, -0.45, 0.45);
+  let score = clamp(homeScore + awayScore, -0.45, 0.45);
 
-  if (!homeB2B && !awayB2B) return { score: 0, edge: "Both bullpens at full rest — no fatigue differential." };
+  const hasRows = !!(homeFat || awayFat);
+  if (hasRows) {
+    const hComp = 0.5 * normBullpenQuality(homeFat) + 0.5 * (1 - normBullpenFatigue(homeFat));
+    const aComp = 0.5 * normBullpenQuality(awayFat) + 0.5 * (1 - normBullpenFatigue(awayFat));
+    const layered = clamp((hComp - aComp) * 0.42, -0.22, 0.22);
+    score = clamp(score * 0.5 + layered, -0.45, 0.45);
+  }
+
+  const emergH = bullpenEmergencyNote(homeFat, homeAbbr);
+  const emergA = bullpenEmergencyNote(awayFat, awayAbbr);
+
+  if (!homeB2B && !awayB2B && !hasRows) {
+    return { score: 0, edge: "Both bullpens at full rest — no fatigue differential." };
+  }
   if (homeB2B && awayB2B) {
     const net = homeScore + awayScore;
-    if (Math.abs(net) < 0.05) return { score, edge: "Both teams on back-to-back — bullpen fatigue roughly cancels out." };
+    if (Math.abs(net) < 0.05 && !hasRows) {
+      return { score, edge: "Both teams on back-to-back — bullpen fatigue roughly cancels out." };
+    }
   }
   const homeSuffix = homeConsec ? " (3rd game in 3 days — severely taxed)" : "";
   const awaySuffix = awayConsec ? " (3rd game in 3 days — road bullpen depleted)" : "";
-  if (homeB2B && !awayB2B) return { score, edge: `Home bullpen on B2B${homeSuffix} — thin relief depth tonight.` };
-  if (awayB2B && !homeB2B) return { score, edge: `Away bullpen on B2B${awaySuffix} — home carries meaningful relief advantage.` };
-  return { score, edge: `Bullpen fatigue: home${homeSuffix}, away${awaySuffix}.` };
+  let edge: string;
+  if (homeB2B && !awayB2B) edge = `Home bullpen on B2B${homeSuffix} — thin relief depth tonight.`;
+  else if (awayB2B && !homeB2B) edge = `Away bullpen on B2B${awaySuffix} — home carries meaningful relief advantage.`;
+  else if (homeB2B && awayB2B) edge = `Bullpen fatigue: home${homeSuffix}, away${awaySuffix}.`;
+  else edge = "Bullpen context neutral on schedule tags.";
+
+  if (emergH) edge = `${emergH} ${edge}`;
+  if (emergA) edge = `${emergA} ${edge}`;
+  if (hasRows && !homeB2B && !awayB2B) {
+    edge = `${edge} (season pen + recent usage from database.)`;
+  }
+  return { score, edge };
 }
 
 /**
@@ -322,15 +385,27 @@ function deriveConfidence(
   hasStats: boolean,
   pitcherCertainty: string,
   extremePark: boolean,
-  hasOdds: boolean
+  hasOdds: boolean,
+  opts: {
+    lineupConfirmed: boolean;
+    volatileWeather: boolean;
+    awaitingFullPregameLock: boolean;
+  }
 ): ConfidenceLevel {
   if (pitcherCertainty === "unknown") return "low";
-  // Partial (one starter unknown) → cap at medium
   if (pitcherCertainty === "partial") return probGap >= 8 ? "medium" : "low";
+
   const canBeHigh = hasStats || hasOdds;
-  if (probGap >= 14 && canBeHigh && !extremePark) return "high";
-  if (probGap >= 8) return "medium";
-  return "low";
+  let tier: ConfidenceLevel = "low";
+  if (probGap >= 14 && canBeHigh && !extremePark) tier = "high";
+  else if (probGap >= 8) tier = "medium";
+
+  if (opts.awaitingFullPregameLock && tier === "high") tier = "medium";
+  if (!opts.lineupConfirmed && tier === "high") tier = "medium";
+  if (opts.volatileWeather && tier === "high") tier = "medium";
+  if (extremePark && tier === "high") tier = "medium";
+
+  return tier;
 }
 
 // ── Snapshot write (fire-and-forget) ─────────────────────────────────────────
@@ -347,7 +422,9 @@ function persistSnapshot(
   riskFlag: string | null,
   parkFactor: number,
   hasOdds: boolean,
-  pitcherCertaintyRecorded: string | null
+  pitcherCertaintyRecorded: string | null,
+  modelInputsSnapshot: Record<string, unknown> | null,
+  edgeNotes: string | null
 ): void {
   if (!supabase || !game._meta?.eventId || game.status === "final") return;
   const predicted = adjustedProb >= 50 ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
@@ -361,14 +438,15 @@ function persistSnapshot(
         home_team: game.homeTeam.abbreviation,
         away_team: game.awayTeam.abbreviation,
         phase: "pregame",
-        model_version: "1.0",
+        model_version: MLB_MODEL_SCHEMA_VERSION,
+        prediction_version: MLB_PREDICTION_VERSION,
         home_pitcher_id: game._meta.homePitcherAthleteId ?? null,
         away_pitcher_id: game._meta.awayPitcherAthleteId ?? null,
         home_pitcher_era: homeStats?.era ?? null,
         away_pitcher_era: awayStats?.era ?? null,
         home_pitcher_whip: homeStats?.whip ?? null,
         away_pitcher_whip: awayStats?.whip ?? null,
-        pitcher_certainty: game.mlb?.pitcherCertainty ?? null,
+        pitcher_certainty: pitcherCertaintyRecorded ?? game.mlb?.pitcherCertainty ?? null,
         home_b2b: game.situationalTags.includes("HOME B2B"),
         away_b2b: game.situationalTags.includes("AWAY B2B"),
         park_factor: parkFactor,
@@ -384,6 +462,8 @@ function persistSnapshot(
         confidence,
         pending_confirmation: isPending,
         risk_flag: riskFlag ?? null,
+        model_inputs_snapshot: modelInputsSnapshot,
+        edge_notes: edgeNotes,
       },
       { onConflict: "id" }
     )
@@ -437,15 +517,60 @@ async function modelOneGame(
     return game;
   }
 
-  // ── Fetch pitcher stats + recent form + rest days in parallel ──────────────
-  const [{ home: homeStats, away: awayStats }, homeRecentEra, awayRecentEra, homeRestDays, awayRestDays] =
-    await Promise.all([
-      fetchMatchupPitcherStats(ctx.homeAthleteId, ctx.awayAthleteId),
-      fetchRecentEra(ctx.homeAthleteId),
-      fetchRecentEra(ctx.awayAthleteId),
-      ctx.homeAthleteId ? fetchPitcherRestDays(ctx.homeAthleteId) : Promise.resolve(null),
-      ctx.awayAthleteId ? fetchPitcherRestDays(ctx.awayAthleteId) : Promise.resolve(null),
-    ]);
+  const seasonYear = Number(game._meta.easternYmd.slice(0, 4)) || new Date().getFullYear();
+  const eid = game._meta.eventId;
+
+  // ── Fetch pitcher stats, historical rows, fatigue, lineups in parallel ───────
+  const [
+    { home: homeStats, away: awayStats },
+    homeRestDays,
+    awayRestDays,
+    homeForm,
+    awayForm,
+    homeLogs,
+    awayLogs,
+    homeSplit,
+    awaySplit,
+    homeFat,
+    awayFat,
+    homeLu,
+    awayLu,
+  ] = await Promise.all([
+    fetchMatchupPitcherStats(ctx.homeAthleteId, ctx.awayAthleteId),
+    ctx.homeAthleteId ? fetchPitcherRestDays(ctx.homeAthleteId) : Promise.resolve(null),
+    ctx.awayAthleteId ? fetchPitcherRestDays(ctx.awayAthleteId) : Promise.resolve(null),
+    fetchPitcherRecentFormRow(ctx.homeAthleteId),
+    fetchPitcherRecentFormRow(ctx.awayAthleteId),
+    fetchPitcherLogBaselines(ctx.homeAthleteId),
+    fetchPitcherLogBaselines(ctx.awayAthleteId),
+    fetchTeamBattingSplit(game.homeTeam.abbreviation, seasonYear, mlbIntel.awayPitcherHand),
+    fetchTeamBattingSplit(game.awayTeam.abbreviation, seasonYear, mlbIntel.homePitcherHand),
+    fetchBullpenFatigueRow(game.homeTeam.abbreviation, game._meta.easternYmd),
+    fetchBullpenFatigueRow(game.awayTeam.abbreviation, game._meta.easternYmd),
+    eid ? fetchLineupStrengthRow(eid, game.homeTeam.abbreviation) : Promise.resolve(null),
+    eid ? fetchLineupStrengthRow(eid, game.awayTeam.abbreviation) : Promise.resolve(null),
+  ]);
+
+  const homeBlend = blendPitcherEra(
+    homeStats?.era ?? null,
+    homeForm?.last_5_starts_era ?? null,
+    homeLogs?.era9 ?? null
+  );
+  const awayBlend = blendPitcherEra(
+    awayStats?.era ?? null,
+    awayForm?.last_5_starts_era ?? null,
+    awayLogs?.era9 ?? null
+  );
+  const homeEraEff = homeBlend.value;
+  const awayEraEff = awayBlend.value;
+  const blendLabel =
+    homeBlend.usedRecent || awayBlend.usedRecent || homeBlend.usedLogs || awayBlend.usedLogs
+      ? "50% season / 30% L5 / 20% hist prior"
+      : "";
+
+  const homeOpsB = blendTeamOps(homeSplit, mlbIntel.awayPitcherHand);
+  const awayOpsB = blendTeamOps(awaySplit, mlbIntel.homePitcherHand);
+  const usedDbSplits = homeOpsB.usedDb && awayOpsB.usedDb;
 
   // ── Contextual flags ─────────────────────────────────────────────────────────
   const userStartersConfirm =
@@ -467,6 +592,15 @@ async function modelOneGame(
     : pitcherCertaintyRaw;
   const isPending = pitcherCertaintyEff === "unknown";
   const isPartial = pitcherCertaintyEff === "partial";
+  const lineupConfirmed = mlbIntel.lineupConfirmed === true;
+  const pitchersConfirmed = pitcherCertaintyEff === "confirmed" || userStartersConfirm;
+  const awaitingFullPregameLock = !pitchersConfirmed || !lineupConfirmed;
+  const pendingConfirmation = awaitingFullPregameLock;
+
+  const wx = game._meta?.mlbWeather;
+  const volatileWeather =
+    (wx?.windMph != null && wx.windMph >= 15) || (wx?.tempF != null && wx.tempF < 40);
+
   const hasOdds = !!(game.lines?.homeMl && game.lines?.awayMl);
   const parkEntry = MLB_PARK_FACTORS[game.homeTeam.abbreviation.toUpperCase()];
   const parkFactor = parkEntry?.factor ?? 1.0;
@@ -474,14 +608,41 @@ async function modelOneGame(
 
   // ── Factor scores ─────────────────────────────────────────────────────────────
   const pitcher = scorePitcher(
-    homeStats, awayStats, homeRecentEra, awayRecentEra,
-    mlbIntel.homeProbablePitcher, mlbIntel.awayProbablePitcher,
-    homeRestDays, awayRestDays
+    homeStats,
+    awayStats,
+    homeEraEff,
+    awayEraEff,
+    mlbIntel.homeProbablePitcher,
+    mlbIntel.awayProbablePitcher,
+    homeRestDays,
+    awayRestDays,
+    homeForm,
+    awayForm,
+    blendLabel
   );
-  const batting = scoreBatting(mlbIntel.awayPitcherHand, mlbIntel.homePitcherHand);
-  const bullpen = scoreBullpen(homeB2B, awayB2B, homeConsec, awayConsec);
-  const form    = scoreForm(game.homeTeam, game.awayTeam);
-  const rest    = scoreRest(homeB2B, awayB2B);
+  const batting = scoreBatting(
+    mlbIntel.awayPitcherHand,
+    mlbIntel.homePitcherHand,
+    homeOpsB.ops,
+    awayOpsB.ops,
+    usedDbSplits,
+    game.homeTeam.abbreviation,
+    game.awayTeam.abbreviation,
+    homeLu,
+    awayLu
+  );
+  const bullpen = scoreBullpen(
+    homeB2B,
+    awayB2B,
+    homeConsec,
+    awayConsec,
+    homeFat,
+    awayFat,
+    game.homeTeam.abbreviation,
+    game.awayTeam.abbreviation
+  );
+  const form = scoreForm(game.homeTeam, game.awayTeam);
+  const rest = scoreRest(homeB2B, awayB2B);
 
   // ── Probability adjustment (using dynamic or default weights) ─────────────────
   const baseProb = game.winProbability.home;
@@ -510,7 +671,11 @@ async function modelOneGame(
   }
 
   const probGap = Math.abs(adjustedProb - 50);
-  const confidence = deriveConfidence(probGap, pitcher.hasStats, pitcherCertaintyEff, extremePark, hasOdds);
+  const confidence = deriveConfidence(probGap, pitcher.hasStats, pitcherCertaintyEff, extremePark, hasOdds, {
+    lineupConfirmed,
+    volatileWeather,
+    awaitingFullPregameLock,
+  });
 
   // ── Risk flag ─────────────────────────────────────────────────────────────────
   let riskFlag: string | null = null;
@@ -519,13 +684,21 @@ async function modelOneGame(
   } else if (isPartial) {
     const known = mlbIntel.homeProbablePitcher ?? mlbIntel.awayProbablePitcher ?? "one starter";
     riskFlag = `Only ${known} confirmed — opponent's starter unknown. Confidence capped until both are set.`;
-  } else if (!mlbIntel.lineupConfirmed && !userStartersConfirm) {
-    riskFlag = "Starting lineup not yet posted — prediction may shift when confirmed.";
+  } else if (!lineupConfirmed) {
+    riskFlag = "Lineup not fully confirmed — marked Pending Confirmation; model will tighten when lineups post.";
+  } else if (homeLu?.star_absence_penalty != null && homeLu.star_absence_penalty >= 4) {
+    riskFlag = `${game.homeTeam.abbreviation} lineup missing a major bat — star absence penalty applied.`;
+  } else if (awayLu?.star_absence_penalty != null && awayLu.star_absence_penalty >= 4) {
+    riskFlag = `${game.awayTeam.abbreviation} lineup missing a major bat — star absence penalty applied.`;
+  } else if (volatileWeather) {
+    riskFlag = "Strong wind or cold at this outdoor park — higher variance; confidence capped.";
   } else if (extremePark && parkFactor >= 1.08) {
     riskFlag = `Hitter-friendly park (${game.homeTeam.abbreviation}) increases run-environment variance.`;
   } else if (extremePark && parkFactor <= 0.92) {
     riskFlag = `Pitcher-friendly park (${game.homeTeam.abbreviation}) compresses scoring.`;
   }
+
+  const computedAt = new Date().toISOString();
 
   // ── Model output ─────────────────────────────────────────────────────────────
   const modelOutput: MlbModelOutput = {
@@ -535,7 +708,8 @@ async function modelOneGame(
     formEdge: form.edge,
     parkNote: parkEntry?.note ?? `${game.homeTeam.abbreviation} — neutral park environment.`,
     riskFlag,
-    pendingConfirmation: isPending || isPartial,
+    pendingConfirmation,
+    lastUpdated: computedAt,
     _debug: {
       pitcherScore: pitcher.score,
       battingScore: batting.score,
@@ -549,6 +723,20 @@ async function modelOneGame(
       awayPitcherEra: awayStats?.era ?? null,
       homePitcherWhip: homeStats?.whip ?? null,
       awayPitcherWhip: awayStats?.whip ?? null,
+      layerDebug: {
+        historicalBaselineEra: { home: homeLogs?.era9 ?? null, away: awayLogs?.era9 ?? null },
+        seasonEra: { home: homeStats?.era ?? null, away: awayStats?.era ?? null },
+        recentEraL5: { home: homeForm?.last_5_starts_era ?? null, away: awayForm?.last_5_starts_era ?? null },
+        blendedEra: { home: homeEraEff, away: awayEraEff },
+        battingUsedDbSplits: usedDbSplits,
+        bullpenUsedFatigueRows: !!(homeFat || awayFat),
+        todayContext: {
+          pitchersConfirmed,
+          lineupConfirmed,
+          parkFactor,
+          weatherVolatile: volatileWeather,
+        },
+      },
     },
   };
 
@@ -565,9 +753,53 @@ async function modelOneGame(
 
   // ── Situational tags ──────────────────────────────────────────────────────────
   const updatedTags = [...tags];
-  if ((isPending || isPartial) && !updatedTags.includes("PENDING CONFIRM")) {
+  if (pendingConfirmation && !updatedTags.includes("PENDING CONFIRM")) {
     updatedTags.push("PENDING CONFIRM");
   }
+
+  const edgeNotes = [
+    blendLabel && `pitcher_blend:${blendLabel}`,
+    usedDbSplits && "batting:db_splits",
+    (homeFat || awayFat) && "bullpen:fatigue_rows",
+    awaitingFullPregameLock && "status:pending_confirmation",
+    volatileWeather && "context:volatile_weather",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+  const oddsF5LegNote =
+    game.enrichmentNotes?.find((n) => n.includes("F5") || n.includes("1st 5 inn")) ?? null;
+
+  const modelInputsSnapshot: Record<string, unknown> = {
+    prediction_version: MLB_PREDICTION_VERSION,
+    schema_version: MLB_MODEL_SCHEMA_VERSION,
+    computed_at: computedAt,
+    odds_f5_leg_note: oddsF5LegNote,
+    market_leg_context: oddsF5LegNote
+      ? { source: "the_odds_api_enrichment", note: oddsF5LegNote }
+      : null,
+    pitchers_confirmed: pitchersConfirmed,
+    lineup_confirmed: lineupConfirmed,
+    pending_confirmation: pendingConfirmation,
+    historical_baseline_era: { home: homeLogs?.era9 ?? null, away: awayLogs?.era9 ?? null },
+    season_era: { home: homeStats?.era ?? null, away: awayStats?.era ?? null },
+    recent_l5_era: { home: homeForm?.last_5_starts_era ?? null, away: awayForm?.last_5_starts_era ?? null },
+    blended_era: { home: homeEraEff, away: awayEraEff },
+    batting_ops_blend: { home: homeOpsB.ops, away: awayOpsB.ops, used_db: usedDbSplits },
+    bullpen_fatigue_ids: {
+      home: `${game.homeTeam.abbreviation}-${game._meta.easternYmd}`,
+      away: `${game.awayTeam.abbreviation}-${game._meta.easternYmd}`,
+    },
+    factor_scores: {
+      pitcher: pitcher.score,
+      batting: batting.score,
+      bullpen: bullpen.score,
+      form: form.score,
+      rest: rest.score,
+    },
+    park_factor: parkFactor,
+    weather: wx ?? null,
+  };
 
   // ── Persist snapshot (fire-and-forget) ───────────────────────────────────────
   persistSnapshot(
@@ -578,11 +810,13 @@ async function modelOneGame(
     combinedDelta,
     adjustedProb,
     confidence,
-    isPending,
+    pendingConfirmation,
     riskFlag,
     parkFactor,
     hasOdds,
-    pitcherCertaintyEff
+    pitcherCertaintyEff,
+    modelInputsSnapshot,
+    edgeNotes || null
   );
 
   const riskFactors = riskFlag && !game.riskFactors.some((r) => r.includes(riskFlag!.slice(0, 30)))
@@ -626,5 +860,5 @@ export async function applyMlbPredictionModel(
     const done = await Promise.all(resolved.map((ctx) => modelOneGame(ctx, weights)));
     results.push(...done);
   }
-  return results;
+  return applyPredictionQualityPipeline(await applyAdvancedIntelligenceToGames(results));
 }

@@ -28,6 +28,7 @@ import {
   normalizeSlipItem,
   playerPropToSlipItem,
   slipAggregateConfidence,
+  computeSlipCorrelationScore,
 } from "@/lib/edgeCardScoring";
 
 const STORAGE_SLIP = "gamelens-edge-slip-v1";
@@ -206,12 +207,24 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
 
   const saveSlipToHistory = useCallback(() => {
     if (!slip.length) return;
+    const { score: correlationScore } = computeSlipCorrelationScore(slip);
+    const highVolatilityTeamPicks = slip.filter(
+      (i) => isTeamSlipItem(i) && i.snapshot.volatilityLabel === "high"
+    ).length;
     const aggregateConfidence = slipAggregateConfidence(
-      slip.map((i) => ({ confidence: i.snapshot.confidence }))
+      slip.map((i) => ({ confidence: i.snapshot.confidence })),
+      { correlationScore, highVolatilityTeamPicks }
     );
     let riskLabel: EdgeHistoryEntry["riskLabel"] = "controlled";
-    if (slip.some((i) => i.snapshot.confidence === "low")) riskLabel = "elevated";
-    else if (slip.some((i) => i.snapshot.confidence === "medium")) riskLabel = "moderate";
+    if (
+      slip.some((i) => i.snapshot.confidence === "low") ||
+      correlationScore >= 62 ||
+      highVolatilityTeamPicks >= 2
+    ) {
+      riskLabel = "elevated";
+    } else if (slip.some((i) => i.snapshot.confidence === "medium") || correlationScore >= 42) {
+      riskLabel = "moderate";
+    }
     const entry: EdgeHistoryEntry = {
       id: `hist-${Date.now()}`,
       savedAt: new Date().toISOString(),
