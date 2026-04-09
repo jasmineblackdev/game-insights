@@ -14,6 +14,9 @@ const config: Record<ConfidenceLevel, { label: string; colorClass: string; bgCla
   low: { label: "LOW", colorClass: "text-confidence-low", bgClass: "bg-confidence-low" },
 };
 
+/** Ring + center % show win probability only; confidence colors apply to the pill below. */
+const PROB_RING_CLASS = "text-primary";
+
 export function ConfidenceMeter({ level, probability, showRing = true }: ConfidenceMeterProps) {
   const { label, colorClass, bgClass } = config[level];
 
@@ -26,7 +29,7 @@ export function ConfidenceMeter({ level, probability, showRing = true }: Confide
             <motion.circle
               cx="32" cy="32" r="28"
               fill="none"
-              className={`stroke-current ${colorClass}`}
+              className={`stroke-current ${PROB_RING_CLASS}`}
               strokeWidth="4"
               strokeLinecap="round"
               strokeDasharray={`${2 * Math.PI * 28}`}
@@ -36,7 +39,7 @@ export function ConfidenceMeter({ level, probability, showRing = true }: Confide
             />
           </svg>
           <div className="absolute inset-0 flex items-center justify-center">
-            <span className={`text-sm font-display font-bold ${colorClass}`}>{probability}%</span>
+            <span className="text-sm font-display font-bold text-foreground tabular-nums">{probability}%</span>
           </div>
         </div>
       ) : null}

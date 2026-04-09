@@ -2,7 +2,7 @@
 /**
  * Dump The Odds API /v4/sports/?all=true for syncing src/lib/oddsSportKeys.ts.
  *
- * Env: THE_ODDS_API_KEY or VITE_THE_ODDS_API_KEY (loads `.env.local` from repo root).
+ * Env: VITE_THE_ODDS_API_KEY first, then THE_ODDS_API_KEY (loads `.env.local` from repo root).
  *
  * Usage:
  *   node scripts/list-odds-sports.mjs
@@ -34,9 +34,9 @@ function loadEnvLocal() {
 loadEnvLocal();
 
 const wantJson = process.argv.includes("--json");
-const key = process.env.THE_ODDS_API_KEY || process.env.VITE_THE_ODDS_API_KEY;
+const key = process.env.VITE_THE_ODDS_API_KEY || process.env.THE_ODDS_API_KEY;
 if (!key) {
-  console.error("Missing THE_ODDS_API_KEY or VITE_THE_ODDS_API_KEY (set in .env.local or env).");
+  console.error("Missing VITE_THE_ODDS_API_KEY or THE_ODDS_API_KEY (set in .env.local or env).");
   process.exit(1);
 }
 
