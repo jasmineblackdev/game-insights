@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Upsert `mlb_pitcher_recent_form` from MLB Stats API game logs + ESPN athlete search.
+ * Upsert `mlb_pitcher_recent_form` from MLB Stats API game logs + ESPN id resolution.
+ * ESPN global search often returns []; we build a name→id map from all MLB team rosters, then fall back to search.
  *
  * Requires (service role — bypasses RLS write policies):
  *   SUPABASE_SERVICE_ROLE_KEY  (Dashboard → Settings → API → service_role secret)
@@ -43,6 +44,55 @@ loadEnvLocal();
 
 const MLB = "https://statsapi.mlb.com/api/v1";
 const ESPN_SEARCH = "https://site.api.espn.com/apis/common/v3/search";
+const ESPN_TEAMS = "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams?limit=50";
+
+const fetchOpts = {
+  headers: {
+    Accept: "application/json",
+    Referer: "https://www.espn.com/",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 GameLens-MLB-Sync/1.0",
+  },
+};
+
+/** Lowercase + strip accents — matches MLB fullName to ESPN roster fullName. */
+function normName(s) {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Collect ESPN athlete id by normalized fullName from all 30 team rosters (search API often returns []). */
+async function buildEspnMlbNameToIdMap() {
+  const map = new Map();
+  const res = await fetch(ESPN_TEAMS, fetchOpts);
+  if (!res.ok) return map;
+  const json = await res.json();
+  const teams = json?.sports?.[0]?.leagues?.[0]?.teams ?? [];
+  const teamIds = [...new Set(teams.map((t) => t?.team?.id).filter(Boolean))];
+  for (const tid of teamIds) {
+    const r = await fetch(
+      `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${tid}/roster`,
+      fetchOpts
+    );
+    if (!r.ok) continue;
+    const roster = await r.json();
+    const groups = roster?.athletes ?? [];
+    for (const g of groups) {
+      for (const a of g?.items ?? []) {
+        const id = a?.id != null ? String(a.id) : "";
+        const fn = a?.fullName || a?.displayName;
+        if (!id || !fn) continue;
+        const k = normName(fn);
+        if (!map.has(k)) map.set(k, id);
+      }
+    }
+    await new Promise((x) => setTimeout(x, 90));
+  }
+  return map;
+}
 
 function parseIp(s) {
   if (typeof s !== "string") return 0;
@@ -66,28 +116,66 @@ function eraFromStarts(splits, n) {
   return Math.round((9 * er) / ip * 100) / 100;
 }
 
-async function resolveEspnAthleteId(fullName) {
-  const q = (fullName ?? "").trim();
-  if (!q) return null;
-  const url = `${ESPN_SEARCH}?query=${encodeURIComponent(q)}&limit=12`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const json = await res.json();
-  for (const block of json.results ?? []) {
-    if (block.type !== "athlete" && block.type !== "player") continue;
-    for (const a of block.athletes ?? []) {
+function pushAthleteCandidates(node, out, depth = 0) {
+  if (depth > 10 || node == null) return;
+  if (Array.isArray(node)) {
+    for (const x of node) pushAthleteCandidates(x, out, depth + 1);
+    return;
+  }
+  if (typeof node === "object") {
+    const id = node.id;
+    const name = node.fullName || node.displayName || node.name;
+    if (id != null && name && String(id).match(/^\d+$/)) {
+      out.push(node);
+    }
+    for (const v of Object.values(node)) {
+      if (v && (typeof v === "object" || Array.isArray(v))) pushAthleteCandidates(v, out, depth + 1);
+    }
+  }
+}
+
+/** Roster map first; then common search with Referer + accent/“Last, First” variants. */
+async function resolveEspnAthleteId(fullName, rosterMap) {
+  const raw = (fullName ?? "").trim();
+  if (!raw) return null;
+  const fromRoster = rosterMap?.get(normName(raw));
+  if (fromRoster) return fromRoster;
+
+  const queries = [raw];
+  const stripped = raw.normalize("NFD").replace(/\p{M}/gu, "").trim();
+  if (stripped && stripped !== raw) queries.push(stripped);
+  const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) queries.push(`${parts[parts.length - 1]}, ${parts[0]}`);
+
+  const want = normName(raw);
+  for (const q of [...new Set(queries)]) {
+    if (!q) continue;
+    const url = `${ESPN_SEARCH}?query=${encodeURIComponent(q)}&limit=20&lang=en&region=us`;
+    const res = await fetch(url, fetchOpts);
+    if (!res.ok) continue;
+    const json = await res.json();
+    const candidates = [];
+    pushAthleteCandidates(json, candidates, 0);
+    for (const a of candidates) {
       const id = a.id != null ? String(a.id) : "";
       if (!id) continue;
+      const fn = a.fullName || a.displayName || a.name || "";
       const lg = (a.league?.abbreviation ?? "").toUpperCase();
-      if (lg === "MLB" || lg === "") return id;
+      if (fn && normName(fn) === want && (lg === "MLB" || lg === "")) return id;
     }
+    for (const a of candidates) {
+      const id = a.id != null ? String(a.id) : "";
+      const fn = a.fullName || a.displayName || a.name || "";
+      if (fn && normName(fn) === want) return id;
+    }
+    await new Promise((r) => setTimeout(r, 100));
   }
   return null;
 }
 
 async function fetchGameLogEras(mlbPlayerId, season) {
   const url = `${MLB}/people/${mlbPlayerId}/stats?stats=gameLog&season=${season}&group=pitching`;
-  const res = await fetch(url);
+  const res = await fetch(url, fetchOpts);
   if (!res.ok) return { l3: null, l5: null, name: null, lastDate: null };
   const json = await res.json();
   const splits = json.stats?.[0]?.splits ?? [];
@@ -103,7 +191,7 @@ async function fetchGameLogEras(mlbPlayerId, season) {
 
 async function collectPitcherIdsForDate(date) {
   const url = `${MLB}/schedule?sportId=1&date=${date}&hydrate=probablePitcher(note)`;
-  const res = await fetch(url);
+  const res = await fetch(url, fetchOpts);
   if (!res.ok) return new Set();
   const json = await res.json();
   const ids = new Set();
@@ -143,6 +231,10 @@ async function main() {
 
   const supabase = createClient(supUrl, supKey);
 
+  console.error("Loading ESPN MLB rosters for name → id map…");
+  const rosterMap = await buildEspnMlbNameToIdMap();
+  console.error(`Roster map: ${rosterMap.size} players`);
+
   let pitcherIds = new Set();
   if (singleDate) {
     pitcherIds = await collectPitcherIdsForDate(singleDate);
@@ -167,7 +259,7 @@ async function main() {
   for (const mlbId of capped) {
     const { l3, l5, name, lastDate } = await fetchGameLogEras(mlbId, season);
     if (!name || (l5 == null && l3 == null)) continue;
-    const espnId = await resolveEspnAthleteId(name);
+    const espnId = await resolveEspnAthleteId(name, rosterMap);
     if (!espnId) {
       console.error(`Skip ${name} (${mlbId}): no ESPN id`);
       continue;
