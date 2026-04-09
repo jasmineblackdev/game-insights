@@ -12,7 +12,11 @@ import type {
   VolatilityLabel,
 } from "@/data/mockGames";
 import { shiftThreeWayProb, shiftWinProbabilityTwoWay } from "@/lib/espnEnrichment";
-import { calibrateConfidenceForSport, type CalibrationRow } from "@/lib/confidenceCalibration";
+import {
+  calibrateConfidenceForSport,
+  fetchConfidenceCalibration,
+  type CalibrationRow,
+} from "@/lib/confidenceCalibration";
 import { parseRecord, winProbFromOdds } from "@/lib/espnShared";
 
 const BLEND_WEIGHTS = {
