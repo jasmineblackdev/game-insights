@@ -12,7 +12,15 @@
       "Read(//tmp/**)",
       "Bash(ls -lh /tmp/espn_api*.md /tmp/SUMMARY.txt /tmp/INDEX.md)",
       "Bash(ls:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(echo \"TSC EXIT: $?\")",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(node_modules/.bin/tsc --noEmit --version)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(git:*)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(echo \"DONE:$?\")",
+      "Bash(echo \"RESULT:$?\")"
     ]
   }
 }
