@@ -18,7 +18,9 @@
     "advanced:log-prediction-input": "node scripts/log-advanced-prediction-input.mjs",
     "advanced:batch-log-prediction-input": "node scripts/batch-log-advanced-prediction-input.mjs",
     "advanced:etl-team-metrics": "node scripts/etl-advanced-team-metrics.mjs",
-    "advanced:rollup-confidence-calibration": "node scripts/rollup-confidence-calibration.mjs"
+    "advanced:rollup-confidence-calibration": "node scripts/rollup-confidence-calibration.mjs",
+    "git:export-patches": "bash scripts/export-push-patches.sh",
+    "git:push-recovery": "bash scripts/git-push-recovery.sh"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

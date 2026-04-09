@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * Live check: NFL draft sport in /v4/sports?all=true and outrights payload shape.
- * Reads THE_ODDS_API_KEY (preferred) or VITE_THE_ODDS_API_KEY from process.env or .env.local.
+ * Reads VITE_THE_ODDS_API_KEY (preferred) or THE_ODDS_API_KEY from process.env or .env.local.
  *
  * Usage:
  *   npm run verify:odds-draft
- *   THE_ODDS_API_KEY=... node scripts/verify-odds-nfl-draft.mjs
+ *   VITE_THE_ODDS_API_KEY=... node scripts/verify-odds-nfl-draft.mjs
  */
 
 import fs from "node:fs";
@@ -36,7 +36,7 @@ function loadEnvFile() {
 }
 
 function apiKey() {
-  return (process.env.THE_ODDS_API_KEY || process.env.VITE_THE_ODDS_API_KEY || "").trim();
+  return (process.env.VITE_THE_ODDS_API_KEY || process.env.THE_ODDS_API_KEY || "").trim();
 }
 
 function envDraftSportKey() {
@@ -51,7 +51,7 @@ async function main() {
   const key = apiKey();
   if (!key) {
     console.error(
-      "Missing THE_ODDS_API_KEY (recommended) or VITE_THE_ODDS_API_KEY. Set in .env.local or export, then run again."
+      "Missing VITE_THE_ODDS_API_KEY (recommended) or THE_ODDS_API_KEY. Set in .env.local or export, then run again."
     );
     process.exit(1);
   }
