@@ -85,17 +85,48 @@ mkdir -p "$OUT"
 OUT_ABS="$(cd "$OUT" && pwd)"
 PATCH_FILE="$OUT_ABS/working-tree-uncommitted.patch"
 
-COUNT=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+COUNT=0
+if ! COUNT=$(git rev-list --count origin/main..HEAD 2>/dev/null); then
+  COUNT=0
+fi
 
+MERGE_BASE=$(git merge-base origin/main HEAD 2>/dev/null || true)
+ORIGIN_SHA=$(git rev-parse origin/main 2>/dev/null || true)
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || true)
+# When rev-list crashes (SIGBUS), COUNT is wrong — detect linear "ahead" without rev-list.
+LINEAR_AHEAD=0
+if [ -n "$MERGE_BASE" ] && [ -n "$ORIGIN_SHA" ] && [ -n "$HEAD_SHA" ] \
+  && [ "$MERGE_BASE" = "$ORIGIN_SHA" ] && [ "$HEAD_SHA" != "$ORIGIN_SHA" ]; then
+  LINEAR_AHEAD=1
+fi
+
+WROTE_FORMAT=0
 if [ "${COUNT:-0}" -gt 0 ]; then
-  git format-patch origin/main..HEAD -o "$OUT_ABS"
+  if git format-patch origin/main..HEAD -o "$OUT_ABS" 2>/dev/null; then
+    WROTE_FORMAT=1
+    echo ""
+    echo "==> Wrote $COUNT commit patch(es) to:"
+    echo "    $OUT_ABS"
+    echo ""
+    echo "==> In a fresh clone:"
+    echo "    cd .. && git clone https://github.com/jasmineblackdev/game-insights.git game-insights-clean"
+    echo "    cd game-insights-clean && git am $OUT_ABS/*.patch && git push origin main"
+    exit 0
+  fi
+  echo "!!! format-patch failed (often SIGBUS) — writing one unified diff instead."
+fi
+
+if [ "$LINEAR_AHEAD" -eq 1 ] && [ "$WROTE_FORMAT" -eq 0 ]; then
+  git diff origin/main..HEAD > "$OUT_ABS/unpushed-commits.patch"
   echo ""
-  echo "==> Wrote $COUNT commit patch(es) to:"
-  echo "    $OUT_ABS"
+  echo "==> Wrote cumulative diff (origin/main..HEAD) to:"
+  echo "    $OUT_ABS/unpushed-commits.patch"
   echo ""
   echo "==> In a fresh clone:"
   echo "    cd .. && git clone https://github.com/jasmineblackdev/game-insights.git game-insights-clean"
-  echo "    cd game-insights-clean && git am $OUT_ABS/*.patch && git push origin main"
+  echo "    cd game-insights-clean"
+  echo "    git apply --check \"$OUT_ABS/unpushed-commits.patch\" && git apply \"$OUT_ABS/unpushed-commits.patch\""
+  echo "    git add -A && git commit -m \"Apply unpushed work\" && git push origin main"
   exit 0
 fi
 
