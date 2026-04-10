@@ -270,6 +270,31 @@ export function draftEdgeToSlipItem(card: DraftEdgeCard): DraftEdgeSlipItem {
   };
 }
 
+function normalizeTeamSlipSnapshot(raw: unknown): EdgeSlipSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  const conf = s.confidence;
+  const confidence: ConfidenceLevel =
+    conf === "high" || conf === "medium" || conf === "low" ? conf : "medium";
+  const vl = s.volatilityLabel;
+  const volatilityLabel: VolatilityLabel | undefined =
+    vl === "low" || vl === "medium" || vl === "high" ? vl : undefined;
+  return {
+    homeAbbr: typeof s.homeAbbr === "string" ? s.homeAbbr : "?",
+    awayAbbr: typeof s.awayAbbr === "string" ? s.awayAbbr : "?",
+    pickedAbbr: typeof s.pickedAbbr === "string" ? s.pickedAbbr : "?",
+    opponentAbbr: typeof s.opponentAbbr === "string" ? s.opponentAbbr : "?",
+    winProb: typeof s.winProb === "number" && Number.isFinite(s.winProb) ? s.winProb : 50,
+    confidence,
+    pickScore: typeof s.pickScore === "number" && Number.isFinite(s.pickScore) ? s.pickScore : 0,
+    topReason: typeof s.topReason === "string" ? s.topReason : "—",
+    topRisk: typeof s.topRisk === "string" ? s.topRisk : "—",
+    keyEdge: typeof s.keyEdge === "string" ? s.keyEdge : "—",
+    lastUpdated: typeof s.lastUpdated === "string" ? s.lastUpdated : new Date().toISOString(),
+    ...(volatilityLabel ? { volatilityLabel } : {}),
+  };
+}
+
 /** Migrate v1 JSON slip rows (no `kind`) to discriminated union. */
 export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
   if (!raw || typeof raw !== "object") return null;
@@ -289,11 +314,36 @@ export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
         : "MORE";
     return {
       ...item,
-      snapshot: { ...snap, edgeDisplay, predictionDirection },
+      snapshot: {
+        ...snap,
+        playerName: typeof snap.playerName === "string" ? snap.playerName : "—",
+        label: typeof snap.label === "string" ? snap.label : "Player prop",
+        teamAbbr: typeof snap.teamAbbr === "string" ? snap.teamAbbr : "?",
+        opponentAbbr: typeof snap.opponentAbbr === "string" ? snap.opponentAbbr : "?",
+        gameTime: typeof snap.gameTime === "string" ? snap.gameTime : "—",
+        statType: typeof snap.statType === "string" ? snap.statType : "—",
+        lineValue: typeof snap.lineValue === "number" && Number.isFinite(snap.lineValue) ? snap.lineValue : 0,
+        projectedValue:
+          typeof snap.projectedValue === "number" && Number.isFinite(snap.projectedValue)
+            ? snap.projectedValue
+            : 0,
+        topReason: typeof snap.topReason === "string" ? snap.topReason : "—",
+        topRisk: typeof snap.topRisk === "string" ? snap.topRisk : "—",
+        lastUpdated: typeof snap.lastUpdated === "string" ? snap.lastUpdated : new Date().toISOString(),
+        edgeDisplay,
+        predictionDirection,
+        confidence:
+          snap.confidence === "high" || snap.confidence === "medium" || snap.confidence === "low"
+            ? snap.confidence
+            : "medium",
+      },
     };
   }
   if (o.kind === "team_pick") {
-    return raw as TeamEdgeSlipItem;
+    const item = raw as TeamEdgeSlipItem;
+    const snap = normalizeTeamSlipSnapshot(item.snapshot);
+    if (!snap) return null;
+    return { ...item, snapshot: snap };
   }
   if (
     typeof o.gameId === "string" &&
@@ -304,6 +354,8 @@ export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
     "pickedAbbr" in (o.snapshot as object)
   ) {
     const gid = String(o.gameId);
+    const snap = normalizeTeamSlipSnapshot(o.snapshot);
+    if (!snap) return null;
     return {
       kind: "team_pick",
       id: gid,
@@ -311,7 +363,7 @@ export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
       league: o.league as League,
       side: o.side as EdgeSide,
       addedAt: typeof o.addedAt === "string" ? o.addedAt : new Date().toISOString(),
-      snapshot: o.snapshot as EdgeSlipSnapshot,
+      snapshot: snap,
     };
   }
   return null;
@@ -627,8 +679,8 @@ export function edgeSlipWarningLines(items: EdgeSlipItem[]): string[] {
       if (i.snapshot.confidence === "low") lowConf++;
       continue;
     }
-    const risk = i.snapshot.topRisk.toLowerCase();
-    const reason = i.snapshot.topReason.toLowerCase();
+    const risk = (i.snapshot.topRisk ?? "").toLowerCase();
+    const reason = (i.snapshot.topReason ?? "").toLowerCase();
     if (risk.includes("probable pitcher") || risk.includes("bullpen leverage")) pitcherNote++;
     if (risk.includes("injury") || reason.includes("injury") || risk.includes("questionable")) injuryNote++;
   }

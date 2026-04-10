@@ -415,11 +415,11 @@ function EdgeCardPageInner() {
     let risk = "Controlled";
     if (slip.some((s) => s.snapshot.confidence === "low")) risk = "Elevated";
     else if (
-      slip.some(
-        (s) =>
-          isTeamSlipItem(s) &&
-          (s.snapshot.topRisk.toLowerCase().includes("line") || s.snapshot.topRisk.includes("?"))
-      )
+      slip.some((s) => {
+        if (!isTeamSlipItem(s)) return false;
+        const tr = s.snapshot.topRisk ?? "";
+        return tr.toLowerCase().includes("line") || tr.includes("?");
+      })
     ) {
       risk = "Moderate";
     }
