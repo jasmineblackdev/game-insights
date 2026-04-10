@@ -7,3 +7,7 @@ export * from "@/lib/valueParlay/oddsEvents";
 export * from "@/lib/valueParlay/buildCandidates";
 export * from "@/lib/valueParlay/parlayOptimizer";
 export * from "@/lib/valueParlay/dbMappers";
+export * from "@/lib/valueParlay/parlayBotFormatting";
+export * from "@/lib/valueParlay/teamAbbrevNormalize";
+export * from "@/lib/valueParlay/relevantMarkets";
+export * from "@/lib/valueParlay/scheduleBuckets";

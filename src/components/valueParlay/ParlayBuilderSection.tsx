@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Shuffle, Trash2, Wallet, Zap } from "lucide-react";
+import { Copy, RefreshCw, Shuffle, Trash2, Wallet, Zap } from "lucide-react";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { buildAllValueCandidates } from "@/lib/valueParlay/buildCandidates";
+import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 
@@ -44,6 +45,24 @@ export function ParlayBuilderSection({
   const candidates = useMemo(() => buildAllValueCandidates(games, oddsMap), [games, oddsMap]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
 
+  const shareText = useMemo(
+    () => (builderLegs.length ? formatBuilderParlayShare(builderLegs, builderMetrics) : ""),
+    [builderLegs, builderMetrics]
+  );
+
+  const copyShare = async () => {
+    if (!shareText) {
+      toast.message("Add legs first");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(shareText);
+      toast.success("Parlay summary copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
+
   const saveSnapshot = () => {
     if (!builderLegs.length) {
       toast.message("Add legs first");
@@ -57,6 +76,7 @@ export function ParlayBuilderSection({
         savedAt: new Date().toISOString(),
         mode: parlayMode,
         legs: builderLegs.map((l) => ({ id: l.id, label: l.selectionLabel, edge: l.edge })),
+        formattedSummary: shareText,
       };
       const next = [entry, ...prev].slice(0, 15);
       localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
@@ -188,6 +208,10 @@ export function ParlayBuilderSection({
         <Button variant="ghost" size="sm" onClick={clearValueBuilder} disabled={!builderLegs.length}>
           <Trash2 className="w-3.5 h-3.5" />
           Clear
+        </Button>
+        <Button variant="outline" size="sm" className="gap-1" onClick={copyShare} disabled={!builderLegs.length}>
+          <Copy className="w-3.5 h-3.5" />
+          Copy summary
         </Button>
         <Button variant="secondary" size="sm" onClick={saveSnapshot}>
           Save to history

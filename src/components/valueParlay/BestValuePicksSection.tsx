@@ -13,7 +13,8 @@ import {
   topRecommended,
 } from "@/lib/valueParlay/buildCandidates";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import { formatMatchupWithAbbrevs } from "@/lib/valueParlay/teamAbbrevNormalize";
+import type { ParlayBuildMode, ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useValueParlay } from "@/context/ValueParlayContext";
 
 type PickKind = "all" | "team" | "props";
@@ -70,7 +71,9 @@ function ValuePickCard({
       </div>
 
       <div>
-        <p className="text-sm font-display font-bold text-foreground">{c.matchupLabel}</p>
+        <p className="text-sm font-display font-bold text-foreground">
+          {formatMatchupWithAbbrevs(c.matchupLabel, c.sport)}
+        </p>
         <p className="text-xs font-semibold text-primary mt-0.5">{c.selectionLabel}</p>
         <p className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
           Odds {c.americanOdds > 0 ? `+${c.americanOdds}` : c.americanOdds}
