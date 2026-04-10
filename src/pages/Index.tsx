@@ -18,6 +18,7 @@ import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { ModelHonestyCallout } from "@/components/ModelHonestyCallout";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
@@ -575,10 +576,17 @@ const Index = () => {
                   ))}
                 </div>
               ) : activeQuery.isError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-                  Could not load ESPN {leagueLabel(league)} data (
-                  {activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network;
-                  if the API blocks the browser, proxy through Supabase Edge Functions.
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive space-y-2">
+                  <p>
+                    Could not load ESPN {leagueLabel(league)} data (
+                    {activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}).
+                  </p>
+                  <p className="text-destructive/90 text-xs">
+                    Check your connection, wait a moment, and retry. If this persists, deploy the{" "}
+                    <span className="font-medium">espn-proxy</span> Edge Function and set{" "}
+                    <span className="font-mono">VITE_ENABLE_ESPN_PROXY=1</span> so scoreboards load through your backend
+                    cache.
+                  </p>
                 </div>
               ) : filteredGames.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -608,6 +616,10 @@ const Index = () => {
             </motion.div>
           )}
         </AnimatePresence>
+
+        <div className="mt-10 pt-8 border-t border-border">
+          <ModelHonestyCallout variant="home" />
+        </div>
       </main>
     </div>
   );

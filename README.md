@@ -1,6 +1,6 @@
 # GameLens
 
-AI-assisted matchup intelligence for **NBA**, **NFL**, **MLB**, and **soccer** (EPL in the current ESPN build), plus an **Edge Card** slip builder (Pick 3 / 4 / 6).
+AI-assisted matchup intelligence for **NBA**, **NFL**, **MLB**, and **soccer** (EPL in the current ESPN build), plus an **Edge Card** slip builder (sizes **3 / 5 / 7 / 10**).
 
 ## Data & API architecture
 
@@ -9,7 +9,9 @@ Target **multi-sport stack** (SportsDataIO → Supabase → clients, with phased
 - **[docs/DATA_STACK.md](docs/DATA_STACK.md)** — side-by-side sport matrix, shared DB shape, phases, product parity across sports.
 - **`src/lib/dataStack.ts`** — typed, machine-readable definitions (`SPORT_STACK`, `DATA_PHASES`, shared tables) for code and future UI.
 
-**Current web MVP** still pulls **ESPN** (and optional **football-data.org** / **The Odds API**) in the browser; normalize through Supabase when you wire SportsDataIO.
+**Current web MVP** pulls **ESPN** scoreboards (and optional **football-data.org** / **The Odds API**). For production, deploy the **`espn-proxy`** Supabase Edge Function and set **`VITE_ENABLE_ESPN_PROXY=1`** so clients hit a cached server path instead of ESPN directly (see `.env.example`).
+
+Heavy routes (**Edge Card**, **Player Edge detail**) are **lazy-loaded** to keep the initial bundle smaller; React Query uses bounded retries and scoreboard fetches use **timeouts** for flaky networks.
 
 ## Scripts
 

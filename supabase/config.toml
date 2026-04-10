@@ -12,6 +12,7 @@ major_version = 17
 #   supabase functions deploy player-edge
 #   supabase functions deploy nba-stats-proxy
 #   supabase functions deploy odds-api-proxy
+#   supabase functions deploy espn-proxy
 #   supabase functions deploy odds-persist
 #   supabase secrets set ODDS_PERSIST_SECRET="$(openssl rand -hex 24)"
 #   (Uses SUPABASE_SERVICE_ROLE_KEY + THE_ODDS_API_KEY + SUPABASE_URL automatically in hosted projects.)

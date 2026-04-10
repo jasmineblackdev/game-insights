@@ -11,6 +11,12 @@ interface ImportMetaEnv {
   /** Optional full URL to `odds-api-proxy` (default: Supabase `/functions/v1/odds-api-proxy`). */
   readonly VITE_ODDS_API_PROXY_URL?: string;
   /**
+   * When "1" or "true", ESPN scoreboards load via `espn-proxy` Edge Function (requires deploy + VITE_SUPABASE_URL).
+   */
+  readonly VITE_ENABLE_ESPN_PROXY?: string;
+  /** Optional absolute URL to `espn-proxy` (default: `${VITE_SUPABASE_URL}/functions/v1/espn-proxy`). */
+  readonly VITE_ESPN_PROXY_URL?: string;
+  /**
    * Optional: The Odds API `sport_key` for NFL draft / outrights when catalog discovery fails.
    * See GET /v4/sports?all=true — keys vary by season.
    */

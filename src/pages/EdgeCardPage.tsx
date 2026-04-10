@@ -25,6 +25,7 @@ import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSe
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
+import { ModelHonestyCallout } from "@/components/ModelHonestyCallout";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -476,6 +477,8 @@ function EdgeCardPageInner() {
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6 sm:space-y-8">
+        <ModelHonestyCallout variant="edge" />
+
         {edgeTab === "value" ? (
           <div className="min-h-[min(55vh,28rem)]">
             <BestValuePicksSection
@@ -606,7 +609,14 @@ function EdgeCardPageInner() {
             ))}
           </div>
         ) : hasError ? (
-          <p className="text-sm text-destructive">Could not load one or more sports feeds. Check the network and try again.</p>
+          <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive space-y-2">
+            <p>Could not load one or more sports feeds after retries.</p>
+            <p className="text-xs text-destructive/90">
+              Check your connection and refresh. For production, route scoreboards through the{" "}
+              <span className="font-medium">espn-proxy</span> Edge Function — set{" "}
+              <span className="font-mono">VITE_ENABLE_ESPN_PROXY=1</span> so fetches use a cached server path.
+            </p>
+          </div>
         ) : null}
 
         {!loading && trending.length > 0 ? (
@@ -688,6 +698,10 @@ function EdgeCardPageInner() {
               </p>
             ) : null}
           </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            Mark Win / Loss / Push on saved cards to keep a simple record on this device — useful for judging how much
+            to trust the model over time. Not shared or published unless you add cloud sync later.
+          </p>
           {history.length === 0 ? (
             <p className="text-xs text-muted-foreground">Save your current slip to build a history of cards.</p>
           ) : (

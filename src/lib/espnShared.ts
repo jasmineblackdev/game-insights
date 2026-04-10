@@ -8,6 +8,8 @@ import type {
   MatchupEdge,
   TeamData,
 } from "@/data/mockGames";
+import { fetchWithTimeout } from "@/lib/fetchWithTimeout";
+import { parseScoreboardResourceFromBaseUrl, resolveEspnProxyUrl } from "@/lib/espnProxy";
 
 /** YYYY-MM-DD in America/New_York for a given instant */
 export function easternYmd(d: Date = new Date()): string {
@@ -556,11 +558,50 @@ export function buildLines(
 }
 
 export async function fetchEspnScoreboardEvents(baseUrl: string, datesParam?: string): Promise<EspnEvent[]> {
-  const url = datesParam ? `${baseUrl}?dates=${datesParam}` : baseUrl;
-  const res = await fetch(url);
+  const resource = parseScoreboardResourceFromBaseUrl(baseUrl);
+  const proxy = resolveEspnProxyUrl();
+  let res: Response;
+  if (proxy && resource) {
+    const u = new URL(proxy);
+    u.searchParams.set("league", resource.league);
+    if (resource.slug) u.searchParams.set("slug", resource.slug);
+    if (datesParam) u.searchParams.set("dates", datesParam);
+    res = await fetchWithTimeout(u.toString(), { timeoutMs: 20_000 });
+  } else {
+    const url = datesParam ? `${baseUrl}?dates=${datesParam}` : baseUrl;
+    res = await fetchWithTimeout(url, { timeoutMs: 20_000 });
+  }
   if (!res.ok) throw new Error(`ESPN scoreboard ${res.status}`);
   const data = (await res.json()) as EspnScoreboard;
   return data.events ?? [];
+}
+
+async function fetchEspnSoccerBoardJson(
+  baseUrl: string,
+  datesPart: string,
+  limit?: string
+): Promise<EspnScoreboard | null> {
+  const slugMatch = /\/soccer\/([a-z0-9._-]+)\/scoreboard/i.exec(baseUrl);
+  const slug = slugMatch?.[1];
+  const proxy = resolveEspnProxyUrl();
+  let res: Response;
+  if (proxy && slug) {
+    const u = new URL(proxy);
+    u.searchParams.set("league", "soccer");
+    u.searchParams.set("slug", slug);
+    u.searchParams.set("dates", datesPart);
+    if (limit) u.searchParams.set("limit", limit);
+    res = await fetchWithTimeout(u.toString(), { timeoutMs: 22_000 });
+  } else {
+    const q = limit ? `dates=${datesPart}&limit=${limit}` : `dates=${datesPart}`;
+    res = await fetchWithTimeout(`${baseUrl}?${q}`, { timeoutMs: 22_000 });
+  }
+  if (!res.ok) return null;
+  try {
+    return (await res.json()) as EspnScoreboard;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -575,12 +616,14 @@ export async function fetchEspnSoccerScoreboardRange(
   const rangeParam = `${ymdToParam(startYmd)}-${ymdToParam(endYmd)}`;
   const tryUrls = [`${baseUrl}?dates=${rangeParam}&limit=500`, `${baseUrl}?dates=${rangeParam}`];
 
-  for (const url of tryUrls) {
+  for (const tryUrl of tryUrls) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = (await res.json()) as EspnScoreboard;
-      const ev = data.events ?? [];
+      const u = new URL(tryUrl);
+      const datesPart = u.searchParams.get("dates") ?? "";
+      const lim = u.searchParams.get("limit") ?? undefined;
+      if (!datesPart) continue;
+      const data = await fetchEspnSoccerBoardJson(baseUrl, datesPart, lim);
+      const ev = data?.events ?? [];
       if (ev.length > 0) return ev;
     } catch {
       /* try next */
@@ -591,9 +634,8 @@ export async function fetchEspnSoccerScoreboardRange(
   let ymd = startYmd;
   for (;;) {
     try {
-      const res = await fetch(`${baseUrl}?dates=${ymdToParam(ymd)}&limit=500`);
-      if (res.ok) {
-        const data = (await res.json()) as EspnScoreboard;
+      const data = await fetchEspnSoccerBoardJson(baseUrl, ymdToParam(ymd), "500");
+      if (data) {
         for (const e of data.events ?? []) byId.set(e.id, e);
       }
     } catch {
