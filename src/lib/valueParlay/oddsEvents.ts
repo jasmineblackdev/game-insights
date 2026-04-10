@@ -6,10 +6,12 @@ import type { OddsH2hRow } from "@/lib/valueParlay/types";
 interface Bookmaker {
   key?: string;
   title?: string;
+  last_update?: string;
   markets?: { key?: string; outcomes?: { name?: string; price?: number }[] }[];
 }
 
 interface OddsEvent {
+  id?: string;
   commence_time: string;
   home_team: string;
   away_team: string;
@@ -114,21 +116,40 @@ function totalPrices(book: Bookmaker | undefined): { over: number; under: number
 
 export type GameOddsBundle = {
   gameId: string;
+  /** Odds API event id — enables /odds?eventIds=… in-play refresh. */
+  oddsApiEventId?: string;
+  commenceTime?: string;
+  /** True when commence_time is in the past (board treats as live / in-play). */
+  boardInPlay?: boolean;
+  bookmakerLastUpdate?: string;
+  oddsFetchedAt?: string;
   h2h?: OddsH2hRow;
   spread?: { home: number; away: number };
   total?: { over: number; under: number; point?: number };
 };
 
-async function fetchJsonForSport(sportKey: string): Promise<OddsEvent[]> {
+async function fetchJsonForSport(sportKey: string, eventIds?: string[]): Promise<OddsEvent[]> {
   const res = await fetchOddsForSport({
     sportKey,
     markets: "h2h,spreads,totals",
     regions: "us",
     oddsFormat: "american",
+    eventIds: eventIds?.length ? [...new Set(eventIds)].join(",") : undefined,
   });
   if (!res.ok) return [];
   const data = (await res.json()) as unknown;
   return Array.isArray(data) ? (data as OddsEvent[]) : [];
+}
+
+/** Odds API `sport_key` for a prediction (soccer maps from ESPN league slug). */
+export function oddsSportKeyForPrediction(pred: GamePrediction): string {
+  if (pred.league === "soccer") {
+    const slug = pred._meta?.soccerLeagueSlug ?? "eng.1";
+    return ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug] ?? "soccer_epl";
+  }
+  if (pred.league === "nba") return "basketball_nba";
+  if (pred.league === "nfl") return "americanfootball_nfl";
+  return "baseball_mlb";
 }
 
 function matchEvent(pred: GamePrediction, events: OddsEvent[]): OddsEvent | undefined {
@@ -145,12 +166,57 @@ function bundleForPred(pred: GamePrediction, ev: OddsEvent | undefined): GameOdd
   const h2h = ev ? extractH2h(b, pred.homeTeam.name, pred.awayTeam.name) : null;
   const sp = ev ? spreadPrices(b, pred.homeTeam.name, pred.awayTeam.name) : null;
   const tot = ev ? totalPrices(b) : null;
+  const ct = ev?.commence_time;
+  const commenceMs = ct ? new Date(ct).getTime() : NaN;
+  const boardInPlay = Number.isFinite(commenceMs) && commenceMs < Date.now();
   return {
     gameId: pred.id,
+    ...(ev?.id ? { oddsApiEventId: String(ev.id) } : {}),
+    ...(ct ? { commenceTime: ct } : {}),
+    boardInPlay,
+    ...(b?.last_update ? { bookmakerLastUpdate: b.last_update } : {}),
+    oddsFetchedAt: new Date().toISOString(),
     ...(h2h ? { h2h } : {}),
     ...(sp ? { spread: sp } : {}),
     ...(tot ? { total: tot } : {}),
   };
+}
+
+/**
+ * Refresh moneylines for live games using Odds API `eventIds` filter (one request per sport_key batch).
+ */
+export async function fetchOddsBundlesForLiveGames(
+  predictions: GamePrediction[],
+  priorMap: Map<string, GameOddsBundle>
+): Promise<Map<string, GameOddsBundle>> {
+  const out = new Map<string, GameOddsBundle>();
+  const live = predictions.filter((p) => p.status === "live");
+  if (!live.length || !isOddsApiAvailable()) return out;
+
+  const bySport = new Map<string, { preds: GamePrediction[]; eventIds: Set<string> }>();
+  for (const p of live) {
+    const eid = priorMap.get(p.id)?.oddsApiEventId;
+    if (!eid) continue;
+    const sk = oddsSportKeyForPrediction(p);
+    const row = bySport.get(sk) ?? { preds: [], eventIds: new Set<string>() };
+    row.preds.push(p);
+    row.eventIds.add(eid);
+    bySport.set(sk, row);
+  }
+
+  for (const [sportKey, { preds, eventIds }] of bySport) {
+    const ids = [...eventIds];
+    if (!ids.length) continue;
+    const events = await fetchJsonForSport(sportKey, ids);
+    for (const p of preds) {
+      const want = priorMap.get(p.id)?.oddsApiEventId;
+      const ev =
+        (want ? events.find((e) => e.id === want) : undefined) ?? matchEvent(p, events);
+      const b = bundleForPred(p, ev);
+      if (b.h2h) out.set(p.id, b);
+    }
+  }
+  return out;
 }
 
 /** Map game id → odds bundle for all predictions in a league batch. */

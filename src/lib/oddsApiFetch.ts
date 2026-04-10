@@ -107,9 +107,12 @@ export async function fetchOddsForSport(params: {
   markets: string;
   regions?: string;
   oddsFormat?: string;
+  /** Comma-separated Odds API event ids — use for in-play refresh (same endpoint, filtered). */
+  eventIds?: string;
 }): Promise<Response> {
-  const { sportKey, markets, regions = "us", oddsFormat = "american" } = params;
+  const { sportKey, markets, regions = "us", oddsFormat = "american", eventIds } = params;
   const q = new URLSearchParams({ regions, markets, oddsFormat });
+  if (eventIds?.trim()) q.set("eventIds", eventIds.trim());
   const path = `sports/${encodeURIComponent(sportKey)}/odds?${q.toString()}`;
 
   if (devProxyEnabled()) {
@@ -117,7 +120,9 @@ export async function fetchOddsForSport(params: {
     if (dev) return dev;
   }
 
-  const edge = await fetchViaEdge("odds", { sportKey, markets, regions, oddsFormat });
+  const edgeParams: Record<string, string> = { sportKey, markets, regions, oddsFormat };
+  if (eventIds?.trim()) edgeParams.eventIds = eventIds.trim();
+  const edge = await fetchViaEdge("odds", edgeParams);
   if (edge) return edge;
 
   const direct = await fetchViaDirect(path);

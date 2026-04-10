@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -21,10 +21,13 @@ import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { ModelHonestyCallout } from "@/components/ModelHonestyCallout";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
-import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
+import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
+import { flushLiveBettingStagesToSupabase } from "@/lib/liveBettingSupabaseSync";
 import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
 
 type ViewMode = "games" | "props" | "draft";
+
+const EMPTY_LEAGUE_GAMES: GamePrediction[] = [];
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -210,37 +213,32 @@ const Index = () => {
               error: mlbBaseQuery.error ?? mlbModeledQuery.error,
             }
           : soccerQuery;
-  const leagueGames =
-    league === "nba"
-      ? (nbaQuery.data ?? [])
-      : league === "nfl"
-        ? (nflQuery.data ?? [])
-        : league === "mlb"
-          ? (mlbModeledQuery.data ?? [])
-          : (soccerQuery.data ?? []);
+  const leagueGames = useMemo(() => {
+    if (league === "nba") return nbaQuery.data ?? EMPTY_LEAGUE_GAMES;
+    if (league === "nfl") return nflQuery.data ?? EMPTY_LEAGUE_GAMES;
+    if (league === "mlb") return mlbModeledQuery.data ?? EMPTY_LEAGUE_GAMES;
+    return soccerQuery.data ?? EMPTY_LEAGUE_GAMES;
+  }, [league, nbaQuery.data, nflQuery.data, mlbModeledQuery.data, soccerQuery.data]);
 
-  const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
-
-  const [oddsMapHome, setOddsMapHome] = useState<Map<string, GameOddsBundle>>(() => new Map());
-
-  useEffect(() => {
-    if (!leagueGames.length) {
-      setOddsMapHome(new Map());
-      return;
-    }
-    let cancelled = false;
-    fetchAllOddsBundles(leagueGames).then((m) => {
-      if (!cancelled) setOddsMapHome(m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [gameIdsKey, league]);
+  const oddsMapHome = useOddsBundlesWithLivePoll(leagueGames);
 
   const leagueGamesWithIntel = useMemo(
     () => enrichGamesWithBettingIntelligence(leagueGames, oddsMapHome),
     [leagueGames, oddsMapHome]
   );
+
+  const intelSyncRef = useRef(leagueGamesWithIntel);
+  intelSyncRef.current = leagueGamesWithIntel;
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const t0 = setTimeout(() => void flushLiveBettingStagesToSupabase(intelSyncRef.current), 12_000);
+    const iv = setInterval(() => void flushLiveBettingStagesToSupabase(intelSyncRef.current), 55_000);
+    return () => {
+      clearTimeout(t0);
+      clearInterval(iv);
+    };
+  }, []);
 
   useEffect(() => {
     if (!selectedGame || selectedGame.league !== "mlb") return;
@@ -345,8 +343,20 @@ const Index = () => {
             </div>
           </div>
           <div className="sm:hidden space-y-2">
-            <div className="overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:thin]">
-              <LeaguePicker value={league} onChange={handleLeagueChange} />
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="overflow-x-auto -mx-1 px-1 pb-0.5 flex-1 min-w-0 [scrollbar-width:thin]">
+                <LeaguePicker value={league} onChange={handleLeagueChange} />
+              </div>
+              <Link
+                to="/edge"
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-2 text-[11px] font-bold tracking-wide text-primary touch-manipulation"
+                aria-label="Edge Card"
+                onPointerEnter={warmEdgeCard}
+                onFocus={warmEdgeCard}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                Edge
+              </Link>
             </div>
             <DataSourceStatus />
           </div>

@@ -13,6 +13,7 @@
  */
 
 import type { GamePrediction } from "@/data/mockGames";
+import { sportSpecificLiveAugmentationPp } from "@/lib/liveWinProbAugment";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -208,7 +209,9 @@ export function computeLiveHomeWinPercent(game: GamePrediction, pregameHomeProb:
       5, 95
     );
   }
-  return liveHomeProb;
+
+  const aug = sportSpecificLiveAugmentationPp(game);
+  return clamp(Math.round(liveHomeProb + aug), 5, 95);
 }
 
 /** Build the live prediction version. Returns null if trigger not met. */

@@ -11,6 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "verify:odds-draft": "node scripts/verify-odds-nfl-draft.mjs",
     "mlb:sync-pitcher-recent-form": "node scripts/refresh-mlb-pitcher-recent-form.mjs",
     "mlb:refresh-derivatives": "node scripts/refresh-mlb-derivative-tables.mjs",

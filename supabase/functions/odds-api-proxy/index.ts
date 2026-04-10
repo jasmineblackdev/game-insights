@@ -60,12 +60,18 @@ Deno.serve(async (req) => {
         return json({ error: "invalid_odds_format" }, 400);
       }
 
+      const eventIds = url.searchParams.get("eventIds")?.trim() ?? "";
+      if (eventIds && !/^[a-zA-Z0-9_,-]+$/.test(eventIds)) {
+        return json({ error: "invalid_event_ids" }, 400);
+      }
+
       const q = new URLSearchParams({
         regions,
         markets,
         oddsFormat,
         apiKey,
       });
+      if (eventIds) q.set("eventIds", eventIds);
       const target = `${UPSTREAM}/sports/${encodeURIComponent(sportKey)}/odds?${q.toString()}`;
       const r = await fetch(target);
       const text = await r.text();

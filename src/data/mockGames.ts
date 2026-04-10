@@ -369,6 +369,10 @@ export interface GamePrediction {
       status: "upcoming" | "live" | "final";
     };
     marketMl?: MarketMlSnapshot;
+    /** The Odds API event id — used for in-play line refresh (see `oddsEvents.ts`). */
+    oddsApiEventId?: string;
+    bookmakerLastUpdate?: string;
+    oddsFetchedAt?: string;
     /** Layered scoring outputs (market, calibration, volatility, etc.). */
     quality?: PredictionQualityMeta;
     /** Model vs book value for primary pick — see `bettingIntelligence.ts`. */

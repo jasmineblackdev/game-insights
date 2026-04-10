@@ -245,39 +245,47 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
           </div>
         ) : null}
 
-        {edge && game.status === "upcoming" ? (
+        {edge ? (
           <div className="mt-5 pt-4 border-t border-border flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2">
-            <Button
-              size="sm"
-              className="gap-1.5 font-semibold"
-              disabled={edge.isOnSlip(game.id)}
-              onClick={() => {
-                const r = edge.addPick(game, favoredSide);
-                if (r.ok) {
-                  toast.success(
-                    `Added ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`
-                  );
-                } else toast.message(r.message ?? "Could not add");
-              }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {edge.isOnSlip(game.id) ? "On Edge Card" : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              disabled={edge.isOnSlip(game.id) || edge.slipFull}
-              onClick={() => {
-                const other: EdgeSide = favoredSide === "home" ? "away" : "home";
-                const r = edge.addPick(game, other);
-                if (r.ok) {
-                  toast.success(`Added ${other === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} (contrarian)`);
-                } else toast.message(r.message ?? "Could not add");
-              }}
-            >
-              Add other side
-            </Button>
+            {game.status === "upcoming" ? (
+              <>
+                <Button
+                  size="sm"
+                  className="gap-1.5 font-semibold"
+                  disabled={edge.isOnSlip(game.id)}
+                  onClick={() => {
+                    const r = edge.addPick(game, favoredSide);
+                    if (r.ok) {
+                      toast.success(
+                        `Added ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`
+                      );
+                    } else toast.message(r.message ?? "Could not add");
+                  }}
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {edge.isOnSlip(game.id) ? "On Edge Card" : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs"
+                  disabled={edge.isOnSlip(game.id) || edge.slipFull}
+                  onClick={() => {
+                    const other: EdgeSide = favoredSide === "home" ? "away" : "home";
+                    const r = edge.addPick(game, other);
+                    if (r.ok) {
+                      toast.success(`Added ${other === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} (contrarian)`);
+                    } else toast.message(r.message ?? "Could not add");
+                  }}
+                >
+                  Add other side
+                </Button>
+              </>
+            ) : (
+              <p className="text-[11px] text-muted-foreground sm:mr-2">
+                Live or final — open Edge Card to manage slips and saved cards. Add picks from upcoming games.
+              </p>
+            )}
             <Link
               to="/edge"
               className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-primary hover:underline px-2 py-1.5"

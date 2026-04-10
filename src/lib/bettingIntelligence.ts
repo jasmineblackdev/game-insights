@@ -217,7 +217,14 @@ export function enrichGamesWithBettingIntelligence(
     maybeRecordFinalLiveBettingLearning(g, liveBetting);
     return {
       ...g,
-      _meta: { ...g._meta, bettingIntel, liveBetting },
+      _meta: {
+        ...g._meta,
+        bettingIntel,
+        liveBetting,
+        oddsApiEventId: bundle?.oddsApiEventId,
+        bookmakerLastUpdate: bundle?.bookmakerLastUpdate,
+        oddsFetchedAt: bundle?.oddsFetchedAt,
+      },
     };
   });
 }

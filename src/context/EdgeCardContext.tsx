@@ -48,6 +48,8 @@ interface EdgeCardContextValue {
   removePick: (itemId: string) => void;
   replacePick: (itemId: string, item: TeamEdgeSlipItem) => void;
   clearSlip: () => void;
+  /** Remove slip items whose league is not in `allowed`. Returns how many were removed. No-op when `allowed` is `"all"`. */
+  trimSlipToAllowedLeagues: (allowed: League[] | "all") => number;
   autoBuild: (candidates: EdgeCandidate[], size: EdgeCardSize) => void;
   saveSlipToHistory: () => void;
   setHistoryOutcome: (entryId: string, outcome: EdgeSlipOutcome | null) => void;
@@ -204,6 +206,18 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const trimSlipToAllowedLeagues = useCallback((allowed: League[] | "all"): number => {
+    if (allowed === "all") return 0;
+    let removed = 0;
+    setSlipState((s) => {
+      const next = s.items.filter((x) => allowed.includes(x.league));
+      removed = s.items.length - next.length;
+      if (removed === 0) return s;
+      return { ...s, items: next };
+    });
+    return removed;
+  }, []);
+
   const autoBuild = useCallback((candidates: EdgeCandidate[], size: EdgeCardSize) => {
     const picked = autoBuildEdgeSlip(candidates, size);
     setSlipState((s) => ({
@@ -281,6 +295,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       removePick,
       replacePick,
       clearSlip,
+      trimSlipToAllowedLeagues,
       autoBuild,
       saveSlipToHistory,
       setHistoryOutcome,
@@ -301,6 +316,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       removePick,
       replacePick,
       clearSlip,
+      trimSlipToAllowedLeagues,
       autoBuild,
       saveSlipToHistory,
       setHistoryOutcome,

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy, RefreshCw, Shuffle, Trash2, Wallet, Zap } from "lucide-react";
+import { Copy, RefreshCw, Shuffle, Trash2, Wallet, Wrench, Zap } from "lucide-react";
+import type { League } from "@/data/mockGames";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,10 @@ const MODE_LABEL: Record<ParlayBuildMode, string> = {
 };
 
 const HISTORY_KEY = "gamelens-value-parlay-history-v1";
+
+function leagueShort(l: League) {
+  return l === "soccer" ? "EPL" : l.toUpperCase();
+}
 
 export function ParlayBuilderSection({
   games,
@@ -92,212 +97,255 @@ export function ParlayBuilderSection({
 
   return (
     <div className="space-y-8">
-      <div className="space-y-2">
-        <h2 className="font-display font-bold text-xl text-foreground">Parlay builder</h2>
-        <p className="text-sm text-muted-foreground max-w-2xl">
-          Value-first legs with mode presets, payout estimate, hit-rate projection, and correlation warnings. Add legs
-          from Best Value or auto-build from the candidate pool below.
-        </p>
+      <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-violet-500/[0.07] via-card to-card p-5 sm:p-6 space-y-3">
+        <div className="absolute -left-6 -bottom-10 h-36 w-36 rounded-full bg-violet-500/10 blur-2xl pointer-events-none" aria-hidden />
+        <div className="relative flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+          <div className="space-y-2 max-w-2xl">
+            <div className="flex items-center gap-2 text-violet-600 dark:text-violet-400">
+              <Wrench className="w-6 h-6 shrink-0" />
+              <span className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Smart parlay</span>
+            </div>
+            <h2 className="font-display font-bold text-2xl sm:text-3xl text-foreground tracking-tight">Parlay builder</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Mode presets tune how many legs we pull from the value board. You get payout and hit-rate estimates plus
+              correlation warnings. Stack legs from <span className="text-foreground font-medium">Best value</span> or use
+              the one-tap optimizers below.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 lg:w-[min(100%,22rem)] shrink-0 text-center">
+            <div className="rounded-xl border border-border/80 bg-background/70 px-3 py-2.5">
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Pool</p>
+              <p className="text-base font-bold tabular-nums text-foreground">{candidates.length}</p>
+            </div>
+            <div className="rounded-xl border border-border/80 bg-background/70 px-3 py-2.5">
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">On slip</p>
+              <p className="text-base font-bold tabular-nums text-foreground">{builderLegs.length}</p>
+            </div>
+            <div className="rounded-xl border border-border/80 bg-background/70 px-3 py-2.5 col-span-2 sm:col-span-1">
+              <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Mode</p>
+              <p className="text-xs font-bold capitalize text-foreground leading-tight pt-0.5">{parlayMode}</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {bookOddsLoading && !gamesLoading ? (
-        <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-2">
+        <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">
           <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" aria-hidden />
-          Sportsbook lines still loading — Auto build may improve after Odds API completes.
+          Sportsbook lines still loading — Auto build and payouts may improve after Odds API completes.
         </p>
       ) : null}
 
       {gamesLoading ? (
         <div className="grid md:grid-cols-2 gap-4">
           {[1, 2].map((i) => (
-            <div key={i} className="h-40 rounded-lg bg-muted/40 animate-pulse" />
+            <div key={i} className="h-44 rounded-xl bg-muted/40 animate-pulse" />
           ))}
         </div>
       ) : null}
 
       {!gamesLoading && candidates.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-10 max-w-lg mx-auto leading-relaxed">
-          No parlay candidates for this slate yet (needs games with usable lines). Try{" "}
-          <span className="text-foreground font-medium">Best value</span> after data loads, or use{" "}
-          <span className="text-foreground font-medium">Team picks</span> for straight ML edges.
-        </p>
+        <div className="rounded-xl border border-dashed border-border bg-muted/20 px-6 py-12 text-center space-y-2 max-w-xl mx-auto">
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            No parlay candidates for this slate yet — we need games with usable lines. Open{" "}
+            <span className="text-foreground font-medium">Best value</span> after data loads, or use{" "}
+            <span className="text-foreground font-medium">Team picks</span> for straight ML edges on the Edge Card slip.
+          </p>
+        </div>
       ) : null}
 
       {!gamesLoading && candidates.length > 0 ? (
         <>
-          <div className="rounded-lg border border-border bg-card/60 p-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2 justify-between">
-              <div>
-                <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">MODE</p>
-                <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 mt-1">
-                  {(["safe", "balanced", "aggressive"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setParlayMode(m)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-xs font-bold transition-colors capitalize",
-                        parlayMode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground"
-                      )}
-                    >
-                      {m}
-                    </button>
-                  ))}
+          <div className="grid lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-5 rounded-xl border border-border bg-card/70 p-4 sm:p-5 space-y-3 shadow-sm">
+              <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">BUILD MODE</p>
+              <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 w-full sm:w-auto">
+                {(["safe", "balanced", "aggressive"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setParlayMode(m)}
+                    className={cn(
+                      "flex-1 sm:flex-none px-3 py-2 rounded-full text-xs font-bold transition-colors capitalize",
+                      parlayMode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground leading-snug">{MODE_LABEL[parlayMode]}</p>
+            </div>
+            <div className="lg:col-span-7 rounded-xl border border-border bg-card/70 p-4 sm:p-5 shadow-sm">
+              <p className="text-[10px] font-semibold tracking-wider text-muted-foreground mb-3">LIVE ESTIMATES</p>
+              {builderMetrics ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="rounded-lg bg-muted/40 px-3 py-2 space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">Payout</p>
+                    <p className="text-lg font-bold tabular-nums text-foreground">{builderMetrics.projectedPayoutMultiplier.toFixed(2)}x</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-3 py-2 space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">Proj. hit</p>
+                    <p className="text-lg font-bold tabular-nums text-foreground">
+                      {(builderMetrics.projectedHitProbability * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-3 py-2 space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground">Confidence</p>
+                    <p className="text-lg font-bold capitalize text-foreground">{builderMetrics.cardConfidence}</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/40 px-3 py-2 space-y-0.5 col-span-2 sm:col-span-1">
+                    <p className="text-[10px] text-muted-foreground">Corr. / vol</p>
+                    <p className="text-sm font-semibold tabular-nums text-risk pt-1">
+                      {builderMetrics.correlationPenalty} · {builderMetrics.volatilityPenalty}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">{MODE_LABEL[parlayMode]}</p>
-              </div>
-              <div className="text-right text-xs space-y-0.5">
-                <p>
-                  <span className="text-muted-foreground">Legs </span>
-                  <span className="font-bold text-foreground">{builderLegs.length}</span>
-                  <span className="text-muted-foreground"> / 12</span>
-                </p>
-                {builderMetrics ? (
-                  <>
-                    <p className="tabular-nums">
-                      <span className="text-muted-foreground">Est. payout </span>
-                      <span className="font-semibold text-foreground">
-                        {builderMetrics.projectedPayoutMultiplier.toFixed(2)}x
-                      </span>
-                    </p>
-                    <p className="tabular-nums">
-                      <span className="text-muted-foreground">Proj. hit </span>
-                      <span className="font-semibold text-foreground">
-                        {(builderMetrics.projectedHitProbability * 100).toFixed(1)}%
-                      </span>
-                    </p>
-                    <p>
-                      <span className="text-muted-foreground">Card conf </span>
-                      <span className="font-semibold capitalize">{builderMetrics.cardConfidence}</span>
-                    </p>
-                    <p className="tabular-nums text-risk">
-                      Corr. {builderMetrics.correlationPenalty} · Vol {builderMetrics.volatilityPenalty}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">Add legs for estimates</p>
-                )}
-              </div>
+              ) : (
+                <p className="text-sm text-muted-foreground py-4 text-center sm:text-left">Add legs to see combined price and hit rate.</p>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="default"
-              size="sm"
-              className="gap-1 touch-manipulation"
-              disabled={actionsDisabled}
-              onClick={() => {
-                autoBuildFromCandidates(candidates);
-                toast.success("Auto-built from value board");
-              }}
-            >
-              <Zap className="w-3.5 h-3.5" />
-              Auto build
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              className="gap-1 touch-manipulation"
-              disabled={actionsDisabled}
-              onClick={() => {
-                rebalance(candidates);
-                toast.success("Rebalanced");
-              }}
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              Rebalance
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="touch-manipulation"
-              disabled={actionsDisabled}
-              onClick={() => {
-                saferSwap(candidates);
-                toast.success("Applied safer mix");
-              }}
-            >
-              Safer swap
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="touch-manipulation"
-              disabled={actionsDisabled}
-              onClick={() => {
-                higherPayoutSwap(candidates);
-                toast.success("Applied higher payout mix");
-              }}
-            >
-              <Wallet className="w-3.5 h-3.5" />
-              Higher payout
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1 touch-manipulation" onClick={() => setTripleOpen((v) => !v)}>
-              <Shuffle className="w-3.5 h-3.5" />
-              {tripleOpen ? "Hide" : "Show"} triple card
-            </Button>
-            <Button variant="ghost" size="sm" className="touch-manipulation" onClick={clearValueBuilder} disabled={!builderLegs.length}>
-              <Trash2 className="w-3.5 h-3.5" />
-              Clear
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1 touch-manipulation" onClick={copyShare} disabled={!builderLegs.length}>
-              <Copy className="w-3.5 h-3.5" />
-              Copy summary
-            </Button>
-            <Button variant="secondary" size="sm" className="touch-manipulation" onClick={saveSnapshot}>
-              Save to history
-            </Button>
+          <div className="rounded-xl border border-border/80 bg-muted/20 p-3 sm:p-4 space-y-3">
+            <p className="text-[10px] font-semibold tracking-wider text-muted-foreground px-0.5">ACTIONS</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                className="gap-1 touch-manipulation"
+                disabled={actionsDisabled}
+                onClick={() => {
+                  autoBuildFromCandidates(candidates);
+                  toast.success("Auto-built from value board");
+                }}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Auto build
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="gap-1 touch-manipulation"
+                disabled={actionsDisabled}
+                onClick={() => {
+                  rebalance(candidates);
+                  toast.success("Rebalanced");
+                }}
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Rebalance
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="touch-manipulation"
+                disabled={actionsDisabled}
+                onClick={() => {
+                  saferSwap(candidates);
+                  toast.success("Applied safer mix");
+                }}
+              >
+                Safer swap
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="touch-manipulation gap-1"
+                disabled={actionsDisabled}
+                onClick={() => {
+                  higherPayoutSwap(candidates);
+                  toast.success("Applied higher payout mix");
+                }}
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                Higher payout
+              </Button>
+              <Button variant="outline" size="sm" className="gap-1 touch-manipulation" onClick={() => setTripleOpen((v) => !v)}>
+                <Shuffle className="w-3.5 h-3.5" />
+                {tripleOpen ? "Hide" : "Show"} triple card
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1 border-t border-border/60">
+              <Button variant="ghost" size="sm" className="touch-manipulation gap-1" onClick={clearValueBuilder} disabled={!builderLegs.length}>
+                <Trash2 className="w-3.5 h-3.5" />
+                Clear legs
+              </Button>
+              <Button variant="outline" size="sm" className="gap-1 touch-manipulation" onClick={copyShare} disabled={!builderLegs.length}>
+                <Copy className="w-3.5 h-3.5" />
+                Copy summary
+              </Button>
+              <Button variant="secondary" size="sm" className="touch-manipulation" onClick={saveSnapshot} disabled={!builderLegs.length}>
+                Save to history
+              </Button>
+            </div>
           </div>
 
           {triple ? (
             <div className="grid md:grid-cols-3 gap-3 text-xs">
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5">
                 <p className="font-display font-bold text-foreground">Best value parlay</p>
                 <p className="text-muted-foreground">{triple.bestValue.legs.length} legs</p>
-                <p className="tabular-nums">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
-                <p className="tabular-nums">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
+                <p className="tabular-nums font-semibold">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
+                <p className="tabular-nums text-muted-foreground">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
               </div>
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1">
+              <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
                 <p className="font-display font-bold text-foreground">Safer alternative</p>
                 <p className="text-muted-foreground">{triple.safer.legs.length} legs</p>
-                <p className="tabular-nums">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
+                <p className="tabular-nums font-semibold">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
               </div>
-              <div className="rounded-md border border-border bg-muted/30 p-3 space-y-1">
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
                 <p className="font-display font-bold text-foreground">Higher payout</p>
                 <p className="text-muted-foreground">{triple.higherPayout.legs.length} legs</p>
-                <p className="tabular-nums">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
+                <p className="tabular-nums font-semibold">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
               </div>
             </div>
           ) : null}
 
           {builderMetrics && builderMetrics.warnings.length > 0 ? (
-            <ul className="text-[11px] text-amber-600 dark:text-amber-400 list-disc list-inside space-y-0.5">
+            <ul className="text-[11px] text-amber-700 dark:text-amber-400 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-2 space-y-1 list-disc list-inside">
               {builderMetrics.warnings.map((w) => (
                 <li key={w}>{w}</li>
               ))}
             </ul>
           ) : null}
 
-          <div className="space-y-2">
-            <h3 className="text-sm font-display font-bold text-foreground">Selected legs</h3>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 border-b border-border/60 pb-2">
+              <h3 className="text-sm font-display font-bold text-foreground">Selected legs</h3>
+              <span className="text-[10px] font-semibold tabular-nums text-muted-foreground px-2 py-0.5 rounded-full bg-muted/80">
+                {builderLegs.length} / 12
+              </span>
+            </div>
             {builderLegs.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Add picks from Best Value or tap Auto build above.</p>
+              <div className="rounded-xl border border-dashed border-border bg-muted/15 px-4 py-8 text-center">
+                <p className="text-sm text-muted-foreground">Add picks from Best value, or run Auto build / Rebalance above.</p>
+              </div>
             ) : (
               <ul className="space-y-2">
                 {builderLegs.map((l) => (
                   <li
                     key={l.id}
-                    className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-xs"
+                    className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/80 bg-card/80 px-4 py-3 text-xs shadow-sm"
                   >
-                    <div>
-                      <p className="font-semibold text-foreground">{l.selectionLabel}</p>
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          {leagueShort(l.sport)}
+                        </span>
+                        {l.pickType === "player_prop" ? (
+                          <span className="text-[10px] font-bold tracking-wide text-violet-600 dark:text-violet-400 bg-violet-500/10 px-2 py-0.5 rounded-full">
+                            PROP
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="font-semibold text-foreground text-sm">{l.selectionLabel}</p>
                       <p className="text-muted-foreground tabular-nums">
                         {l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds} · edge {(l.edge * 100).toFixed(1)}% ·{" "}
                         {l.confidence} · {l.riskBand} risk
                       </p>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => removeValueLeg(l.id)}>
+                    <Button variant="ghost" size="sm" className="h-8 shrink-0 text-destructive hover:text-destructive" onClick={() => removeValueLeg(l.id)}>
                       Remove
                     </Button>
                   </li>
@@ -307,12 +355,12 @@ export function ParlayBuilderSection({
           </div>
 
           {builderMetrics && builderLegs.length > 0 ? (
-            <div className="rounded-lg border border-dashed border-border bg-muted/20 p-4 text-xs space-y-1">
-              <p className="font-display font-bold text-foreground">Combined price</p>
+            <div className="rounded-xl border border-dashed border-primary/25 bg-primary/[0.04] p-4 sm:p-5 text-xs space-y-2">
+              <p className="font-display font-bold text-foreground text-sm">Combined price</p>
               <p className="tabular-nums text-muted-foreground">
                 American {builderMetrics.combinedAmericanOdds > 0 ? "+" : ""}
                 {builderMetrics.combinedAmericanOdds} · Parlay grade score{" "}
-                {builderMetrics.smartParlayScore.toFixed(2)}
+                <span className="font-semibold text-foreground">{builderMetrics.smartParlayScore.toFixed(2)}</span>
               </p>
             </div>
           ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
@@ -11,6 +11,7 @@ import {
   Layers,
   Plus,
   RefreshCw,
+  Scissors,
   Sparkles,
   Trash2,
   TrendingUp,
@@ -200,6 +201,7 @@ function EdgeCardPageInner() {
     removePick,
     replacePick,
     clearSlip,
+    trimSlipToAllowedLeagues,
     autoBuild,
     saveSlipToHistory,
     setHistoryOutcome,
@@ -330,12 +332,56 @@ function EdgeCardPageInner() {
 
   const runAuto = (size: EdgeCardSize) => {
     if (!ranked.length) {
-      toast.message("No picks match your filters");
+      toast.message(
+        "No ranked picks match your hub filters — widen leagues or confidence. Your slip was not changed."
+      );
       return;
     }
     autoBuild(ranked, size);
     setCardSize(size);
     toast.success(`Auto-built Edge Card ${size}`);
+  };
+
+  /** Slip is independent of hub filters; count legs whose league is hidden by current filter chips. */
+  const slipLegsOffHubFilter = useMemo(() => {
+    if (filters.leagues === "all") return 0;
+    const allowed = new Set(filters.leagues);
+    return slip.filter((s) => !allowed.has(s.league)).length;
+  }, [slip, filters.leagues]);
+
+  const hubLeaguesKey = useMemo(
+    () => (filters.leagues === "all" ? "all" : [...filters.leagues].sort().join(",")),
+    [filters.leagues]
+  );
+  const prevHubLeaguesKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prevHubLeaguesKeyRef.current === null) {
+      prevHubLeaguesKeyRef.current = hubLeaguesKey;
+      return;
+    }
+    if (prevHubLeaguesKeyRef.current === hubLeaguesKey) return;
+    prevHubLeaguesKeyRef.current = hubLeaguesKey;
+    if (filters.leagues === "all") return;
+    const removed = trimSlipToAllowedLeagues(filters.leagues);
+    if (removed > 0) {
+      toast.message(
+        `Removed ${removed} slip leg${removed === 1 ? "" : "s"} outside selected leagues — your slip now matches the filter.`
+      );
+    }
+  }, [hubLeaguesKey, filters.leagues, trimSlipToAllowedLeagues]);
+
+  const trimSlipToHubFilters = () => {
+    if (filters.leagues === "all") {
+      toast.message("All leagues are selected — nothing to trim.");
+      return;
+    }
+    const removed = trimSlipToAllowedLeagues(filters.leagues);
+    if (removed > 0) {
+      toast.success(`Trimmed ${removed} leg${removed === 1 ? "" : "s"} off your slip.`);
+    } else {
+      toast.message("Slip already matches selected leagues.");
+    }
   };
 
   const toggleLeague = (l: League) => {
@@ -526,6 +572,29 @@ function EdgeCardPageInner() {
 
           <div className="rounded-lg border border-border bg-card/40 p-4 space-y-4">
             <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">FILTERS</p>
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Filters apply to the ranked list and <span className="text-foreground font-medium">Auto 3 / 5 / 7 / 10</span>.
+              When you narrow <span className="text-foreground font-medium">league chips</span> below, legs on your slip that
+              don&apos;t match are removed automatically so the dock stays aligned with what you&apos;re browsing.
+            </p>
+            {slipLegsOffHubFilter > 0 ? (
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2.5">
+                <p className="text-[11px] text-amber-800 dark:text-amber-400/95 font-medium leading-snug">
+                  {slipLegsOffHubFilter} slip leg{slipLegsOffHubFilter === 1 ? "" : "s"} don&apos;t match the leagues selected
+                  above. Trim them now, or change filters — new narrowings will auto-remove off-league legs.
+                </p>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="shrink-0 gap-1.5 border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/15 text-amber-950 dark:text-amber-100"
+                  onClick={trimSlipToHubFilters}
+                >
+                  <Scissors className="w-3.5 h-3.5" />
+                  Trim slip to filters
+                </Button>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {LEAGUES.map((l) => (
                 <button
@@ -824,7 +893,11 @@ function EdgeCardPageInner() {
             </div>
           </div>
           {slip.length > 0 ? (
-            <ul className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+            <div className="space-y-1">
+              {slip.length >= 4 ? (
+                <p className="text-[10px] text-muted-foreground text-center sm:text-left">Scroll the list to see all picks</p>
+              ) : null}
+              <ul className="flex flex-col gap-2 max-h-[min(14rem,40vh)] sm:max-h-60 overflow-y-auto overscroll-contain pr-0.5">
               {slip.map((item) => {
                 if (isDraftEdgeSlipItem(item)) {
                   return (
@@ -886,16 +959,21 @@ function EdgeCardPageInner() {
                           · Conditions may have changed — review
                         </span>
                       ) : null}
-                      <span className="block text-muted-foreground mt-0.5 line-clamp-1">
+                      <span className="block text-muted-foreground mt-0.5 line-clamp-2 break-words">
                         Edge: {item.snapshot.keyEdge}
                       </span>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
-                      {rep && dataStale ? (
+                      {rep ? (
                         <Button
                           variant="outline"
                           size="sm"
                           className="h-7 text-[10px] px-2"
+                          title={
+                            dataStale
+                              ? "Replace with the next ranked pick (feed may have moved)"
+                              : "Replace with the next ranked pick"
+                          }
                           onClick={() => {
                             const nc = buildCandidate(rep.game, rep.side);
                             replacePick(item.id, candidateToSlipItem(nc));
@@ -915,7 +993,8 @@ function EdgeCardPageInner() {
                   </li>
                 );
               })}
-            </ul>
+              </ul>
+            </div>
           ) : (
             <p className="text-[11px] text-muted-foreground">Add picks from the hub or use Auto-build.</p>
           )}

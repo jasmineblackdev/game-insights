@@ -29,6 +29,9 @@ major_version = 17
 #     -H "x-odds-persist-secret: $ODDS_PERSIST_SECRET" \
 #     -H "Content-Type: application/json" \
 #     -d '{"sportKeys":["basketball_nba","americanfootball_nfl"]}'
+#
+# persist-live-betting: POST JSON { stages: [...] } with anon JWT — upserts live_betting_stages (service role).
+#   supabase functions deploy persist-live-betting
 
 [functions.odds-persist]
 verify_jwt = false
