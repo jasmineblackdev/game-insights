@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ import {
 import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type PredictionVersion } from "@/lib/predictionVersions";
 import { Switch } from "@/components/ui/switch";
 import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/mlbStarterConfirm";
+import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -32,7 +34,9 @@ interface GameDetailViewProps {
 }
 
 export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: GameDetailViewProps) {
+  const queryClient = useQueryClient();
   const edge = useEdgeCardOptional();
+  const warmEdgeCard = () => prefetchEdgeCardQueries(queryClient);
   const tw = game.threeWay;
   const favoredSide = getFavoredSide(game);
   const favored = game.winProbability.home >= game.winProbability.away ? "home" : "away";
@@ -272,6 +276,8 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
             <Link
               to="/edge"
               className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-primary hover:underline px-2 py-1.5"
+              onPointerEnter={warmEdgeCard}
+              onFocus={warmEdgeCard}
             >
               <Layers className="w-3.5 h-3.5" />
               Open Edge Card builder

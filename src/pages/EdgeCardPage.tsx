@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BarChart3,
+  Copy,
   History,
   Layers,
   Plus,
@@ -19,7 +20,7 @@ import {
 import { toast } from "sonner";
 import type { GamePrediction, League } from "@/data/mockGames";
 import { useEdgeCard } from "@/context/EdgeCardContext";
-import { ValueParlayProvider } from "@/context/ValueParlayContext";
+import { ValueParlayProvider, useValueParlay } from "@/context/ValueParlayContext";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
@@ -32,8 +33,11 @@ import { cn } from "@/lib/utils";
 import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
-import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
+import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
+import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
+import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import {
   type EdgeCandidate,
   type EdgeCardSize,
@@ -202,40 +206,72 @@ function EdgeCardPageInner() {
     slipFull,
   } = useEdgeCard();
 
-  const results = useQueries({
+  const {
+    builderLegs,
+    builderMetrics,
+    clearValueBuilder,
+    removeValueLeg,
+  } = useValueParlay();
+
+  const poll = 2 * 60 * 1000;
+  const ymd = easternYmd();
+
+  const coreResults = useQueries({
     queries: [
       {
-        queryKey: ["nba-espn-scoreboard", easternYmd()],
+        queryKey: ["nba-espn-scoreboard", ymd],
         queryFn: fetchNbaGamePredictions,
-        staleTime: 2 * 60 * 1000,
+        staleTime: poll,
+        refetchInterval: poll,
+        refetchIntervalInBackground: false,
         retry: 2,
       },
       {
-        queryKey: ["nfl-espn-scoreboard", easternYmd()],
+        queryKey: ["nfl-espn-scoreboard", ymd],
         queryFn: fetchNflGamePredictions,
-        staleTime: 2 * 60 * 1000,
+        staleTime: poll,
+        refetchInterval: poll,
+        refetchIntervalInBackground: false,
         retry: 2,
       },
       {
-        queryKey: ["mlb-espn-scoreboard", easternYmd()],
-        queryFn: fetchMlbGamePredictions,
-        staleTime: 2 * 60 * 1000,
-        retry: 2,
-      },
-      {
-        queryKey: ["soccer-espn-scoreboard", easternYmd()],
+        queryKey: ["soccer-espn-scoreboard", ymd],
         queryFn: fetchSoccerGamePredictions,
-        staleTime: 2 * 60 * 1000,
+        staleTime: poll,
+        refetchInterval: poll,
+        refetchIntervalInBackground: false,
         retry: 2,
       },
     ],
   });
 
+  const mlbBaseQuery = useQuery({
+    queryKey: ["mlb-espn-enriched", ymd],
+    queryFn: fetchMlbEnrichedGames,
+    staleTime: poll,
+    refetchInterval: poll,
+    refetchIntervalInBackground: false,
+    retry: 2,
+  });
+
+  const mlbModeledQuery = useQuery({
+    queryKey: ["mlb-modeled", mlbBaseQuery.dataUpdatedAt, 0],
+    queryFn: () =>
+      applyMlbPredictionModel(mergeMlbStarterConfirmations(mlbBaseQuery.data ?? [])),
+    enabled: mlbBaseQuery.isSuccess,
+    staleTime: Infinity,
+    retry: 2,
+  });
+
+  const mlbListPending =
+    mlbBaseQuery.isPending || (mlbBaseQuery.isSuccess && mlbModeledQuery.isPending);
+
   const allGames = useMemo(() => {
     const merged: GamePrediction[] = [];
-    for (const q of results) {
+    for (const q of coreResults) {
       if (q.data) merged.push(...q.data);
     }
+    if (mlbModeledQuery.data) merged.push(...mlbModeledQuery.data);
     return merged.filter(
       (g) =>
         g.status === "upcoming" &&
@@ -243,11 +279,12 @@ function EdgeCardPageInner() {
           g.gameDate === "tomorrow" ||
           (g.league === "soccer" && g.gameDate === "week"))
     );
-  }, [results]);
+  }, [coreResults, mlbModeledQuery.data]);
 
   useEffect(() => {
     if (!allGames.length) {
       setOddsMap(new Map());
+      setOddsLoading(false);
       return;
     }
     let cancelled = false;
@@ -264,6 +301,10 @@ function EdgeCardPageInner() {
     };
   }, [allGames]);
 
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [edgeTab]);
+
   const allGamesWithIntel = useMemo(
     () => enrichGamesWithBettingIntelligence(allGames, oddsMap),
     [allGames, oddsMap]
@@ -276,10 +317,15 @@ function EdgeCardPageInner() {
   const trending = useMemo(() => ranked.slice(0, 6), [ranked]);
 
   /** Full skeleton only while every feed is still pending — one slow sport no longer blocks the whole hub. */
-  const loading = results.every((q) => q.isPending);
-  const hasError = results.some((q) => q.isError);
+  const loading = coreResults.every((q) => q.isPending) && mlbListPending;
+  const hasError =
+    coreResults.some((q) => q.isError) || mlbBaseQuery.isError || mlbModeledQuery.isError;
+  const coreAnySettled = coreResults.some((q) => q.isSuccess || q.isError);
+  const coreAnyPending = coreResults.some((q) => q.isPending);
+  const mlbSettled =
+    mlbBaseQuery.isSuccess || mlbBaseQuery.isError || mlbModeledQuery.isSuccess || mlbModeledQuery.isError;
   const moreSportsLoading =
-    results.some((q) => q.isSuccess || q.isError) && results.some((q) => q.isPending);
+    (coreAnySettled || mlbSettled) && (coreAnyPending || mlbListPending);
 
   const runAuto = (size: EdgeCardSize) => {
     if (!ranked.length) {
@@ -329,6 +375,24 @@ function EdgeCardPageInner() {
   }, [slip]);
 
   const slipWarnings = useMemo(() => edgeSlipWarningLines(slip), [slip]);
+
+  const parlayShareText = useMemo(
+    () => (builderLegs.length ? formatBuilderParlayShare(builderLegs, builderMetrics) : ""),
+    [builderLegs, builderMetrics]
+  );
+
+  const copyParlayShare = async () => {
+    if (!parlayShareText) {
+      toast.message("Add legs from Best Value or Auto build on Parlay builder first");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(parlayShareText);
+      toast.success("Parlay summary copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  };
 
   const historyRecord = useMemo(() => {
     let w = 0;
@@ -413,10 +477,24 @@ function EdgeCardPageInner() {
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6 sm:space-y-8">
         {edgeTab === "value" ? (
-          <BestValuePicksSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+          <div className="min-h-[min(55vh,28rem)]">
+            <BestValuePicksSection
+              games={allGamesWithIntel}
+              oddsMap={oddsMap}
+              gamesLoading={loading}
+              bookOddsLoading={oddsLoading}
+            />
+          </div>
         ) : null}
         {edgeTab === "parlay" ? (
-          <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+          <div className="min-h-[min(55vh,28rem)]">
+            <ParlayBuilderSection
+              games={allGamesWithIntel}
+              oddsMap={oddsMap}
+              gamesLoading={loading}
+              bookOddsLoading={oddsLoading}
+            />
+          </div>
         ) : null}
 
         {edgeTab === "hub" ? (
@@ -688,6 +766,8 @@ function EdgeCardPageInner() {
 
       <div className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(0,0,0,0.12)] safe-pb">
         <div className="container max-w-6xl mx-auto py-3 space-y-3">
+          {edgeTab === "hub" ? (
+            <>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <p className="text-xs font-display font-bold text-foreground">
@@ -824,6 +904,103 @@ function EdgeCardPageInner() {
             </ul>
           ) : (
             <p className="text-[11px] text-muted-foreground">Add picks from the hub or use Auto-build.</p>
+          )}
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-display font-bold text-foreground">Parlay builder · draft legs</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    <span className="text-foreground font-semibold">{builderLegs.length}</span> / 12 legs
+                    {builderMetrics ? (
+                      <>
+                        {" · Est. payout "}
+                        <span className="text-foreground font-semibold tabular-nums">
+                          {builderMetrics.projectedPayoutMultiplier.toFixed(2)}x
+                        </span>
+                        {" · Proj. hit "}
+                        <span className="text-foreground font-semibold tabular-nums">
+                          {(builderMetrics.projectedHitProbability * 100).toFixed(1)}%
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                  {edgeTab === "value" ? (
+                    <p className="text-[10px] text-muted-foreground mt-1 max-w-md">
+                      Tap <span className="text-foreground font-medium">Add leg</span> on value cards — your slip shows
+                      here. Open Parlay builder to auto-build, rebalance, or copy a share summary.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {edgeTab === "value" ? (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="touch-manipulation min-h-10 sm:min-h-9 gap-1"
+                      onClick={() => setEdgeTab("parlay")}
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      Parlay builder
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="touch-manipulation min-h-10 sm:min-h-9"
+                    onClick={clearValueBuilder}
+                    disabled={!builderLegs.length}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Clear legs
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="touch-manipulation min-h-10 sm:min-h-9 gap-1"
+                    onClick={copyParlayShare}
+                    disabled={!builderLegs.length}
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy summary
+                  </Button>
+                </div>
+              </div>
+              {builderLegs.length > 0 ? (
+                <ul className="flex flex-col gap-1.5 max-h-40 overflow-y-auto">
+                  {builderLegs.map((l) => (
+                    <li
+                      key={l.id}
+                      className="flex flex-wrap items-start justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-[11px]"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground">{l.selectionLabel}</p>
+                        <p className="text-muted-foreground tabular-nums">
+                          {l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds} · edge {(l.edge * 100).toFixed(1)}%
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 shrink-0"
+                        onClick={() => removeValueLeg(l.id)}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  No legs yet — use Best Value (Add leg) or Parlay builder (Auto build).
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>

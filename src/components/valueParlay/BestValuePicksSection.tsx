@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, ChevronUp, Plus, TrendingUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Plus, RefreshCw, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import type { GamePrediction, League } from "@/data/mockGames";
 import { Button } from "@/components/ui/button";
@@ -153,11 +153,14 @@ function ValuePickCard({
 export function BestValuePicksSection({
   games,
   oddsMap,
-  loading,
+  gamesLoading,
+  bookOddsLoading = false,
 }: {
   games: GamePrediction[];
   oddsMap: Map<string, GameOddsBundle>;
-  loading: boolean;
+  gamesLoading: boolean;
+  /** The Odds API pass — do not block the whole page on this. */
+  bookOddsLoading?: boolean;
 }) {
   const { addValueLeg, isValueLegAdded, setParlayMode } = useValueParlay();
   const [pickKind, setPickKind] = useState<PickKind>("all");
@@ -287,12 +290,24 @@ export function BestValuePicksSection({
         </div>
       </div>
 
-      {loading ? (
+      {bookOddsLoading && !gamesLoading ? (
+        <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-2">
+          <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" aria-hidden />
+          Loading sportsbook lines — spreads/totals and some edges update when Odds API finishes.
+        </p>
+      ) : null}
+
+      {gamesLoading ? (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-52 rounded-lg bg-muted/40 animate-pulse" />
           ))}
         </div>
+      ) : candidates.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-10 max-w-lg mx-auto leading-relaxed">
+          No value legs for this slate yet. When games and lines are available, ranked edges appear here. Use{" "}
+          <span className="text-foreground font-medium">Team picks</span> for model-only leans anytime.
+        </p>
       ) : (
         <>
           {renderRow("Top 5 best value picks", top5)}

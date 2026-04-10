@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
@@ -21,6 +21,7 @@ import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
+import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -149,6 +150,7 @@ function leagueLabel(league: League): string {
 }
 
 const Index = () => {
+  const queryClient = useQueryClient();
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
@@ -299,6 +301,8 @@ const Index = () => {
     setSelectedGame(null);
   };
 
+  const warmEdgeCard = () => prefetchEdgeCardQueries(queryClient);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -317,6 +321,8 @@ const Index = () => {
                   to="/edge"
                   className="inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg border border-border bg-card text-primary touch-manipulation"
                   aria-label="Edge Card"
+                  onPointerEnter={warmEdgeCard}
+                  onFocus={warmEdgeCard}
                 >
                   <Layers className="w-4 h-4" />
                 </Link>
@@ -326,6 +332,8 @@ const Index = () => {
                 <Link
                   to="/edge"
                   className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 sm:py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors touch-manipulation"
+                  onPointerEnter={warmEdgeCard}
+                  onFocus={warmEdgeCard}
                 >
                   <Layers className="w-3.5 h-3.5 text-primary" />
                   Edge Card
