@@ -3,6 +3,12 @@
  * Optimizes for betting value (EV), not raw win probability.
  */
 import type { BettingIntelligenceMeta, GamePrediction } from "@/data/mockGames";
+import { buildLiveBettingIntelBundle } from "@/lib/liveBettingIntelligence";
+import {
+  loadPregameSnapshot,
+  maybeRecordFinalLiveBettingLearning,
+  persistPregameSnapshot,
+} from "@/lib/liveBettingPersistence";
 import {
   computePickFlags,
   getFavoredSide,
@@ -10,12 +16,14 @@ import {
   type EdgeSide,
 } from "@/lib/edgeCardScoring";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import {
-  americanFromImpliedProb,
-  americanToImpliedProb,
-  parseAmericanOddsString,
-} from "@/lib/valueParlay/oddsMath";
+import { americanFromImpliedProb, americanToImpliedProb } from "@/lib/valueParlay/oddsMath";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
+import {
+  americanOddsForPick,
+  pickAbbrevForSide,
+  primaryPickSide,
+  type PickSide,
+} from "@/lib/bettingPickUtils";
 
 /** Minimum model win probability for ideal parlay legs (0–1). */
 export const MIN_MODEL_PROB_FOR_IDEAL = 0.58;
@@ -31,7 +39,8 @@ export const MIN_EDGE_FOR_MINUS_350 = 0.07;
 /** Volatile underdog (plus money) needs stronger edge. */
 export const MIN_EDGE_VOLATILE_DOG = 0.08;
 
-export type PickSide = EdgeSide | "draw";
+export type { PickSide } from "@/lib/bettingPickUtils";
+export { americanOddsForPick, primaryPickSide } from "@/lib/bettingPickUtils";
 
 function volatilityNumeric(game: GamePrediction): number {
   const q = game._meta?.quality?.volatility?.volatility_score;
@@ -51,34 +60,6 @@ function modelProbabilityForPick(game: GamePrediction, side: PickSide): number {
   if (side === "draw" && game.threeWay) return game.threeWay.draw / 100;
   if (side === "home" || side === "away") return getWinProbForSide(game, side) / 100;
   return 0.5;
-}
-
-function americanForPick(game: GamePrediction, side: PickSide, bundle: GameOddsBundle | undefined): number | null {
-  if (side === "draw") {
-    const d = parseAmericanOddsString(game.lines?.drawMl ?? undefined);
-    if (d != null) return d;
-    const bd = bundle?.h2h?.drawAmerican;
-    if (bd != null) return bd;
-    return null;
-  }
-  if (bundle?.h2h) {
-    return side === "home" ? bundle.h2h.homeAmerican : bundle.h2h.awayAmerican;
-  }
-  const raw = side === "home" ? game.lines?.homeMl : game.lines?.awayMl;
-  return parseAmericanOddsString(raw ?? undefined);
-}
-
-function pickAbbrev(game: GamePrediction, side: PickSide): string {
-  if (side === "draw") return "Draw";
-  return side === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
-}
-
-/** Primary model lean for display: home, away, or draw when 1X2. */
-export function primaryPickSide(game: GamePrediction): PickSide {
-  if (!game.threeWay) return getFavoredSide(game);
-  const { home, away, draw } = game.threeWay;
-  if (draw >= home && draw >= away) return "draw";
-  return home >= away ? "home" : "away";
 }
 
 function betQualityFromSignals(args: {
@@ -134,7 +115,7 @@ export function computeBettingIntelligenceMeta(
   bundle: GameOddsBundle | undefined
 ): BettingIntelligenceMeta {
   const modelP = modelProbabilityForPick(game, side);
-  let american = americanForPick(game, side, bundle);
+  let american = americanOddsForPick(game, side, bundle);
   const bookKey = bundle?.h2h?.bookKey;
   if (american == null) {
     american = syntheticAmericanFromModel(modelP);
@@ -200,7 +181,7 @@ export function computeBettingIntelligenceMeta(
 
   return {
     pickSide: side,
-    pickAbbrev: pickAbbrev(game, side),
+    pickAbbrev: pickAbbrevForSide(game, side),
     americanOdds: american,
     modelProbability: modelP,
     impliedProbability: implied,
@@ -230,9 +211,13 @@ export function enrichGamesWithBettingIntelligence(
   return games.map((g) => {
     const bundle = oddsMap.get(g.id);
     const bettingIntel = bettingIntelForGame(g, bundle);
+    persistPregameSnapshot(g, bettingIntel);
+    const preSnap = loadPregameSnapshot(g.id);
+    const liveBetting = buildLiveBettingIntelBundle(g, bundle, preSnap, bettingIntel);
+    maybeRecordFinalLiveBettingLearning(g, liveBetting);
     return {
       ...g,
-      _meta: { ...g._meta, bettingIntel },
+      _meta: { ...g._meta, bettingIntel, liveBetting },
     };
   });
 }

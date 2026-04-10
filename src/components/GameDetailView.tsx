@@ -21,6 +21,7 @@ import {
   getFinalPredictionContext,
   finalPredictionAccuracyClass,
 } from "@/lib/liveGameState";
+import type { LiveBettingStageRow } from "@/data/mockGames";
 import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type PredictionVersion } from "@/lib/predictionVersions";
 import { Switch } from "@/components/ui/switch";
 import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/mlbStarterConfirm";
@@ -50,6 +51,10 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
   const upcomingBetTip = getUpcomingBetTip(game);
   const predictionVersions = buildPredictionVersions(game);
   const finalCtx = getFinalPredictionContext(game);
+  const liveBetting = game._meta?.liveBetting;
+  const liveBettingRows: LiveBettingStageRow[] = liveBetting
+    ? [liveBetting.pregame, ...liveBetting.checkpoints, ...(liveBetting.final ? [liveBetting.final] : [])]
+    : [];
 
   const [mlbStartersChecked, setMlbStartersChecked] = useState(() =>
     game.league === "mlb" ? isMlbStartersUserConfirmed(game.id) : false
@@ -479,6 +484,79 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
               );
             })}
           </div>
+
+          {liveBettingRows.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-border">
+              <h4 className="font-display font-bold text-xs text-foreground tracking-wide mb-2 flex items-center gap-2">
+                <DollarSign className="w-3.5 h-3.5 text-confidence-high" />
+                Value by stage (model vs book)
+              </h4>
+              {liveBetting?.pregameSnapshotMissing && game.status !== "upcoming" && (
+                <p className="text-[10px] text-muted-foreground mb-2">
+                  No frozen opening snapshot for this fixture — pregame row is a best-effort replay from the current fetch.
+                </p>
+              )}
+              <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-[10px] sm:text-xs border-collapse min-w-[520px]">
+                  <thead>
+                    <tr className="text-left text-muted-foreground border-b border-border">
+                      <th className="py-1.5 pr-2 font-semibold">Stage</th>
+                      <th className="py-1.5 pr-2 font-semibold">Pick</th>
+                      <th className="py-1.5 pr-2 font-semibold tabular-nums">Model</th>
+                      <th className="py-1.5 pr-2 font-semibold">Conf</th>
+                      <th className="py-1.5 pr-2 font-semibold tabular-nums">Odds</th>
+                      <th className="py-1.5 pr-2 font-semibold tabular-nums">Implied</th>
+                      <th className="py-1.5 pr-2 font-semibold tabular-nums">Edge</th>
+                      <th className="py-1.5 font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveBettingRows.map((row) => (
+                      <tr key={row.stageId} className="border-b border-border/60 align-top">
+                        <td className="py-2 pr-2 text-foreground font-medium">{row.stageLabel}</td>
+                        <td className="py-2 pr-2 tabular-nums">{row.pickAbbrev}</td>
+                        <td className="py-2 pr-2 tabular-nums">{(row.modelProbability * 100).toFixed(1)}%</td>
+                        <td className={`py-2 pr-2 font-bold ${confColor(row.confidence)}`}>{row.confidence}</td>
+                        <td className="py-2 pr-2 tabular-nums whitespace-nowrap">
+                          {row.americanOdds > 0 ? `+${row.americanOdds}` : row.americanOdds}
+                          {row.oddsSource === "estimated" && (
+                            <span className="text-muted-foreground font-normal ml-0.5" title="Estimated from line movement">
+                              *
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-2 tabular-nums">{(row.impliedProbability * 100).toFixed(1)}%</td>
+                        <td
+                          className={`py-2 pr-2 tabular-nums font-semibold ${
+                            row.edge >= 0.04 ? "text-confidence-high" : row.edge <= -0.02 ? "text-risk" : "text-muted-foreground"
+                          }`}
+                        >
+                          {(row.edge * 100).toFixed(1)}pp
+                        </td>
+                        <td className="py-2 text-foreground">{row.recommendedAction}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {liveBettingRows.some((r) => r.sportSignals.length > 0) && (
+                <div className="mt-3 space-y-2">
+                  {liveBettingRows
+                    .filter((r) => r.sportSignals.length > 0)
+                    .map((row) => (
+                      <div key={`sig-${row.stageId}`} className="text-[10px] text-muted-foreground space-y-0.5">
+                        <p className="font-semibold text-foreground/80">{row.stageLabel} — live inputs</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {row.sportSignals.map((s, i) => (
+                            <li key={i}>{s}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -193,7 +193,15 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSlip = useCallback(() => {
-    setSlipState((s) => ({ ...s, items: [] }));
+    setSlipState((s) => {
+      const next = { ...s, items: [] as EdgeSlipItem[] };
+      try {
+        localStorage.setItem(STORAGE_SLIP, JSON.stringify({ cardSize: next.cardSize, items: [] }));
+      } catch {
+        /* quota / private mode */
+      }
+      return next;
+    });
   }, []);
 
   const autoBuild = useCallback((candidates: EdgeCandidate[], size: EdgeCardSize) => {
@@ -212,8 +220,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       (i) => isTeamSlipItem(i) && i.snapshot.volatilityLabel === "high"
     ).length;
     const aggregateConfidence = slipAggregateConfidence(
-      slip.map((i) => ({ confidence: i.snapshot.confidence })),
-      { correlationScore, highVolatilityTeamPicks }
+      slip.map((i) => ({ confidence: i.snapshot.confidence }))
     );
     let riskLabel: EdgeHistoryEntry["riskLabel"] = "controlled";
     if (

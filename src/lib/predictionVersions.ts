@@ -21,7 +21,8 @@ export type PredictionPhase =
   | "late_news"   // Lineup / injury / line move triggered refresh (same fetch cycle)
   | "live_q1"     // NBA / NFL: after Q1 complete
   | "live_f5"     // MLB: after 5 innings complete
-  | "live_15min"  // Soccer: 15'–30' pattern read
+  | "live_15min"  // Soccer: ≥30′ pattern read (pre-halftime)
+  | "live_halftime" // Soccer: halftime checkpoint
   | "final";
 
 export type TriggerType =
@@ -30,6 +31,7 @@ export type TriggerType =
   | "end_q1_signal"
   | "end_f5_signal"
   | "early_pattern_signal"
+  | "halftime_signal"
   | "final_result";
 
 export interface LiveStateSnapshot {
@@ -132,9 +134,9 @@ export function buildPregameVersion(game: GamePrediction): PredictionVersion {
 /**
  * Returns true when the sport-specific live signal conditions are satisfied.
  *
- *  NBA/NFL  — period ≥ 2 (Q1 complete) AND |scoreDiff| ≤ 8
- *  MLB      — period ≥ 5 (5 innings complete)
- *  Soccer   — 15' ≤ minute ≤ 30, no halftime
+ *  NBA/NFL  — period ≥ 2 (Q1 complete), not at halftime
+ *  MLB      — period ≥ 5 (through 5th inning)
+ *  Soccer   — minute ≥ 30 (pattern) OR halftime
  */
 export function isLiveTriggerMet(game: GamePrediction): boolean {
   if (game.status !== "live") return false;
@@ -145,17 +147,16 @@ export function isLiveTriggerMet(game: GamePrediction): boolean {
   const dataAgeMs = Date.now() - new Date(game.lastUpdated).getTime();
   if (dataAgeMs > 90_000) return false;
 
-  const { periodNum, homeScore, awayScore, isHalftime } = ls;
-  const diff = Math.abs(homeScore - awayScore);
+  const { periodNum, isHalftime } = ls;
 
   switch (game.league) {
     case "nba":
     case "nfl":
-      return periodNum >= 2 && !isHalftime && diff <= 8;
+      return periodNum >= 2 && !isHalftime;
     case "mlb":
       return periodNum >= 5;
     case "soccer":
-      return !isHalftime && periodNum >= 15 && periodNum <= 30;
+      return isHalftime === true || (!isHalftime && periodNum >= 30);
     default:
       return false;
   }
@@ -173,7 +174,11 @@ export function isLiveTriggerMet(game: GamePrediction): boolean {
  *   MLB  — 1 run lead after F5 ≈ +5pp
  *   Soccer — 1 goal lead at 20' ≈ +8pp
  */
-function liveAdjustedHomeProb(game: GamePrediction, pregameHomeProb: number): number {
+/**
+ * Score-based live adjustment to home win % (integer 0–100).
+ * @param pregameHomeProb — use frozen pregame home % when available (live betting / learning).
+ */
+export function liveAdjustedHomeProb(game: GamePrediction, pregameHomeProb: number): number {
   const ls = game._meta?.liveState;
   if (!ls) return pregameHomeProb;
 
@@ -188,24 +193,30 @@ function liveAdjustedHomeProb(game: GamePrediction, pregameHomeProb: number): nu
   return clamp(Math.round(pregameHomeProb + adjustment), 5, 95);
 }
 
+/**
+ * Home win probability (integer 0–100) after live score + sport-specific blend (MLB pitcher).
+ */
+export function computeLiveHomeWinPercent(game: GamePrediction, pregameHomeProb: number): number {
+  let liveHomeProb = liveAdjustedHomeProb(game, pregameHomeProb);
+
+  if (game.league === "mlb") {
+    const pitcherScore = game.mlb?.modelOutput?._debug?.pitcherScore ?? 0;
+    const pitcherAdj = clamp(Math.round(pitcherScore * 3), -3, 3);
+    const scoreDelta = liveHomeProb - pregameHomeProb;
+    liveHomeProb = clamp(
+      Math.round(pregameHomeProb + scoreDelta * 0.70 + pitcherAdj * 0.30),
+      5, 95
+    );
+  }
+  return liveHomeProb;
+}
+
 /** Build the live prediction version. Returns null if trigger not met. */
 export function buildLiveVersion(game: GamePrediction): PredictionVersion | null {
   if (!isLiveTriggerMet(game)) return null;
   const ls = game._meta!.liveState!;
 
-  let liveHomeProb = liveAdjustedHomeProb(game, game.winProbability.home);
-
-  // MLB F5: starter is usually still pitching — blend in the pregame pitcher quality lean.
-  // Weight: 70% score-based + 30% pitcher ERA quality (capped at ±3pp).
-  if (game.league === "mlb") {
-    const pitcherScore = game.mlb?.modelOutput?._debug?.pitcherScore ?? 0;
-    const pitcherAdj = clamp(Math.round(pitcherScore * 3), -3, 3);
-    const scoreDelta = liveHomeProb - game.winProbability.home;
-    liveHomeProb = clamp(
-      Math.round(game.winProbability.home + scoreDelta * 0.70 + pitcherAdj * 0.30),
-      5, 95
-    );
-  }
+  const liveHomeProb = computeLiveHomeWinPercent(game, game.winProbability.home);
   const liveAwayProb = 100 - liveHomeProb;
   const pickedHome = liveHomeProb >= liveAwayProb;
   const predictedSide = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
@@ -213,12 +224,18 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
 
   const phase: PredictionPhase =
     game.league === "mlb" ? "live_f5"
-    : game.league === "soccer" ? "live_15min"
+    : game.league === "soccer"
+      ? ls.isHalftime
+        ? "live_halftime"
+        : "live_15min"
     : "live_q1";
 
   const triggerType: TriggerType =
     game.league === "mlb" ? "end_f5_signal"
-    : game.league === "soccer" ? "early_pattern_signal"
+    : game.league === "soccer"
+      ? ls.isHalftime
+        ? "halftime_signal"
+        : "early_pattern_signal"
     : "end_q1_signal";
 
   // Sport-specific live reasons
@@ -266,10 +283,12 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
       reasons.push("F5 window: WHIP, walks, and velocity trend are now readable for both starters.");
     }
     reasons.push("Bullpen bridge begins — leverage situations will refine late-inning edge.");
+  } else if (ls.isHalftime) {
+    reasons.push(`Halftime — ${scoreStr}. xG trend, possession, and card state from the first half anchor the live read.`);
+    reasons.push("Draw risk and tactical subs are now the main swing factors for the second half.");
   } else {
-    reasons.push(`${periodLabel} — ${scoreStr}. Opening shape and press intensity visible.`);
-    reasons.push("No red cards — full-strength match; early possession pattern is reliable signal.");
-    reasons.push("Pre-halftime window: highest accuracy before tactical substitution disruption.");
+    reasons.push(`${periodLabel} — ${scoreStr}. ≥30′ pattern checkpoint: press and chance quality are readable before the break.`);
+    reasons.push("Possession tilt and live xG-style lean (proxy from score state) inform the checkpoint update.");
   }
 
   return {
@@ -340,7 +359,8 @@ export function phaseLabel(phase: PredictionPhase): string {
     case "pregame":   return "Pregame Edge";
     case "live_q1":   return "Live Edge · Q1 Signal";
     case "live_f5":   return "Live Edge · F5 Signal";
-    case "live_15min":return "Live Edge · 15′ Signal";
+    case "live_15min":return "Live Edge · 30′ Pattern";
+    case "live_halftime": return "Live Edge · Halftime";
     case "final":     return "Final Result";
   }
 }

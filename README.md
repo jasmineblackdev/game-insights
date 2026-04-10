@@ -11,7 +11,7 @@ Target **multi-sport stack** (SportsDataIO → Supabase → clients, with phased
 
 **Current web MVP** pulls **ESPN** scoreboards (and optional **football-data.org** / **The Odds API**). For production, deploy the **`espn-proxy`** Supabase Edge Function and set **`VITE_ENABLE_ESPN_PROXY=1`** so clients hit a cached server path instead of ESPN directly (see `.env.example`).
 
-Heavy routes (**Edge Card**, **Player Edge detail**) are **lazy-loaded** to keep the initial bundle smaller; React Query uses bounded retries and scoreboard fetches use **timeouts** for flaky networks.
+**Edge Card** and **Player Edge** ship in the main bundle so hard refresh on `/edge` and `/player-edge/...` always loads reliably on static hosts. React Query uses bounded retries; scoreboard fetches use **timeouts** for flaky networks.
 
 ## Scripts
 

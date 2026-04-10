@@ -260,6 +260,45 @@ export interface BettingIntelligenceMeta {
   filterNotes: string[];
 }
 
+/** Live / pregame value stages — see `liveBettingIntelligence.ts`. */
+export type LiveRecommendedAction =
+  | "Bet Now"
+  | "Wait"
+  | "Pass"
+  | "Value Gone"
+  | "Live Edge Active";
+
+export interface LiveBettingStageRow {
+  stageId: string;
+  stageLabel: string;
+  pickAbbrev: string;
+  pickSide: "home" | "away" | "draw";
+  /** Model win probability for the pick (0–1). */
+  modelProbability: number;
+  confidence: "HIGH" | "MED" | "LOW";
+  americanOdds: number;
+  impliedProbability: number;
+  edge: number;
+  recommendedAction: LiveRecommendedAction;
+  /** Sport-specific live inputs (heuristic until vendor feeds). */
+  sportSignals: string[];
+  liveStateSnapshot?: { period: number; scoreHome: number; scoreAway: number };
+  capturedAt: string;
+  oddsSource?: "sportsbook" | "estimated";
+}
+
+export interface LiveBettingIntelMeta {
+  schemaVersion: 1;
+  /** Frozen opening read when available (localStorage); else current book row. */
+  pregame: LiveBettingStageRow;
+  /** One row per active checkpoint (refreshed each fetch while in-window). */
+  checkpoints: LiveBettingStageRow[];
+  /** Outcome vs pregame pick when final. */
+  final?: LiveBettingStageRow;
+  /** First view was after tip — pregame row is a best-effort replay. */
+  pregameSnapshotMissing?: boolean;
+}
+
 export interface GamePrediction {
   id: string;
   league: League;
@@ -334,6 +373,8 @@ export interface GamePrediction {
     quality?: PredictionQualityMeta;
     /** Model vs book value for primary pick — see `bettingIntelligence.ts`. */
     bettingIntel?: BettingIntelligenceMeta;
+    /** Pregame vs live checkpoint vs final value — see `liveBettingIntelligence.ts`. */
+    liveBetting?: LiveBettingIntelMeta;
   };
 }
 

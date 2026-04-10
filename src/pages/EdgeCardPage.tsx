@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
@@ -302,8 +302,8 @@ function EdgeCardPageInner() {
     };
   }, [allGames]);
 
-  useLayoutEffect(() => {
-    window.scrollTo(0, 0);
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [edgeTab]);
 
   const allGamesWithIntel = useMemo(
