@@ -2,7 +2,17 @@ import type { ConfidenceLevel, GamePrediction, League, VolatilityLabel } from "@
 import type { DraftEdgeCard, DraftEdgeCardKind } from "@/data/draftEdgeTypes";
 
 export type EdgeSide = "home" | "away";
-export type EdgeCardSize = 3 | 4 | 6 | 10;
+/** Common leg counts (3 / 5 / 7 / 10). Legacy 4→5 and 6→7 on read from storage. */
+export type EdgeCardSize = 3 | 5 | 7 | 10;
+
+export const EDGE_CARD_SIZE_OPTIONS = [3, 5, 7, 10] as const satisfies readonly EdgeCardSize[];
+
+export function normalizeEdgeCardSizeFromStorage(raw: unknown): EdgeCardSize {
+  if (raw === 3 || raw === 5 || raw === 7 || raw === 10) return raw;
+  if (raw === 4) return 5;
+  if (raw === 6) return 7;
+  return 3;
+}
 
 export interface EdgeHubFilters {
   leagues: League[] | "all";

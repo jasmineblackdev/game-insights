@@ -38,6 +38,7 @@ import {
   type EdgeCandidate,
   type EdgeCardSize,
   type EdgeSlipOutcome,
+  EDGE_CARD_SIZE_OPTIONS,
   buildCandidate,
   candidateToSlipItem,
   edgeSlipWarningLines,
@@ -207,21 +208,25 @@ function EdgeCardPageInner() {
         queryKey: ["nba-espn-scoreboard", easternYmd()],
         queryFn: fetchNbaGamePredictions,
         staleTime: 2 * 60 * 1000,
+        retry: 2,
       },
       {
         queryKey: ["nfl-espn-scoreboard", easternYmd()],
         queryFn: fetchNflGamePredictions,
         staleTime: 2 * 60 * 1000,
+        retry: 2,
       },
       {
         queryKey: ["mlb-espn-scoreboard", easternYmd()],
         queryFn: fetchMlbGamePredictions,
         staleTime: 2 * 60 * 1000,
+        retry: 2,
       },
       {
         queryKey: ["soccer-espn-scoreboard", easternYmd()],
         queryFn: fetchSoccerGamePredictions,
         staleTime: 2 * 60 * 1000,
+        retry: 2,
       },
     ],
   });
@@ -270,8 +275,11 @@ function EdgeCardPageInner() {
   const byLeague = useMemo(() => groupCandidatesByLeague(ranked), [ranked]);
   const trending = useMemo(() => ranked.slice(0, 6), [ranked]);
 
-  const loading = results.some((q) => q.isPending);
+  /** Full skeleton only while every feed is still pending — one slow sport no longer blocks the whole hub. */
+  const loading = results.every((q) => q.isPending);
   const hasError = results.some((q) => q.isError);
+  const moreSportsLoading =
+    results.some((q) => q.isSuccess || q.isError) && results.some((q) => q.isPending);
 
   const runAuto = (size: EdgeCardSize) => {
     if (!ranked.length) {
@@ -361,7 +369,7 @@ function EdgeCardPageInner() {
           <div className="flex items-center gap-2 shrink-0 overflow-x-auto max-w-full pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0 [scrollbar-width:thin]">
             <UnitSizeCalculator variant="compact" className="h-10 w-10 sm:h-9 sm:w-9 shrink-0 touch-manipulation" />
             <div className="inline-flex items-center gap-1 rounded-full bg-muted p-0.5 shrink-0">
-              {([3, 4, 6, 10] as const).map((n) => (
+              {EDGE_CARD_SIZE_OPTIONS.map((n) => (
                 <button
                   key={n}
                   type="button"
@@ -426,22 +434,12 @@ function EdgeCardPageInner() {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => runAuto(3)} className="gap-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Auto Edge 3
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => runAuto(4)} className="gap-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Auto 4
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => runAuto(6)} className="gap-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Auto 6
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => runAuto(10)} className="gap-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                Auto 10
-              </Button>
+              {EDGE_CARD_SIZE_OPTIONS.map((n) => (
+                <Button key={n} variant="outline" size="sm" onClick={() => runAuto(n)} className="gap-1">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Auto {n}
+                </Button>
+              ))}
             </div>
           </div>
 
@@ -515,6 +513,13 @@ function EdgeCardPageInner() {
             </div>
           </div>
         </section>
+
+        {moreSportsLoading ? (
+          <p className="text-[11px] text-muted-foreground flex items-center gap-2">
+            <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" aria-hidden />
+            Still loading some sports — picks may update as feeds finish.
+          </p>
+        ) : null}
 
         {loading ? (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">

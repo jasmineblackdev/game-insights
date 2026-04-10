@@ -25,6 +25,7 @@ import {
   defaultEdgeHubFilters,
   draftEdgeToSlipItem,
   isTeamSlipItem,
+  normalizeEdgeCardSizeFromStorage,
   normalizeSlipItem,
   playerPropToSlipItem,
   slipAggregateConfidence,
@@ -71,9 +72,8 @@ function loadSlip(): { cardSize: EdgeCardSize; items: EdgeSlipItem[] } {
   try {
     const raw = localStorage.getItem(STORAGE_SLIP);
     if (!raw) return { cardSize: 3, items: [] };
-    const p = JSON.parse(raw) as { cardSize?: EdgeCardSize; items?: unknown[] };
-    const size =
-      p.cardSize === 4 || p.cardSize === 6 || p.cardSize === 10 ? p.cardSize : 3;
+    const p = JSON.parse(raw) as { cardSize?: unknown; items?: unknown[] };
+    const size = normalizeEdgeCardSizeFromStorage(p.cardSize);
     return { cardSize: size, items: parseSlipItems(p.items) };
   } catch {
     return { cardSize: 3, items: [] };
