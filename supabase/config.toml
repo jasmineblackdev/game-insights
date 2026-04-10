@@ -32,6 +32,9 @@ major_version = 17
 #
 # persist-live-betting: POST JSON { stages: [...] } with anon JWT — upserts live_betting_stages (service role).
 #   supabase functions deploy persist-live-betting
+#
+# mlb-starter-confirmation: GET list / POST { game_id, confirmed } — user access token; backs MLB detail toggle sync.
+#   supabase functions deploy mlb-starter-confirmation
 
 [functions.odds-persist]
 verify_jwt = false
