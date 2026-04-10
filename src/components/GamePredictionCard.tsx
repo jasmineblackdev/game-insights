@@ -71,16 +71,6 @@ export function GamePredictionCard({ game, index, onSelect, livePickOverlay = nu
       onClick={() => onSelect(game)}
       className="card-shine relative bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
     >
-      {livePickOverlay?.kind === "ranked" ? (
-        <div
-          className="absolute top-2 right-2 z-10 pointer-events-none"
-          aria-label={`Live pick ${livePickOverlay.rank}`}
-        >
-          <span className="inline-flex items-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-black tracking-wide text-primary-foreground shadow-sm">
-            Pick {livePickOverlay.rank}
-          </span>
-        </div>
-      ) : null}
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
         <div className="flex flex-col gap-0.5 min-w-0">
@@ -139,13 +129,21 @@ export function GamePredictionCard({ game, index, onSelect, livePickOverlay = nu
       </div>
 
       {livePickOverlay?.kind === "ranked" ? (
-        <div className="mx-4 mb-2 rounded-md border border-emerald-500/25 bg-emerald-500/[0.07] px-2.5 py-1.5 space-y-0.5">
+        <div
+          className="mx-4 mb-2 rounded-md border border-emerald-500/25 bg-emerald-500/[0.07] px-2.5 py-2 space-y-1"
+          aria-label={`Live pick ${livePickOverlay.rank}`}
+        >
+          <p className="text-[11px] font-black tracking-wide text-foreground leading-tight">Pick {livePickOverlay.rank}</p>
           <p className="text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 leading-tight">
             {livePickOverlay.badgeLine}
           </p>
-          <p className="text-[10px] text-muted-foreground tabular-nums leading-tight">
-            Conf {livePickOverlay.liveConfidencePct}% · Edge {livePickOverlay.edgePct >= 0 ? "+" : ""}
+          <p className="text-[11px] font-semibold tabular-nums text-foreground leading-tight">
+            Edge {livePickOverlay.edgePct >= 0 ? "+" : ""}
             {livePickOverlay.edgePct}%
+          </p>
+          <p className="text-[10px] font-semibold text-muted-foreground leading-tight">
+            Confidence <span className="text-foreground">{livePickOverlay.modelConfidenceLabel}</span>
+            <span className="text-muted-foreground font-normal"> · Live model {livePickOverlay.liveConfidencePct}%</span>
           </p>
           {livePickOverlay.recommendedAction ? (
             <p className="text-[10px] font-semibold text-foreground leading-tight">{livePickOverlay.recommendedAction}</p>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
 import { fetchDraftPicks } from "@/data/draftPicks";
@@ -10,7 +10,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Layers, TrendingUp, Tv2, User, Zap } from "lucide-react";
+import { ClipboardList, Layers, Sparkles, TrendingUp, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -25,6 +25,12 @@ import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
 import { flushLiveBettingStagesToSupabase } from "@/lib/liveBettingSupabaseSync";
 import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
 import { buildLivePickOverlays, type LivePickOverlay } from "@/lib/livePickRanking";
+import { LiveEdgeNotificationSettings } from "@/components/LiveEdgeNotificationSettings";
+import { getFinalPredictionContext } from "@/lib/liveGameState";
+import {
+  recordCorrelationFailurePattern,
+  recordPredictionOutcome,
+} from "@/lib/predictionLearningStorage";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -156,6 +162,7 @@ function leagueLabel(league: League): string {
 
 const Index = () => {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
@@ -231,6 +238,33 @@ const Index = () => {
   const intelSyncRef = useRef(leagueGamesWithIntel);
   intelSyncRef.current = leagueGamesWithIntel;
 
+  const gradedFinalsRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const g of leagueGamesWithIntel) {
+      if (g.status !== "final") continue;
+      if (gradedFinalsRef.current.has(g.id)) continue;
+      const ctx = getFinalPredictionContext(g);
+      if (!ctx) {
+        gradedFinalsRef.current.add(g.id);
+        continue;
+      }
+      if (ctx.outcome === "push") {
+        gradedFinalsRef.current.add(g.id);
+        continue;
+      }
+      gradedFinalsRef.current.add(g.id);
+      const hit = ctx.outcome === "hit";
+      recordPredictionOutcome({
+        league: g.league,
+        confidence: g.confidence,
+        pickType: "team_moneyline",
+        hit,
+        errorTags: inferMissTagsForLearning(g, hit),
+      });
+      if (!hit) recordCorrelationFailurePattern([g.id, ctx.pickedSide]);
+    }
+  }, [leagueGamesWithIntel]);
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     const t0 = setTimeout(() => void flushLiveBettingStagesToSupabase(intelSyncRef.current), 12_000);
@@ -280,6 +314,71 @@ const Index = () => {
     return buildLivePickOverlays(filteredGames);
   }, [viewMode, filteredGames]);
 
+  const rankedLivePickCount = useMemo(() => {
+    if (viewMode !== "games") return 0;
+    let n = 0;
+    for (const g of filteredGames) {
+      const o = livePickOverlays.get(g.id);
+      if (o?.kind === "ranked") n++;
+    }
+    return n;
+  }, [viewMode, filteredGames, livePickOverlays]);
+
+  useEffect(() => {
+    if (viewMode !== "games") return;
+    const gid = searchParams.get("game");
+    const lp = searchParams.get("livePicks");
+
+    if (gid) {
+      const pool = [
+        ...(nbaQuery.data ?? []),
+        ...(nflQuery.data ?? []),
+        ...(mlbModeledQuery.data ?? []),
+        ...(soccerQuery.data ?? []),
+      ];
+      const raw = pool.find((g) => g.id === gid);
+      if (raw && league !== raw.league) {
+        setLeague(raw.league);
+        return;
+      }
+      const g = leagueGamesWithIntel.find((x) => x.id === gid);
+      if (g) {
+        setSelectedGame(g);
+        const next = new URLSearchParams(searchParams);
+        next.delete("game");
+        next.delete("livePicks");
+        setSearchParams(next, { replace: true });
+        return;
+      }
+      if (!raw) {
+        const next = new URLSearchParams(searchParams);
+        next.delete("game");
+        next.delete("livePicks");
+        setSearchParams(next, { replace: true });
+      }
+      return;
+    }
+
+    if (lp === "1") {
+      requestAnimationFrame(() => {
+        document.getElementById("game-predictions-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      const next = new URLSearchParams(searchParams);
+      next.delete("livePicks");
+      setSearchParams(next, { replace: true });
+    }
+  }, [
+    viewMode,
+    searchParams,
+    setSearchParams,
+    leagueGamesWithIntel,
+    nbaQuery.data,
+    nflQuery.data,
+    mlbModeledQuery.data,
+    soccerQuery.data,
+    league,
+  ]);
+
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
   const draftPicksQuery = useQuery({
@@ -322,6 +421,7 @@ const Index = () => {
             <div className="flex items-center gap-2 shrink-0">
               <div className="sm:hidden flex items-center gap-1.5">
                 <UnitSizeCalculator variant="compact" className="h-10 w-10 shrink-0 touch-manipulation" />
+                <LiveEdgeNotificationSettings className="h-10 w-10" />
                 <Link
                   to="/edge"
                   className="inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg border border-border bg-card text-primary touch-manipulation"
@@ -334,6 +434,7 @@ const Index = () => {
               </div>
               <div className="hidden sm:flex items-center gap-2">
                 <UnitSizeCalculator variant="compact" className="h-9 w-9" />
+                <LiveEdgeNotificationSettings className="h-9 w-9" />
                 <Link
                   to="/edge"
                   className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 sm:py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors touch-manipulation"
@@ -492,6 +593,31 @@ const Index = () => {
                     </>
                   )}
                 </motion.div>
+
+                {viewMode === "games" && rankedLivePickCount > 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.25 }}
+                    className="mt-4 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.06] px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                  >
+                    <p className="text-sm text-foreground leading-snug">
+                      <span className="font-bold">{rankedLivePickCount} ranked live pick</span>
+                      {rankedLivePickCount === 1 ? "" : "s"} ready — checkpoint confirmed. Bet from the cards below or open
+                      the optimizer.
+                    </p>
+                    <Link
+                      to="/edge"
+                      state={{ focusParlay: true }}
+                      className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-600/35 bg-emerald-600/10 px-3 py-2 text-xs font-bold tracking-wide text-emerald-800 dark:text-emerald-300 hover:bg-emerald-600/15 transition-colors touch-manipulation"
+                      onPointerEnter={warmEdgeCard}
+                      onFocus={warmEdgeCard}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" aria-hidden />
+                      Optimize picks
+                    </Link>
+                  </motion.div>
+                ) : null}
               </div>
 
               {/* View mode toggle */}
@@ -605,7 +731,7 @@ const Index = () => {
                   </p>
                 </div>
               ) : filteredGames.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div id="game-predictions-grid" className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {filteredGames.map((game, i) => (
                     <GamePredictionCard
                       key={game.id}

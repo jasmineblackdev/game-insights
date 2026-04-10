@@ -6,7 +6,9 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EdgeCardProvider } from "@/context/EdgeCardContext";
+import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { useLiveEdgeNotifications } from "@/hooks/useLiveEdgeNotifications";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { queryClient } from "@/lib/queryClient.ts";
 import { isSupabaseConfigured } from "@/lib/supabase";
@@ -35,6 +37,11 @@ function MlbStarterSupabaseSync() {
   return null;
 }
 
+function LiveEdgeNotificationRunner() {
+  useLiveEdgeNotifications();
+  return null;
+}
+
 const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
@@ -46,15 +53,18 @@ const App = () => (
             <Sonner />
             <BrowserRouter>
               <ScrollToTop />
-              <ErrorBoundary>
-                <Routes>
-                  <Route path="/" element={<Index />} />
-                  <Route path="/edge" element={<EdgeCardPage />} />
-                  <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
-                  {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </ErrorBoundary>
+              <LiveEdgeNotificationProvider>
+                <LiveEdgeNotificationRunner />
+                <ErrorBoundary>
+                  <Routes>
+                    <Route path="/" element={<Index />} />
+                    <Route path="/edge" element={<EdgeCardPage />} />
+                    <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
+                    {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </ErrorBoundary>
+              </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
         </EdgeCardProvider>

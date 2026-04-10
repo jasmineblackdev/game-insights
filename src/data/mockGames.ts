@@ -159,6 +159,45 @@ export interface MarketMlSnapshot {
 export type VolatilityLabel = "low" | "medium" | "high";
 
 /**
+ * Extended signals for calibration, live timing, learning, and parlay risk (no UI requirement).
+ * Populated by predictionQualityPipeline + client enrichment pass.
+ */
+export interface PredictionIntelMeta {
+  /** ms since ESPN/board timestamp vs client now for live games */
+  live_update_latency_ms?: number;
+  /** When latency exceeds target, pipeline may soften confidence */
+  live_latency_confidence_penalty?: boolean;
+  /** Injury/pitcher snapshot changed materially vs last client view */
+  late_change_flag?: boolean;
+  /** 0–100 materiality of late change */
+  late_change_impact_score?: number;
+  /** Estimated edge erosion per minute (positive = edge falling) from client snapshots */
+  edge_decay_rate_pp_per_min?: number;
+  /** Current model edge vs opening implied, pp (moneyline layer) when known */
+  edge_current_vs_open_pp?: number | null;
+  /** Sport-specific floor learned + bounded (see sportEdgeThresholds) */
+  optimal_edge_threshold?: number;
+  /** 0–100 role/minutes certainty proxy */
+  role_stability_score?: number;
+  /** 0–100 blowout script risk (props/minutes) */
+  blowout_risk_score?: number;
+  /** 0–100 spread across model blend pillars */
+  model_disagreement_score?: number;
+  /** 0–100 uncertain injury / GTD mass */
+  injury_uncertainty_score?: number;
+  /** 0–100 season phase variance / rest context */
+  season_phase_score?: number;
+  /** 0–100 public-side overpricing hint (model fades popular side) */
+  public_bias_score?: number;
+  /** Keys into local learning store (accuracy, failure heatmap) */
+  learning_store_keys?: {
+    accuracy_summary: string;
+    correlation_failures: string;
+    confidence_curve: string;
+  };
+}
+
+/**
  * Layered quality / calibration metadata — populated by predictionQualityPipeline.
  * UI may ignore; used for Edge Card risk, versions, and future analytics persistence.
  */
@@ -216,6 +255,8 @@ export interface PredictionQualityMeta {
     correlation_score: number;
     card_risk_penalty: number;
   };
+  /** v2 intelligence — live latency, decay, diversification inputs, learning hooks */
+  predictionIntel?: PredictionIntelMeta;
   risk_flags: string[];
   /** True when material late info should surface an extra prediction version. */
   late_news_refresh?: boolean;

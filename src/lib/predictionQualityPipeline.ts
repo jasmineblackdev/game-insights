@@ -18,6 +18,10 @@ import {
   type CalibrationRow,
 } from "@/lib/confidenceCalibration";
 import { parseRecord, winProbFromOdds } from "@/lib/espnShared";
+import {
+  buildPipelinePredictionIntel,
+  computeLiveUpdateLatencyMs,
+} from "@/lib/predictionIntelCompute";
 
 const BLEND_WEIGHTS = {
   historical_baseline: 0.18,
@@ -293,6 +297,25 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
   const cal = calibrateConfidenceForSport(next.league, conf, calibrationRows);
   conf = cal.confidence;
 
+  const blendObj = {
+    historical_baseline: Math.round(hist * 10) / 10,
+    recent_trend: Math.round(recent * 10) / 10,
+    matchup: Math.round(match * 10) / 10,
+    market: Math.round(mkt * 10) / 10,
+    live: Math.round(live * 10) / 10,
+    blended_adjustment_pp: Math.round(blended_adjustment_pp * 100) / 100,
+  };
+
+  const modelVsCloseHomePp = closeH != null ? Math.round((finalModelHome - closeH) * 100) / 100 : null;
+  const liveLatMs = computeLiveUpdateLatencyMs(next);
+  const predictionIntel = buildPipelinePredictionIntel(next, blendObj, modelVsCloseHomePp);
+  predictionIntel.live_update_latency_ms = liveLatMs;
+  predictionIntel.live_latency_confidence_penalty = liveLatMs > 12_000 && next.status === "live";
+
+  if ((predictionIntel.model_disagreement_score ?? 0) >= 74) conf = downgradeConfidence(conf);
+  if ((predictionIntel.injury_uncertainty_score ?? 0) >= 64) conf = downgradeConfidence(conf);
+  if (predictionIntel.live_latency_confidence_penalty) conf = downgradeConfidence(conf);
+
   const agreeMove =
     lineMove != null &&
     ((lineMove > 1.5 && modelHome >= 52) || (lineMove < -1.5 && modelHome <= 48));
@@ -317,8 +340,16 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
   if (fat.fatigue_score >= 62) {
     extraReasons.push("Rest / congestion profile adds fatigue risk — projection confidence capped.");
   }
+  if ((predictionIntel.blowout_risk_score ?? 0) >= 62) {
+    extraReasons.push("Blowout script risk elevated — pace and minutes variance can swing props.");
+  }
 
   const extraRisks: string[] = [];
+  if ((predictionIntel.model_disagreement_score ?? 0) >= 72) {
+    extraRisks.push(
+      "Model pillars diverge — historical/trend/market reads disagree; treat lean as softer."
+    );
+  }
   if (disagreeMove) extraRisks.push("Market disagreement: consider shrinking stake size.");
   if (sharpMove) extraRisks.push("Sharp line move detected (open vs close) — re-check news before lock.");
   if (sty.style_risk_flag) extraRisks.push("Style clash increases script volatility — same-game parlays carry extra correlation risk.");
@@ -331,16 +362,14 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
 
   const lateNews = detectLateNews(next, sharpMove);
 
+  const brI = predictionIntel.blowout_risk_score ?? 0;
+  const mdI = predictionIntel.model_disagreement_score ?? 0;
+  const corrScore = Math.round(brI * 0.32 + mdI * 0.48);
+  const corrPen = Math.round(brI * 0.14 + mdI * 0.17);
+
   const quality: PredictionQualityMeta = {
     pipelineVersion: 1,
-    modelBlend: {
-      historical_baseline: Math.round(hist * 10) / 10,
-      recent_trend: Math.round(recent * 10) / 10,
-      matchup: Math.round(match * 10) / 10,
-      market: Math.round(mkt * 10) / 10,
-      live: Math.round(live * 10) / 10,
-      blended_adjustment_pp: Math.round(blended_adjustment_pp * 100) / 100,
-    },
+    modelBlend: blendObj,
     market: {
       opening_implied_home: openH,
       closing_implied_home: closeH,
@@ -361,12 +390,18 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
     style: sty,
     volatility: vol,
     schedule: sch,
-    correlation: { correlation_score: 0, card_risk_penalty: 0 },
+    correlation: {
+      correlation_score: Math.min(100, corrScore),
+      card_risk_penalty: Math.min(100, corrPen),
+    },
+    predictionIntel,
     risk_flags: [
       ...(vol.volatility_label === "high" ? ["high_volatility"] : []),
       ...(disagreeMove ? ["market_disagreement"] : []),
       ...(sharpMove ? ["line_move_sharp"] : []),
       ...(lateNews ? ["late_news_trigger"] : []),
+      ...((predictionIntel.model_disagreement_score ?? 0) >= 74 ? ["model_pillar_disagreement"] : []),
+      ...((predictionIntel.injury_uncertainty_score ?? 0) >= 64 ? ["injury_uncertainty_elevated"] : []),
     ],
     late_news_refresh: lateNews,
     version_timestamp: new Date().toISOString(),

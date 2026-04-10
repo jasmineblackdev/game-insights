@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 import {
@@ -28,6 +28,7 @@ import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { ModelHonestyCallout } from "@/components/ModelHonestyCallout";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
+import { LiveEdgeNotificationSettings } from "@/components/LiveEdgeNotificationSettings";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -191,6 +192,7 @@ function HubPickCard({
 type EdgeTab = "hub" | "value" | "parlay";
 
 function EdgeCardPageInner() {
+  const location = useLocation();
   const [edgeTab, setEdgeTab] = useState<EdgeTab>("hub");
   const [oddsMap, setOddsMap] = useState<Map<string, GameOddsBundle>>(new Map());
   const [oddsLoading, setOddsLoading] = useState(false);
@@ -223,6 +225,11 @@ function EdgeCardPageInner() {
 
   const poll = 2 * 60 * 1000;
   const ymd = easternYmd();
+
+  useEffect(() => {
+    const st = location.state as { focusParlay?: boolean } | null;
+    if (st?.focusParlay) setEdgeTab("parlay");
+  }, [location.state]);
 
   const coreResults = useQueries({
     queries: [
@@ -282,7 +289,7 @@ function EdgeCardPageInner() {
     if (mlbModeledQuery.data) merged.push(...mlbModeledQuery.data);
     return merged.filter(
       (g) =>
-        g.status === "upcoming" &&
+        (g.status === "upcoming" || g.status === "live") &&
         (g.gameDate === "today" ||
           g.gameDate === "tomorrow" ||
           (g.league === "soccer" && g.gameDate === "week"))
@@ -484,6 +491,7 @@ function EdgeCardPageInner() {
           </div>
           <div className="flex items-center gap-2 shrink-0 overflow-x-auto max-w-full pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0 [scrollbar-width:thin]">
             <UnitSizeCalculator variant="compact" className="h-10 w-10 sm:h-9 sm:w-9 shrink-0 touch-manipulation" />
+            <LiveEdgeNotificationSettings className="h-10 w-10 sm:h-9 sm:w-9" />
             <div className="inline-flex items-center gap-1 rounded-full bg-muted p-0.5 shrink-0">
               {EDGE_CARD_SIZE_OPTIONS.map((n) => (
                 <button

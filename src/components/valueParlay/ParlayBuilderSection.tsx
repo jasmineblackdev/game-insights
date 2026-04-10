@@ -9,6 +9,7 @@ import { buildAllValueCandidates } from "@/lib/valueParlay/buildCandidates";
 import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
+import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (3–5 legs)",
@@ -128,6 +129,8 @@ export function ParlayBuilderSection({
           </div>
         </div>
       </div>
+
+      <RankedLiveParlayPresets games={games} oddsMap={oddsMap} candidates={candidates} gamesLoading={gamesLoading} />
 
       {bookOddsLoading && !gamesLoading ? (
         <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2">

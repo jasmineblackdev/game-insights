@@ -112,3 +112,13 @@ Odds comparison, line movement, news/sentiment, accuracy dashboards by sport (Sp
 Treat this as **demo/iteration** until data is normalized through Supabase per the pipeline above.
 
 Structured machine-readable definitions: `src/lib/dataStack.ts`.
+
+---
+
+## Not in this pass (limits)
+
+- **Sub-10s scoreboard streaming** — True near–real-time play-by-play would need ESPN or partner **WebSockets** or **server push**. The current SPA polls HTTP sources; it does not implement a streaming scoreboard stack.
+
+- **Minutes / snap / xG “role” models** — Where the app infers usage, roles, or xG-style edges, those paths remain **heuristic** until dedicated usage feeds and richer event data exist.
+
+- **Accuracy / learning persistence (no UI)** — Client-side outcomes and calibration artifacts (including an accuracy-style rollup) are stored in **localStorage** via `src/lib/predictionLearningStorage.ts` (e.g. `gamelens-learn-v1-accuracy-summary`). This is **not surfaced in the product UI** by design in this pass. The Supabase table `prediction_accuracy_summary` (see migrations) is a separate server-side rollup for future use; it is also not exposed in the app UI here.

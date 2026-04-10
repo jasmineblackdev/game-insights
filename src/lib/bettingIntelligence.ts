@@ -24,6 +24,9 @@ import {
   primaryPickSide,
   type PickSide,
 } from "@/lib/bettingPickUtils";
+import { updateEdgeDecaySnapshot } from "@/lib/predictionLearningStorage";
+import { computeLiveUpdateLatencyMs } from "@/lib/predictionIntelCompute";
+import { defaultMinEdgeForRecommend } from "@/lib/sportEdgeThresholds";
 
 /** Minimum model win probability for ideal parlay legs (0–1). */
 export const MIN_MODEL_PROB_FOR_IDEAL = 0.58;
@@ -67,16 +70,17 @@ function betQualityFromSignals(args: {
   modelP: number;
   american: number;
   inSweetSpot: boolean;
+  minEdgeRec: number;
 }): "A" | "B" | "C" {
-  const { edge, modelP, american, inSweetSpot } = args;
+  const { edge, modelP, american, inSweetSpot, minEdgeRec } = args;
   if (edge >= 0.06 && modelP >= MIN_MODEL_PROB_FOR_IDEAL && inSweetSpot) return "A";
-  if (edge >= MIN_EDGE_RECOMMEND && modelP >= 0.52) return "B";
+  if (edge >= minEdgeRec && modelP >= 0.52) return "B";
   return "C";
 }
 
-function valueRatingFrom(edge: number, quality: "A" | "B" | "C"): "low" | "medium" | "high" {
+function valueRatingFrom(edge: number, quality: "A" | "B" | "C", minEdgeRec: number): "low" | "medium" | "high" {
   if (quality === "A" || edge >= 0.06) return "high";
-  if (quality === "B" || edge >= MIN_EDGE_RECOMMEND) return "medium";
+  if (quality === "B" || edge >= minEdgeRec) return "medium";
   return "low";
 }
 
@@ -114,6 +118,9 @@ export function computeBettingIntelligenceMeta(
   side: PickSide,
   bundle: GameOddsBundle | undefined
 ): BettingIntelligenceMeta {
+  const minEdgeRec =
+    game._meta?.quality?.predictionIntel?.optimal_edge_threshold ?? defaultMinEdgeForRecommend(game.league);
+
   const modelP = modelProbabilityForPick(game, side);
   let american = americanOddsForPick(game, side, bundle);
   const bookKey = bundle?.h2h?.bookKey;
@@ -149,6 +156,7 @@ export function computeBettingIntelligenceMeta(
   const filterNotes: string[] = [];
 
   if (edge < 0) filterNotes.push("Negative edge vs book — not a value bet.");
+  if (edge > 0 && edge < minEdgeRec) filterNotes.push(`Edge below ${(minEdgeRec * 100).toFixed(1)}% sport floor — value fragile.`);
   if (modelP < MIN_MODEL_PROB_FOR_IDEAL) filterNotes.push(`Model below ${MIN_MODEL_PROB_FOR_IDEAL * 100}% threshold for ideal legs.`);
   if (game.confidence === "low") filterNotes.push("Model confidence is low.");
   if (flags.injuryUncertainty) filterNotes.push("Injury tags still uncertain.");
@@ -168,7 +176,7 @@ export function computeBettingIntelligenceMeta(
   }
 
   let recommendedForParlay = true;
-  if (edge < MIN_EDGE_RECOMMEND) recommendedForParlay = false;
+  if (edge < minEdgeRec) recommendedForParlay = false;
   if (edge < 0) recommendedForParlay = false;
   if (modelP < MIN_MODEL_PROB_FOR_IDEAL) recommendedForParlay = false;
   if (game.confidence === "low") recommendedForParlay = false;
@@ -204,17 +212,63 @@ export function bettingIntelForGame(game: GamePrediction, bundle: GameOddsBundle
   return computeBettingIntelligenceMeta(game, primaryPickSide(game), bundle);
 }
 
+function rosterSignature(game: GamePrediction): string {
+  return JSON.stringify({
+    h: game.injuries.home.map((i) => [i.name, i.status, i.impactScore]),
+    a: game.injuries.away.map((i) => [i.name, i.status, i.impactScore]),
+    pc: game.mlb?.pitcherCertainty,
+    pend: game.mlb?.modelOutput?.pendingConfirmation,
+  });
+}
+
 export function enrichGamesWithBettingIntelligence(
   games: GamePrediction[],
   oddsMap: Map<string, GameOddsBundle>
 ): GamePrediction[] {
   return games.map((g) => {
     const bundle = oddsMap.get(g.id);
-    const bettingIntel = bettingIntelForGame(g, bundle);
+    let bettingIntel = bettingIntelForGame(g, bundle);
+    const minEdgeRec =
+      g._meta?.quality?.predictionIntel?.optimal_edge_threshold ?? defaultMinEdgeForRecommend(g.league);
+
+    const { ratePpPerMin } = updateEdgeDecaySnapshot(g.id, bettingIntel.edge);
+
+    const rk = `gamelens-roster-v1-${g.id}`;
+    let lateFlag = false;
+    let lateImpact = 0;
+    try {
+      const cur = rosterSignature(g);
+      const prev = localStorage.getItem(rk);
+      if (prev && prev !== cur) {
+        lateFlag = true;
+        lateImpact = 48;
+      }
+      localStorage.setItem(rk, cur);
+    } catch {
+      /* ignore */
+    }
+
+    let recommendedForParlay = bettingIntel.recommendedForParlay;
+    if (ratePpPerMin > 1.25 && bettingIntel.edge < minEdgeRec + 0.018) recommendedForParlay = false;
+    if (lateFlag && bettingIntel.edge < minEdgeRec + 0.012) recommendedForParlay = false;
+    bettingIntel = { ...bettingIntel, recommendedForParlay };
+
     persistPregameSnapshot(g, bettingIntel);
     const preSnap = loadPregameSnapshot(g.id);
     const liveBetting = buildLiveBettingIntelBundle(g, bundle, preSnap, bettingIntel);
     maybeRecordFinalLiveBettingLearning(g, liveBetting);
+
+    const latMs = computeLiveUpdateLatencyMs(g);
+    const q = g._meta?.quality;
+    const predictionIntel = {
+      ...(q?.predictionIntel ?? {}),
+      edge_decay_rate_pp_per_min: ratePpPerMin,
+      late_change_flag: lateFlag,
+      late_change_impact_score: lateImpact,
+      live_update_latency_ms: latMs,
+      live_latency_confidence_penalty: latMs > 12_000 && g.status === "live",
+    };
+
     return {
       ...g,
       _meta: {
@@ -224,6 +278,7 @@ export function enrichGamesWithBettingIntelligence(
         oddsApiEventId: bundle?.oddsApiEventId,
         bookmakerLastUpdate: bundle?.bookmakerLastUpdate,
         oddsFetchedAt: bundle?.oddsFetchedAt,
+        ...(q ? { quality: { ...q, predictionIntel } } : {}),
       },
     };
   });
@@ -249,7 +304,7 @@ export function evaluateMoneylineForParlay(
   const lineMv = game._meta?.quality?.market?.line_movement_home_pp;
   const lineDelta = side === "home" ? lineMv : lineMv != null ? -lineMv : null;
 
-  const valueScore = computeValueScore({
+  let valueScore = computeValueScore({
     edge: meta.edge,
     confidence: game.confidence,
     impliedProbability: meta.impliedProbability,
@@ -261,6 +316,11 @@ export function evaluateMoneylineForParlay(
       ? 100 - (game._meta.quality.fatigue.fatigue_penalty ?? 30)
       : undefined,
   });
+
+  const pubBias = game._meta?.quality?.predictionIntel?.public_bias_score ?? 0;
+  if (pubBias >= 38 && meta.edge >= 0.028) {
+    valueScore = Math.min(1, valueScore + 0.028);
+  }
 
   const isRecommended = meta.recommendedForParlay;
 

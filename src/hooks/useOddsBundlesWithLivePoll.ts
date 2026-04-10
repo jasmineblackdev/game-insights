@@ -8,6 +8,8 @@ import {
 } from "@/lib/valueParlay/oddsEvents";
 
 const LIVE_ODDS_MS = 20_000;
+/** Faster refresh while any fixture is live (checkpoint windows decay quickly). */
+const LIVE_ODDS_FAST_MS = 8_000;
 
 /**
  * Full odds fetch when the game list changes, plus periodic in-play refresh
@@ -15,6 +17,7 @@ const LIVE_ODDS_MS = 20_000;
  */
 export function useOddsBundlesWithLivePoll(leagueGames: GamePrediction[]) {
   const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
+  const anyLive = useMemo(() => leagueGames.some((g) => g.status === "live"), [leagueGames]);
 
   const [oddsMap, setOddsMap] = useState<Map<string, GameOddsBundle>>(() => new Map());
 
@@ -56,13 +59,15 @@ export function useOddsBundlesWithLivePoll(leagueGames: GamePrediction[]) {
       });
     };
 
+    const intervalMs = anyLive ? LIVE_ODDS_FAST_MS : LIVE_ODDS_MS;
+
     tick();
-    const iv = setInterval(tick, LIVE_ODDS_MS);
+    const iv = setInterval(tick, intervalMs);
     return () => {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [gameIdsKey]);
+  }, [gameIdsKey, anyLive]);
 
   return oddsMap;
 }

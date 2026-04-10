@@ -1,11 +1,11 @@
 /**
  * Main-screen ranked live picks (fallback / quick-pick when Edge Card is heavy or unused).
- * Gates: NBA/NFL after Q1 (incl. halftime row), MLB after 5th, soccer halftime only.
+ * Gates: NBA after Q1 (halftime row allowed), NFL after Q1 (not halftime), MLB after 5th, soccer halftime.
  */
 import type { GamePrediction, LiveBettingStageRow } from "@/data/mockGames";
 import { computePickFlags, getFavoredSide, type EdgeSide } from "@/lib/edgeCardScoring";
 import { computeValueScore } from "@/lib/valueParlay/valueScore";
-import { MIN_EDGE_RECOMMEND } from "@/lib/bettingIntelligence";
+import { defaultMinEdgeForRecommend, isEdgeBelowSportFloor } from "@/lib/sportEdgeThresholds";
 
 export const LIVE_PICK_RANK_MAX = 6;
 const FRESH_MS = 90_000;
@@ -18,9 +18,17 @@ export type LivePickOverlay =
       badgeLine: string;
       liveConfidencePct: number;
       edgePct: number;
+      /** Model confidence for the card (High / Medium / Low). */
+      modelConfidenceLabel: string;
       recommendedAction: string | null;
     }
   | { kind: "stale"; label: "Value Gone" | "Pass" };
+
+function modelConfidenceLabel(game: GamePrediction): string {
+  if (game.confidence === "high") return "High";
+  if (game.confidence === "medium") return "Medium";
+  return "Low";
+}
 
 function volatilityNumeric(game: GamePrediction): number {
   const q = game._meta?.quality?.volatility?.volatility_score;
@@ -80,8 +88,9 @@ export function passesMainScreenLivePickGate(game: GamePrediction): boolean {
   if (!ls) return false;
   switch (game.league) {
     case "nba":
-    case "nfl":
       return ls.periodNum >= 2 || ls.isHalftime === true;
+    case "nfl":
+      return ls.periodNum >= 2 && ls.isHalftime !== true;
     case "mlb":
       return ls.periodNum >= 5;
     case "soccer":
@@ -91,16 +100,29 @@ export function passesMainScreenLivePickGate(game: GamePrediction): boolean {
   }
 }
 
-function checkpointRowForRanking(game: GamePrediction): LiveBettingStageRow | null {
+export type LiveCheckpointFilter = {
+  /** NFL: only after-Q1 row, not halftime. */
+  nflExcludeHalftime?: boolean;
+  /** NBA: when false, ignore halftime checkpoint rows. */
+  nbaIncludeHalftime?: boolean;
+};
+
+/** Latest matching live betting checkpoint row for overlays / notifications. */
+export function selectLiveCheckpointRow(game: GamePrediction, filter?: LiveCheckpointFilter): LiveBettingStageRow | null {
   const cps = game._meta?.liveBetting?.checkpoints ?? [];
   if (!cps.length) return null;
   const want = new Set<string>();
   switch (game.league) {
-    case "nba":
-    case "nfl":
+    case "nba": {
       want.add("after_q1");
-      want.add("halftime");
+      if (filter?.nbaIncludeHalftime !== false) want.add("halftime");
       break;
+    }
+    case "nfl": {
+      want.add("after_q1");
+      if (!filter?.nflExcludeHalftime) want.add("halftime");
+      break;
+    }
     case "mlb":
       want.add("after_inning_5");
       break;
@@ -115,6 +137,10 @@ function checkpointRowForRanking(game: GamePrediction): LiveBettingStageRow | nu
   return filtered[filtered.length - 1]!;
 }
 
+function checkpointRowForRanking(game: GamePrediction): LiveBettingStageRow | null {
+  return selectLiveCheckpointRow(game);
+}
+
 export function mainScreenCheckpointLabel(game: GamePrediction, row: LiveBettingStageRow): string {
   if (row.stageId === "halftime" || row.stageId === "soccer_halftime") return "Halftime Confirmed";
   if (row.stageId === "after_inning_5") return "F5 Confirmed";
@@ -122,9 +148,9 @@ export function mainScreenCheckpointLabel(game: GamePrediction, row: LiveBetting
   return "Live Confirmed";
 }
 
-function canRankFromRow(row: LiveBettingStageRow): boolean {
+function canRankFromRow(row: LiveBettingStageRow, minEdge: number): boolean {
   if (row.recommendedAction === "Value Gone" || row.recommendedAction === "Pass") return false;
-  if (row.edge < MIN_EDGE_RECOMMEND) return false;
+  if (row.edge < minEdge) return false;
   return true;
 }
 
@@ -179,6 +205,7 @@ export function computeLivePickScore(game: GamePrediction, row: LiveBettingStage
 
 /**
  * Build per-game overlay: top ranks (up to 6) among eligible live games, or Value Gone / Pass.
+ * Uses per-sport edge floors + learned `optimal_edge_threshold` when present.
  */
 export function buildLivePickOverlays(games: GamePrediction[]): Map<string, LivePickOverlay> {
   const map = new Map<string, LivePickOverlay>();
@@ -190,14 +217,17 @@ export function buildLivePickOverlays(games: GamePrediction[]): Map<string, Live
     const row = checkpointRowForRanking(game);
     if (!row) continue;
 
-    if (canRankFromRow(row)) {
+    const minE =
+      game._meta?.quality?.predictionIntel?.optimal_edge_threshold ?? defaultMinEdgeForRecommend(game.league);
+
+    if (canRankFromRow(row, minE)) {
       candidates.push({ game, row, score: computeLivePickScore(game, row) });
       continue;
     }
 
     const stale = staleLabelFromRow(row);
     if (stale) map.set(game.id, { kind: "stale", label: stale });
-    else if (row.edge < MIN_EDGE_RECOMMEND)
+    else if (isEdgeBelowSportFloor(game.league, row.edge))
       map.set(game.id, { kind: "stale", label: "Pass" });
   }
 
@@ -213,6 +243,7 @@ export function buildLivePickOverlays(games: GamePrediction[]): Map<string, Live
       badgeLine: `Live Edge • ${checkpointLabel}`,
       liveConfidencePct: Math.round(c.row.modelProbability * 1000) / 10,
       edgePct: Math.round(c.row.edge * 1000) / 10,
+      modelConfidenceLabel: modelConfidenceLabel(c.game),
       recommendedAction: c.row.recommendedAction,
     });
     rank += 1;
