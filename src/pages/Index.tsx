@@ -25,6 +25,7 @@ import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
 import { flushLiveBettingStagesToSupabase } from "@/lib/liveBettingSupabaseSync";
 import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
 import { buildLivePickOverlays, type LivePickOverlay } from "@/lib/livePickRanking";
+import { buildLivePropRankingsForGame } from "@/lib/livePropRanking";
 import { LiveEdgeNotificationSettings } from "@/components/LiveEdgeNotificationSettings";
 import { getFinalPredictionContext } from "@/lib/liveGameState";
 import {
@@ -313,6 +314,16 @@ const Index = () => {
   const livePickOverlays = useMemo(() => {
     if (viewMode !== "games") return new Map<string, LivePickOverlay>();
     return buildLivePickOverlays(filteredGames);
+  }, [viewMode, filteredGames]);
+
+  const livePropRankingsByGame = useMemo(() => {
+    if (viewMode !== "games") return new Map<string, ReturnType<typeof buildLivePropRankingsForGame>>();
+    const m = new Map<string, ReturnType<typeof buildLivePropRankingsForGame>>();
+    for (const g of filteredGames) {
+      const rows = buildLivePropRankingsForGame(g);
+      if (rows.length) m.set(g.id, rows);
+    }
+    return m;
   }, [viewMode, filteredGames]);
 
   const rankedLivePickCount = useMemo(() => {
@@ -740,6 +751,7 @@ const Index = () => {
                       index={i}
                       onSelect={setSelectedGame}
                       livePickOverlay={livePickOverlays.get(game.id) ?? null}
+                      livePropRankings={livePropRankingsByGame.get(game.id) ?? []}
                     />
                   ))}
                 </div>

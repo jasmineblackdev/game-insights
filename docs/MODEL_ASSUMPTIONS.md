@@ -6,6 +6,10 @@
 - When a feed contains at least one **live** game, polling defaults to **~10s** (configurable via `VITE_SCOREBOARD_POLL_MS_LIVE`). Idle slates use a slower cadence (`VITE_SCOREBOARD_POLL_MS_IDLE`).
 - **True sub-second or sub-10s play-by-play** still requires a **partner streaming API** (WebSockets / server push). Poll tuning only approximates fresher scores.
 
+## Live player props (main game cards)
+
+- After the same sport checkpoints as team live picks (Q1 / F5 / soccer HT, etc.), props are re-ranked with `live_prop_score` in `src/lib/livePropRanking.ts` using live heuristics (pace, score margin, inning, HT). Signals are **not** play-by-play feeds.
+
 ## Minutes, snap count, and soccer “role” / xG-style edges
 
 - **NBA / NFL player props** (`src/lib/valueParlay/playerPropEngine.ts`): baselines blend **last-five and season averages** from card-level trend data, with **team pace** (and similar) as a coarse adjustment. This is **not** a minutes model, snap-share model, or coaching-usage model.
