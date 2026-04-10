@@ -237,6 +237,29 @@ export interface GameLines {
   drawMl?: string;
 }
 
+/**
+ * VALUE EDGE / betting market layer for the model’s primary pick on a game.
+ * Populated client-side when odds bundles are merged (Odds API + ESPN lines).
+ */
+export interface BettingIntelligenceMeta {
+  pickSide: "home" | "away" | "draw";
+  pickAbbrev: string;
+  americanOdds: number;
+  modelProbability: number;
+  impliedProbability: number;
+  sportsbookProbability: number;
+  edge: number;
+  edgeScore: number;
+  betQualityRating: "A" | "B" | "C";
+  valueRating: "low" | "medium" | "high";
+  parlayFitScore: number;
+  parlaySafetyScore: number;
+  recommendedForParlay: boolean;
+  sportsbookKey?: string;
+  lineMovementSharpTowardPick?: boolean | null;
+  filterNotes: string[];
+}
+
 export interface GamePrediction {
   id: string;
   league: League;
@@ -309,6 +332,8 @@ export interface GamePrediction {
     marketMl?: MarketMlSnapshot;
     /** Layered scoring outputs (market, calibration, volatility, etc.). */
     quality?: PredictionQualityMeta;
+    /** Model vs book value for primary pick — see `bettingIntelligence.ts`. */
+    bettingIntel?: BettingIntelligenceMeta;
   };
 }
 

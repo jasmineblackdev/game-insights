@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
+  BarChart3,
   History,
   Layers,
   Plus,
@@ -12,11 +13,17 @@ import {
   Sparkles,
   Trash2,
   TrendingUp,
+  Wrench,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { GamePrediction, League } from "@/data/mockGames";
 import { useEdgeCard } from "@/context/EdgeCardContext";
+import { ValueParlayProvider } from "@/context/ValueParlayContext";
+import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
+import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
+import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
+import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -169,7 +176,13 @@ function HubPickCard({
   );
 }
 
-export default function EdgeCardPage() {
+type EdgeTab = "hub" | "value" | "parlay";
+
+function EdgeCardPageInner() {
+  const [edgeTab, setEdgeTab] = useState<EdgeTab>("hub");
+  const [oddsMap, setOddsMap] = useState<Map<string, GameOddsBundle>>(new Map());
+  const [oddsLoading, setOddsLoading] = useState(false);
+
   const {
     cardSize,
     setCardSize,
@@ -227,9 +240,33 @@ export default function EdgeCardPage() {
     );
   }, [results]);
 
-  const gameById = useMemo(() => new Map(allGames.map((g) => [g.id, g])), [allGames]);
+  useEffect(() => {
+    if (!allGames.length) {
+      setOddsMap(new Map());
+      return;
+    }
+    let cancelled = false;
+    setOddsLoading(true);
+    fetchAllOddsBundles(allGames)
+      .then((m) => {
+        if (!cancelled) setOddsMap(m);
+      })
+      .finally(() => {
+        if (!cancelled) setOddsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [allGames]);
 
-  const ranked = useMemo(() => rankCandidatesForHub(allGames, filters), [allGames, filters]);
+  const allGamesWithIntel = useMemo(
+    () => enrichGamesWithBettingIntelligence(allGames, oddsMap),
+    [allGames, oddsMap]
+  );
+
+  const gameById = useMemo(() => new Map(allGamesWithIntel.map((g) => [g.id, g])), [allGamesWithIntel]);
+
+  const ranked = useMemo(() => rankCandidatesForHub(allGamesWithIntel, filters), [allGamesWithIntel, filters]);
   const byLeague = useMemo(() => groupCandidatesByLeague(ranked), [ranked]);
   const trending = useMemo(() => ranked.slice(0, 6), [ranked]);
 
@@ -316,7 +353,7 @@ export default function EdgeCardPage() {
               <div>
                 <h1 className="font-display font-bold text-base text-foreground">Edge Card</h1>
                 <p className="text-[11px] text-muted-foreground">
-                  Team picks · player props · Draft Edge · multi-sport
+                  Team picks · best value · parlay builder · Draft Edge
                 </p>
               </div>
             </div>
@@ -340,9 +377,42 @@ export default function EdgeCardPage() {
             </div>
           </div>
         </div>
+        <div className="container max-w-6xl mx-auto pb-2 flex gap-1 overflow-x-auto [scrollbar-width:thin] border-t border-border/60 pt-2">
+          {(
+            [
+              ["hub", "Team picks", Layers],
+              ["value", "Best value", BarChart3],
+              ["parlay", "Parlay builder", Wrench],
+            ] as const
+          ).map(([id, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setEdgeTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-full text-xs font-bold transition-colors touch-manipulation",
+                edgeTab === id
+                  ? "bg-primary/15 text-primary border border-primary/30"
+                  : "text-muted-foreground hover:text-foreground border border-transparent"
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6 sm:space-y-8">
+        {edgeTab === "value" ? (
+          <BestValuePicksSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+        ) : null}
+        {edgeTab === "parlay" ? (
+          <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+        ) : null}
+
+        {edgeTab === "hub" ? (
+          <>
         <section className="space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
             <div>
@@ -607,6 +677,8 @@ export default function EdgeCardPage() {
             </ul>
           )}
         </section>
+          </>
+        ) : null}
       </main>
 
       <div className="fixed bottom-0 inset-x-0 z-50 border-t border-border bg-background/95 backdrop-blur-md shadow-[0_-8px_30px_rgba(0,0,0,0.12)] safe-pb">
@@ -751,5 +823,13 @@ export default function EdgeCardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function EdgeCardPage() {
+  return (
+    <ValueParlayProvider>
+      <EdgeCardPageInner />
+    </ValueParlayProvider>
   );
 }

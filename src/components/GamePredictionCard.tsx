@@ -39,6 +39,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const finalCtx = getFinalPredictionContext(game);
   const betWindow = getBetWindow(game);
   const upcomingBetTip = getUpcomingBetTip(game);
+  const bi = game._meta?.bettingIntel;
 
   // Prediction versions
   const versions = buildPredictionVersions(game);
@@ -222,6 +223,42 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
         <div className="mx-4 mb-3 px-3 py-2 rounded-lg border border-border/60 bg-muted/30 flex items-center gap-2">
           <Clock className="w-3 h-3 shrink-0 text-muted-foreground/60" />
           <p className="text-[10px] text-muted-foreground/80">{upcomingBetTip}</p>
+        </div>
+      ) : null}
+
+      {/* Value vs book (primary model pick) */}
+      {bi ? (
+        <div className="mx-4 mb-2 px-3 py-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] space-y-1">
+          <p className="text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400">
+            VALUE CHECK · {bi.recommendedForParlay ? "Parlay-friendly" : "Pass"}
+          </p>
+          <p className="text-[11px] text-foreground font-semibold tabular-nums">
+            Pick {bi.pickAbbrev}{" "}
+            <span className="text-muted-foreground font-normal">
+              {bi.americanOdds > 0 ? `+${bi.americanOdds}` : bi.americanOdds}
+            </span>
+          </p>
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground tabular-nums">
+            <span>
+              Model <span className="text-foreground font-medium">{Math.round(bi.modelProbability * 100)}%</span>
+            </span>
+            <span>
+              Implied <span className="text-foreground font-medium">{Math.round(bi.impliedProbability * 100)}%</span>
+            </span>
+            <span>
+              Edge{" "}
+              <span className={bi.edge >= 0.04 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-foreground"}>
+                {bi.edge >= 0 ? "+" : ""}
+                {(bi.edge * 100).toFixed(1)}%
+              </span>
+            </span>
+            <span>
+              Grade <span className="text-foreground font-medium">{bi.betQualityRating}</span>
+            </span>
+            <span>
+              Fit <span className="text-foreground font-medium">{bi.parlayFitScore}</span>
+            </span>
+          </div>
         </div>
       ) : null}
 

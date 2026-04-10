@@ -12,9 +12,22 @@ major_version = 17
 #   supabase functions deploy player-edge
 #   supabase functions deploy nba-stats-proxy
 #   supabase functions deploy odds-api-proxy
+#   supabase functions deploy odds-persist
+#   supabase secrets set ODDS_PERSIST_SECRET="$(openssl rand -hex 24)"
+#   (Uses SUPABASE_SERVICE_ROLE_KEY + THE_ODDS_API_KEY + SUPABASE_URL automatically in hosted projects.)
 #   supabase secrets set THE_ODDS_API_KEY=...   # server-only; do not use VITE_ prefix
 #
 # Learning loop (migration 20260409120000): ETL writes prediction_outcome_log; call
 #   select refresh_prediction_accuracy_summary(7);
 #   select refresh_prediction_accuracy_summary(30);
 # as service_role / cron. factor_weight_adjustments is append-only audit for weekly tuning.
+#
+# odds-persist: POST with header x-odds-persist-secret — writes odds_snapshots + merge_odds_latest_row (CLV).
+#   supabase functions deploy odds-persist --no-verify-jwt
+#   curl -X POST "$SUPABASE_URL/functions/v1/odds-persist" \
+#     -H "x-odds-persist-secret: $ODDS_PERSIST_SECRET" \
+#     -H "Content-Type: application/json" \
+#     -d '{"sportKeys":["basketball_nba","americanfootball_nfl"]}'
+
+[functions.odds-persist]
+verify_jwt = false
