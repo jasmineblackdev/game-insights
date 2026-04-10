@@ -2,6 +2,7 @@
  * Canonical multi-sport data & product stack (target architecture).
  * Narrative + tables: docs/DATA_STACK.md
  * Prop / scoreboard assumptions (heuristic vs feeds): docs/MODEL_ASSUMPTIONS.md
+ * Server learning tables + RPC: docs/DATA_STACK.md (GameLens learning intelligence)
  * Current app may still use ESPN/optional vendors until SportsDataIO → Supabase ingestion exists.
  */
 

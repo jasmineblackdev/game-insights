@@ -32,6 +32,10 @@ import {
   recordCorrelationFailurePattern,
   recordPredictionOutcome,
 } from "@/lib/predictionLearningStorage";
+import {
+  inferMissTagsForLearning,
+  submitTeamMoneylineLearningRecord,
+} from "@/lib/predictionLearningIntelligence";
 import { scoreboardRefetchIntervalMs } from "@/lib/scoreboardPollConfig";
 
 type ViewMode = "games" | "props" | "draft";
@@ -263,6 +267,7 @@ const Index = () => {
         hit,
         errorTags: inferMissTagsForLearning(g, hit),
       });
+      void submitTeamMoneylineLearningRecord(g, ctx);
       if (!hit) recordCorrelationFailurePattern([g.id, ctx.pickedSide]);
     }
   }, [leagueGamesWithIntel]);

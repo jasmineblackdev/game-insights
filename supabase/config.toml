@@ -23,6 +23,13 @@ major_version = 17
 #   select refresh_prediction_accuracy_summary(30);
 # as service_role / cron. factor_weight_adjustments is append-only audit for weekly tuning.
 #
+# GameLens intelligence (migration 20260421100000): browser calls submit_prediction_learning_record;
+# service_role cron can run:
+#   select refresh_learning_market_accuracy_summary(30, 30);
+#   select refresh_learning_checkpoint_accuracy_summary(30, 25);
+#   select refresh_confidence_calibration_history(30, 40);
+#   select * from learning_internal_suggestions(80);
+#
 # odds-persist: POST with header x-odds-persist-secret — writes odds_snapshots + merge_odds_latest_row (CLV).
 #   supabase functions deploy odds-persist --no-verify-jwt
 #   curl -X POST "$SUPABASE_URL/functions/v1/odds-persist" \

@@ -39,6 +39,8 @@ interface ImportMetaEnv {
   readonly VITE_SCOREBOARD_POLL_MS_IDLE?: string;
   /** When "1" or "true", sync client learning JSON to user_learning_snapshots for signed-in users. */
   readonly VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE?: string;
+  /** Learning engine phase 1 | 2 | 3 (stored on prediction_history.learning_phase). Default 1. */
+  readonly VITE_LEARNING_ENGINE_PHASE?: string;
 }
 
 interface ImportMeta {
