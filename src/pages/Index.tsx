@@ -31,6 +31,7 @@ import {
   recordCorrelationFailurePattern,
   recordPredictionOutcome,
 } from "@/lib/predictionLearningStorage";
+import { scoreboardRefetchIntervalMs } from "@/lib/scoreboardPollConfig";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -172,24 +173,24 @@ const Index = () => {
   const nbaQuery = useQuery({
     queryKey: ["nba-espn-scoreboard", easternYmd()],
     queryFn: fetchNbaGamePredictions,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
     refetchIntervalInBackground: false, // pause polling when tab is hidden — saves battery + API calls
   });
 
   const nflQuery = useQuery({
     queryKey: ["nfl-espn-scoreboard", easternYmd()],
     queryFn: fetchNflGamePredictions,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
     refetchIntervalInBackground: false,
   });
 
   const mlbBaseQuery = useQuery({
     queryKey: ["mlb-espn-enriched", easternYmd()],
     queryFn: fetchMlbEnrichedGames,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
     refetchIntervalInBackground: false,
   });
 
@@ -203,8 +204,8 @@ const Index = () => {
   const soccerQuery = useQuery({
     queryKey: ["soccer-espn-scoreboard", easternYmd()],
     queryFn: fetchSoccerGamePredictions,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
     refetchIntervalInBackground: false,
   });
 

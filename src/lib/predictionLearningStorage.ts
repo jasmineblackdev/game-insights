@@ -3,6 +3,7 @@
  * Feeds dynamic edge floors, accuracy summaries, and miss tagging — no UI.
  */
 import type { League } from "@/data/mockGames";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 
 const PREFIX = "gamelens-learn-v1";
 const KEY_THRESHOLDS = `${PREFIX}-edge-floors`;
@@ -50,19 +51,61 @@ function writeJson(key: string, v: unknown): void {
 }
 
 export function getLearnedEdgeFloor(league: League): number {
-  const m = readJson<Partial<Record<League, number>>>(KEY_THRESHOLDS, {});
+  const m = getLearnedEdgeFloorsMap();
   const v = m[league];
   return typeof v === "number" && v > 0 && v < 0.12 ? v : 0;
 }
 
+export function getLearnedEdgeFloorsMap(): Partial<Record<League, number>> {
+  return readJson(KEY_THRESHOLDS, {});
+}
+
 /** Nudge floor up slightly when a bucket underperforms; down when sharp. */
 export function adjustEdgeFloorFromOutcome(league: League, hit: boolean, confidence: "high" | "medium" | "low"): void {
-  const m = readJson<Partial<Record<League, number>>>(KEY_THRESHOLDS, {});
+  const m = { ...getLearnedEdgeFloorsMap() };
   const cur = m[league] ?? 0;
   const delta = confidence === "high" ? (hit ? -0.002 : 0.004) : confidence === "medium" ? (hit ? -0.0015 : 0.003) : hit ? -0.001 : 0.002;
   const next = Math.min(0.055, Math.max(0.02, cur + delta));
   m[league] = Math.round(next * 10000) / 10000;
   writeJson(KEY_THRESHOLDS, m);
+}
+
+let learningFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * When `VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE=1` and the user is signed in, debounce-sync
+ * local learning JSON to `user_learning_snapshots` (see Supabase migration).
+ */
+export function scheduleUserLearningSnapshotSync(): void {
+  const v = import.meta.env.VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE;
+  if (v !== "1" && v !== "true") return;
+  if (learningFlushTimer) clearTimeout(learningFlushTimer);
+  learningFlushTimer = setTimeout(() => {
+    learningFlushTimer = null;
+    void flushUserLearningSnapshotToSupabase();
+  }, 4000);
+}
+
+async function flushUserLearningSnapshotToSupabase(): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user?.id) return;
+
+  const { error } = await supabase.from("user_learning_snapshots").upsert(
+    {
+      user_id: session.user.id,
+      accuracy_summary: getPredictionAccuracySummary(),
+      edge_floors: getLearnedEdgeFloorsMap(),
+      confidence_curve: getConfidenceAccuracyCurve(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+  if (error && import.meta.env.DEV) {
+    console.warn("[user_learning_snapshots]", error.message);
+  }
 }
 
 export function getPredictionAccuracySummary(): PredictionAccuracySummary {
@@ -110,6 +153,8 @@ export function recordPredictionOutcome(args: {
 
   const curve = buildConfidenceCurveFromSummary(sum);
   writeJson(KEY_CURVE, curve);
+
+  scheduleUserLearningSnapshotSync();
 }
 
 function buildConfidenceCurveFromSummary(sum: PredictionAccuracySummary): ConfidenceAccuracyCurve {

@@ -117,8 +117,8 @@ Structured machine-readable definitions: `src/lib/dataStack.ts`.
 
 ## Not in this pass (limits)
 
-- **Sub-10s scoreboard streaming** — True near–real-time play-by-play would need ESPN or partner **WebSockets** or **server push**. The current SPA polls HTTP sources; it does not implement a streaming scoreboard stack.
+- **Sub-10s scoreboard streaming** — True near–real-time play-by-play still needs ESPN or partner **WebSockets** or **server push**. The SPA uses **HTTP polling** only; when a scoreboard feed has at least one **live** game, polling defaults to **~10s** (see `VITE_SCOREBOARD_POLL_MS_LIVE` in `.env.example` and `src/lib/scoreboardPollConfig.ts`). That tightens freshness but is **not** a streaming stack.
 
-- **Minutes / snap / xG “role” models** — Where the app infers usage, roles, or xG-style edges, those paths remain **heuristic** until dedicated usage feeds and richer event data exist.
+- **Minutes / snap / xG “role” models** — Player prop and soccer “role” style signals use **trend + pace heuristics** until real minutes, snap, and xG/event feeds exist. See `docs/MODEL_ASSUMPTIONS.md` and `src/lib/modelAssumptions.ts`.
 
-- **Accuracy / learning persistence (no UI)** — Client-side outcomes and calibration artifacts (including an accuracy-style rollup) are stored in **localStorage** via `src/lib/predictionLearningStorage.ts` (e.g. `gamelens-learn-v1-accuracy-summary`). This is **not surfaced in the product UI** by design in this pass. The Supabase table `prediction_accuracy_summary` (see migrations) is a separate server-side rollup for future use; it is also not exposed in the app UI here.
+- **Accuracy / learning persistence (no product UI)** — Client rollups live in **localStorage** via `src/lib/predictionLearningStorage.ts` (e.g. `gamelens-learn-v1-accuracy-summary`). **Optional**: set `VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE=1` with a signed-in user to upsert a mirror into `user_learning_snapshots` (migration `20260410200000_user_learning_snapshots.sql`). Server rollup `prediction_accuracy_summary` is still built from `prediction_outcome_log` via `refresh_prediction_accuracy_summary()` (service role / batch); neither server rollup nor the snapshot table is exposed in the app UI here.

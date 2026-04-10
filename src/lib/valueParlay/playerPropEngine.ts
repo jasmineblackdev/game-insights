@@ -1,6 +1,16 @@
 import type { GamePrediction, League, PlayerTrendData } from "@/data/mockGames";
+import {
+  PLAYER_PROP_MINUTES_OR_SNAP_MODEL,
+  SOCCER_PROP_XG_OR_ROLE_MODEL,
+} from "@/lib/modelAssumptions";
 import { americanFromImpliedProb, americanToImpliedProb } from "@/lib/valueParlay/oddsMath";
 import type { PlayerPropModelRow } from "@/lib/valueParlay/types";
+
+/** Labels prop signal tier for debugging / future UI; see docs/MODEL_ASSUMPTIONS.md */
+export const propModelSignalTier = {
+  nbaNflMlb: PLAYER_PROP_MINUTES_OR_SNAP_MODEL,
+  soccer: SOCCER_PROP_XG_OR_ROLE_MODEL,
+} as const;
 
 function slugId(s: string): string {
   return s

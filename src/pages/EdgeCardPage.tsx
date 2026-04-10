@@ -40,6 +40,7 @@ import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { scoreboardRefetchIntervalMs } from "@/lib/scoreboardPollConfig";
 import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import {
   type EdgeCandidate,
@@ -223,7 +224,6 @@ function EdgeCardPageInner() {
     removeValueLeg,
   } = useValueParlay();
 
-  const poll = 2 * 60 * 1000;
   const ymd = easternYmd();
 
   useEffect(() => {
@@ -236,24 +236,24 @@ function EdgeCardPageInner() {
       {
         queryKey: ["nba-espn-scoreboard", ymd],
         queryFn: fetchNbaGamePredictions,
-        staleTime: poll,
-        refetchInterval: poll,
+        staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+        refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
         refetchIntervalInBackground: false,
         retry: 2,
       },
       {
         queryKey: ["nfl-espn-scoreboard", ymd],
         queryFn: fetchNflGamePredictions,
-        staleTime: poll,
-        refetchInterval: poll,
+        staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+        refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
         refetchIntervalInBackground: false,
         retry: 2,
       },
       {
         queryKey: ["soccer-espn-scoreboard", ymd],
         queryFn: fetchSoccerGamePredictions,
-        staleTime: poll,
-        refetchInterval: poll,
+        staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+        refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
         refetchIntervalInBackground: false,
         retry: 2,
       },
@@ -263,8 +263,8 @@ function EdgeCardPageInner() {
   const mlbBaseQuery = useQuery({
     queryKey: ["mlb-espn-enriched", ymd],
     queryFn: fetchMlbEnrichedGames,
-    staleTime: poll,
-    refetchInterval: poll,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => scoreboardRefetchIntervalMs(q.state.data),
     refetchIntervalInBackground: false,
     retry: 2,
   });

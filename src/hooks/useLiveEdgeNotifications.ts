@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { GamePrediction } from "@/data/mockGames";
 import { useLiveEdgeNotificationSettings } from "@/context/LiveEdgeNotificationContext";
@@ -13,6 +13,10 @@ import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
+import { scoreboardRefetchIntervalMs } from "@/lib/scoreboardPollConfig";
+
+/** Avoid re-running notification scan on every scoreboard tick. */
+const SCAN_THROTTLE_MS = 12_000;
 
 /**
  * Background scoreboard + odds enrichment for all enabled sports, then evaluates live-edge notify rules.
@@ -21,6 +25,7 @@ import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
 export function useLiveEdgeNotifications(): void {
   const { settings } = useLiveEdgeNotificationSettings();
   const ymd = useMemo(() => easternYmd(), []);
+  const lastNotifyScanAt = useRef(0);
 
   const anySport =
     settings.sports.nba ||
@@ -71,8 +76,8 @@ export function useLiveEdgeNotifications(): void {
   const soccerQuery = useQuery({
     queryKey: ["soccer-espn-scoreboard", ymd],
     queryFn: fetchSoccerGamePredictions,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: canPoll && settings.sports.soccer ? 2 * 60 * 1000 : false,
+    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
+    refetchInterval: (q) => (canPoll && settings.sports.soccer ? scoreboardRefetchIntervalMs(q.state.data) : false),
     refetchIntervalInBackground: false,
     enabled: canPoll && settings.sports.soccer,
   });
@@ -116,8 +121,8 @@ export function useLiveEdgeNotifications(): void {
       return;
     }
     const now = Date.now();
-    if (now - lastThrottle.current < SCAN_THROTTLE_MS) return;
-    lastThrottle.current = now;
+    if (now - lastNotifyScanAt.current < SCAN_THROTTLE_MS) return;
+    lastNotifyScanAt.current = now;
 
     const state = loadNotifyState();
     const { payloads, nextState } = computeLiveEdgeNotifications(enriched, settings, state, now);

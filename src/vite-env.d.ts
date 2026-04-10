@@ -33,6 +33,12 @@ interface ImportMetaEnv {
    * If unset, uses `VITE_SUPABASE_URL` + anon key against `/functions/v1/draft-edge`. Sample cards if unreachable.
    */
   readonly VITE_DRAFT_EDGE_API_URL?: string;
+  /** ESPN scoreboard refetch when a feed has live games (ms). See scoreboardPollConfig.ts */
+  readonly VITE_SCOREBOARD_POLL_MS_LIVE?: string;
+  /** ESPN scoreboard refetch when no live games in feed (ms). */
+  readonly VITE_SCOREBOARD_POLL_MS_IDLE?: string;
+  /** When "1" or "true", sync client learning JSON to user_learning_snapshots for signed-in users. */
+  readonly VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE?: string;
 }
 
 interface ImportMeta {
