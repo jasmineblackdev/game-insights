@@ -15,14 +15,17 @@ import {
 } from "@/lib/liveGameState";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp, ArrowRight } from "lucide-react";
 import { buildPredictionVersions, isLiveTriggerMet, phaseColor } from "@/lib/predictionVersions";
+import type { LivePickOverlay } from "@/lib/livePickRanking";
 
 interface GamePredictionCardProps {
   game: GamePrediction;
   index: number;
   onSelect: (game: GamePrediction) => void;
+  /** Main-screen ranked live pick fallback (Pick 1–6 / Value Gone / Pass). */
+  livePickOverlay?: LivePickOverlay | null;
 }
 
-export function GamePredictionCard({ game, index, onSelect }: GamePredictionCardProps) {
+export function GamePredictionCard({ game, index, onSelect, livePickOverlay = null }: GamePredictionCardProps) {
   const tw = game.threeWay;
   const favored = game.winProbability.home >= game.winProbability.away ? "home" : "away";
   const favoredTeam = favored === "home" ? game.homeTeam : game.awayTeam;
@@ -66,8 +69,18 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.1 }}
       onClick={() => onSelect(game)}
-      className="card-shine bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
+      className="card-shine relative bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
     >
+      {livePickOverlay?.kind === "ranked" ? (
+        <div
+          className="absolute top-2 right-2 z-10 pointer-events-none"
+          aria-label={`Live pick ${livePickOverlay.rank}`}
+        >
+          <span className="inline-flex items-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-black tracking-wide text-primary-foreground shadow-sm">
+            Pick {livePickOverlay.rank}
+          </span>
+        </div>
+      ) : null}
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
         <div className="flex flex-col gap-0.5 min-w-0">
@@ -124,6 +137,25 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
             ))}
         </div>
       </div>
+
+      {livePickOverlay?.kind === "ranked" ? (
+        <div className="mx-4 mb-2 rounded-md border border-emerald-500/25 bg-emerald-500/[0.07] px-2.5 py-1.5 space-y-0.5">
+          <p className="text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 leading-tight">
+            {livePickOverlay.badgeLine}
+          </p>
+          <p className="text-[10px] text-muted-foreground tabular-nums leading-tight">
+            Conf {livePickOverlay.liveConfidencePct}% · Edge {livePickOverlay.edgePct >= 0 ? "+" : ""}
+            {livePickOverlay.edgePct}%
+          </p>
+          {livePickOverlay.recommendedAction ? (
+            <p className="text-[10px] font-semibold text-foreground leading-tight">{livePickOverlay.recommendedAction}</p>
+          ) : null}
+        </div>
+      ) : livePickOverlay?.kind === "stale" ? (
+        <div className="mx-4 mb-2 rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5">
+          <p className="text-[10px] font-bold tracking-wide text-muted-foreground">{livePickOverlay.label}</p>
+        </div>
+      ) : null}
 
       {/* Teams + Probability */}
       <div className="px-4 py-3 flex items-center gap-4">

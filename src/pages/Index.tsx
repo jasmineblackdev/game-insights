@@ -24,6 +24,7 @@ import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
 import { flushLiveBettingStagesToSupabase } from "@/lib/liveBettingSupabaseSync";
 import { prefetchEdgeCardQueries } from "@/lib/prefetchEdgeCardData";
+import { buildLivePickOverlays, type LivePickOverlay } from "@/lib/livePickRanking";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -273,6 +274,11 @@ const Index = () => {
   const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
 
   const filteredGames = leagueGamesWithIntel.filter((g) => g.gameDate === dateFilter);
+
+  const livePickOverlays = useMemo(() => {
+    if (viewMode !== "games") return new Map<string, LivePickOverlay>();
+    return buildLivePickOverlays(filteredGames);
+  }, [viewMode, filteredGames]);
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
@@ -606,6 +612,7 @@ const Index = () => {
                       game={game}
                       index={i}
                       onSelect={setSelectedGame}
+                      livePickOverlay={livePickOverlays.get(game.id) ?? null}
                     />
                   ))}
                 </div>

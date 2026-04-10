@@ -2,8 +2,8 @@ import type { GamePrediction } from "@/data/mockGames";
 import { queryClient } from "@/lib/queryClient";
 import { supabase } from "@/lib/supabase";
 
-function invalidateMlbCaches() {
-  void queryClient.invalidateQueries({ queryKey: ["mlb-espn-enriched"] });
+/** Only re-run MLB modeled query — merge uses cached ESPN data + localStorage. Invalidating ESPN refetches all MLB games and can freeze Safari when stacked with odds polling. */
+function invalidateMlbModeledQueries() {
   void queryClient.invalidateQueries({ queryKey: ["mlb-modeled"] });
 }
 
@@ -57,7 +57,7 @@ export async function pullMlbStarterConfirmationsFromSupabase(): Promise<boolean
     } catch {
       /* quota */
     }
-    invalidateMlbCaches();
+    invalidateMlbModeledQueries();
   }
   return changed;
 }
@@ -73,7 +73,7 @@ async function persistMlbStarterConfirmationToCloud(gameId: string, confirmed: b
   if (!confirmed) {
     const { error } = await supabase.from(TABLE).delete().eq("game_id", gameId);
     if (error) console.warn("mlb_starter_confirm delete:", error.message);
-    else invalidateMlbCaches();
+    else invalidateMlbModeledQueries();
     return;
   }
 
@@ -87,7 +87,7 @@ async function persistMlbStarterConfirmationToCloud(gameId: string, confirmed: b
     { onConflict: "user_id,game_id" }
   );
   if (error) console.warn("mlb_starter_confirm upsert:", error.message);
-  else invalidateMlbCaches();
+  else invalidateMlbModeledQueries();
 }
 
 export function setMlbStartersUserConfirmed(gameId: string, confirmed: boolean): void {

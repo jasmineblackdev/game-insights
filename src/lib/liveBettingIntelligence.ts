@@ -117,7 +117,8 @@ export function activeLiveBettingCheckpoints(game: GamePrediction): LiveCheckpoi
   switch (game.league) {
     case "nba":
     case "nfl":
-      if (ls.periodNum >= 2 && !ls.isHalftime) out.push({ id: "after_q1", label: "After Q1" });
+      if (ls.isHalftime) out.push({ id: "halftime", label: "Halftime" });
+      else if (ls.periodNum >= 2) out.push({ id: "after_q1", label: "After Q1" });
       break;
     case "mlb":
       if (ls.periodNum >= 5) out.push({ id: "after_inning_5", label: "After 5th inning" });
