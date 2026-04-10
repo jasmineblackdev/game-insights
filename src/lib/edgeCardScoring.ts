@@ -278,7 +278,19 @@ export function normalizeSlipItem(raw: unknown): EdgeSlipItem | null {
     return raw as DraftEdgeSlipItem;
   }
   if (o.kind === "player_prop") {
-    return raw as PlayerPropEdgeSlipItem;
+    const item = raw as PlayerPropEdgeSlipItem;
+    const snap = item.snapshot;
+    if (!snap || typeof snap !== "object") return null;
+    const ed = snap.edgeDisplay;
+    const edgeDisplay = typeof ed === "number" && Number.isFinite(ed) ? Math.abs(ed) : 0;
+    const predictionDirection =
+      snap.predictionDirection === "MORE" || snap.predictionDirection === "LESS"
+        ? snap.predictionDirection
+        : "MORE";
+    return {
+      ...item,
+      snapshot: { ...snap, edgeDisplay, predictionDirection },
+    };
   }
   if (o.kind === "team_pick") {
     return raw as TeamEdgeSlipItem;

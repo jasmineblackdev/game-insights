@@ -61,6 +61,11 @@ function leagueShort(l: League) {
   return l === "soccer" ? "EPL" : l.toUpperCase();
 }
 
+function formatPropEdgeDisplay(n: unknown): string {
+  if (typeof n === "number" && Number.isFinite(n)) return n.toFixed(1);
+  return "—";
+}
+
 /** MLB totals (~7–11) vs NBA (~210+) — surfaces board context on hub cards. */
 function mlbBoardSummary(lines: GamePrediction["lines"]): string | null {
   if (!lines) return null;
@@ -928,7 +933,7 @@ function EdgeCardPageInner() {
                         <span className="font-bold text-foreground">{leagueShort(item.league)}</span> ·{" "}
                         <span className="text-primary font-semibold">Prop</span> · {item.snapshot.label}
                         <span className="block text-muted-foreground mt-0.5">
-                          {item.snapshot.predictionDirection} · edge {item.snapshot.edgeDisplay.toFixed(1)} ·{" "}
+                          {item.snapshot.predictionDirection} · edge {formatPropEdgeDisplay(item.snapshot.edgeDisplay)} ·{" "}
                           {item.snapshot.confidence}
                         </span>
                       </div>
