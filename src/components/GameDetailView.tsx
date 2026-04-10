@@ -162,6 +162,80 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
           Updated {timeAgo > 0 ? `${timeAgo}m ago` : "just now"}
         </div>
 
+        {game._meta?.bettingIntel ? (
+          <div className="mt-4 pt-4 border-t border-border rounded-lg bg-emerald-500/[0.04] border-emerald-500/15 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-display font-bold text-foreground">
+              <DollarSign className="w-4 h-4 text-emerald-500 shrink-0" />
+              Betting value — primary pick
+            </div>
+            <p className="text-sm font-semibold text-foreground">
+              {game._meta.bettingIntel.pickAbbrev}{" "}
+              <span className="text-muted-foreground font-normal tabular-nums">
+                {game._meta.bettingIntel.americanOdds > 0 ? "+" : ""}
+                {game._meta.bettingIntel.americanOdds}
+              </span>
+              {game._meta.bettingIntel.sportsbookKey ? (
+                <span className="text-[10px] text-muted-foreground ml-2">({game._meta.bettingIntel.sportsbookKey})</span>
+              ) : null}
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Model probability</span>
+                <span className="font-semibold tabular-nums">{Math.round(game._meta.bettingIntel.modelProbability * 100)}%</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Implied (book)</span>
+                <span className="font-semibold tabular-nums">{Math.round(game._meta.bettingIntel.impliedProbability * 100)}%</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Edge</span>
+                <span
+                  className={cn(
+                    "font-semibold tabular-nums",
+                    game._meta.bettingIntel.edge >= 0.04 ? "text-emerald-600 dark:text-emerald-400" : ""
+                  )}
+                >
+                  {game._meta.bettingIntel.edge >= 0 ? "+" : ""}
+                  {(game._meta.bettingIntel.edge * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Edge score (pts)</span>
+                <span className="font-semibold tabular-nums">{game._meta.bettingIntel.edgeScore}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Bet quality</span>
+                <span className="font-semibold">{game._meta.bettingIntel.betQualityRating}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground block text-[10px]">Value / parlay</span>
+                <span className="font-semibold capitalize">
+                  {game._meta.bettingIntel.valueRating} · fit {game._meta.bettingIntel.parlayFitScore} · safety{" "}
+                  {game._meta.bettingIntel.parlaySafetyScore}
+                </span>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Parlay:{" "}
+              <span className={game._meta.bettingIntel.recommendedForParlay ? "text-emerald-600 dark:text-emerald-400 font-medium" : ""}>
+                {game._meta.bettingIntel.recommendedForParlay ? "Recommended" : "Not recommended"}
+              </span>
+              {game._meta.bettingIntel.lineMovementSharpTowardPick ? (
+                <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                  Line movement aligns with this side (market steam heuristic).
+                </span>
+              ) : null}
+            </p>
+            {game._meta.bettingIntel.filterNotes.length > 0 ? (
+              <ul className="text-[10px] text-muted-foreground list-disc list-inside space-y-0.5">
+                {game._meta.bettingIntel.filterNotes.map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
         {edge && game.status === "upcoming" ? (
           <div className="mt-5 pt-4 border-t border-border flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2">
             <Button

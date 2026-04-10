@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -19,6 +19,8 @@ import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { cn } from "@/lib/utils";
+import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
+import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 
 type ViewMode = "games" | "props" | "draft";
 
@@ -214,9 +216,32 @@ const Index = () => {
           ? (mlbModeledQuery.data ?? [])
           : (soccerQuery.data ?? []);
 
+  const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
+
+  const [oddsMapHome, setOddsMapHome] = useState<Map<string, GameOddsBundle>>(() => new Map());
+
+  useEffect(() => {
+    if (!leagueGames.length) {
+      setOddsMapHome(new Map());
+      return;
+    }
+    let cancelled = false;
+    fetchAllOddsBundles(leagueGames).then((m) => {
+      if (!cancelled) setOddsMapHome(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameIdsKey, league]);
+
+  const leagueGamesWithIntel = useMemo(
+    () => enrichGamesWithBettingIntelligence(leagueGames, oddsMapHome),
+    [leagueGames, oddsMapHome]
+  );
+
   useEffect(() => {
     if (!selectedGame || selectedGame.league !== "mlb") return;
-    const next = leagueGames.find((g) => g.id === selectedGame.id);
+    const next = leagueGamesWithIntel.find((g) => g.id === selectedGame.id);
     if (!next) return;
     if (
       next.winProbability.home !== selectedGame.winProbability.home ||
@@ -226,7 +251,18 @@ const Index = () => {
     ) {
       setSelectedGame(next);
     }
-  }, [leagueGames, selectedGame]);
+  }, [leagueGamesWithIntel, selectedGame]);
+
+  useEffect(() => {
+    if (!selectedGame) return;
+    const next = leagueGamesWithIntel.find((g) => g.id === selectedGame.id);
+    if (!next) return;
+    const oe = selectedGame._meta?.bettingIntel?.edge;
+    const ne = next._meta?.bettingIntel?.edge;
+    if (oe !== ne || selectedGame.lastUpdated !== next.lastUpdated) {
+      setSelectedGame(next);
+    }
+  }, [leagueGamesWithIntel, selectedGame]);
 
   const today = new Date();
   const tomorrow = new Date(today);
@@ -235,7 +271,7 @@ const Index = () => {
   const todayLabel = `Today · ${formatDate(today)}`;
   const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
 
-  const filteredGames = leagueGames.filter((g) => g.gameDate === dateFilter);
+  const filteredGames = leagueGamesWithIntel.filter((g) => g.gameDate === dateFilter);
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
 
