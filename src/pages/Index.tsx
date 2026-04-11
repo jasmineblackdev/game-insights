@@ -10,7 +10,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Layers, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { ClipboardList, Layers, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -23,8 +23,9 @@ import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
+import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 
-type ViewMode = "games" | "props" | "draft" | "college_futures";
+type ViewMode = "games" | "props" | "draft" | "college_futures" | "parlay_edge";
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -232,6 +233,18 @@ const Index = () => {
 
   const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
 
+  // All-sport pool for Parlay Edge (cross-sport candidates need every league loaded)
+  const allGames = useMemo<GamePrediction[]>(
+    () => [
+      ...(nbaQuery.data ?? []),
+      ...(nflQuery.data ?? []),
+      ...(mlbModeledQuery.data ?? []),
+      ...(boxingQuery.data ?? []),
+      ...(mmaQuery.data ?? []),
+    ],
+    [nbaQuery.data, nflQuery.data, mlbModeledQuery.data, boxingQuery.data, mmaQuery.data]
+  );
+
   const [oddsMapHome, setOddsMapHome] = useState<Map<string, GameOddsBundle>>(() => new Map());
 
   useEffect(() => {
@@ -247,6 +260,18 @@ const Index = () => {
       cancelled = true;
     };
   }, [gameIdsKey, league]);
+
+  // Odds map for the full all-sport pool (used by Parlay Edge)
+  const allGamesKey = useMemo(() => allGames.map((g) => g.id).sort().join(","), [allGames]);
+  const [oddsMapAll, setOddsMapAll] = useState<Map<string, GameOddsBundle>>(() => new Map());
+  useEffect(() => {
+    if (viewMode !== "parlay_edge" || !allGames.length) return;
+    let cancelled = false;
+    fetchAllOddsBundles(allGames).then((m) => {
+      if (!cancelled) setOddsMapAll(m);
+    });
+    return () => { cancelled = true; };
+  }, [allGamesKey, viewMode]);
 
   const leagueGamesWithIntel = useMemo(
     () => enrichGamesWithBettingIntelligence(leagueGames, oddsMapHome),
@@ -381,7 +406,11 @@ const Index = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="font-display font-bold text-2xl sm:text-3xl md:text-4xl text-foreground mb-2 break-words"
                 >
-                  {viewMode === "draft" ? (
+                  {viewMode === "parlay_edge" ? (
+                    <>
+                      Parlay <span className="text-gradient-primary">Edge</span>
+                    </>
+                  ) : viewMode === "draft" ? (
                     <>
                       {leagueLabel(league)}{" "}
                       <span className="text-gradient-primary">Draft Edge</span>
@@ -409,7 +438,11 @@ const Index = () => {
                   transition={{ delay: 0.1 }}
                   className="text-sm text-muted-foreground max-w-lg leading-relaxed"
                 >
-                  {viewMode === "draft" ? (
+                  {viewMode === "parlay_edge" ? (
+                    <>
+                      AI-built parlays ranked by edge, confidence, and risk tier. Safe 3-leg, Balanced 4-leg, and Aggressive 6-leg cards generated automatically. Learns which sport mixes and market combos perform best over time.
+                    </>
+                  ) : viewMode === "draft" ? (
                     <>
                       AI-style outcomes: probability ranges, team fit, positional value, and prop-style cards (O/U, round /
                       window moves, team needs). Add any card to your Edge Card — separate from game markets.
@@ -556,6 +589,19 @@ const Index = () => {
                       <Trophy className="w-3 h-3 shrink-0" />
                       College futures
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewModeChange("parlay_edge")}
+                      className={cn(
+                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
+                        viewMode === "parlay_edge"
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground active:bg-muted"
+                      )}
+                    >
+                      <Sparkles className="w-3 h-3 shrink-0" />
+                      Parlay Edge
+                    </button>
                   </div>
                 </div>
 
@@ -574,7 +620,9 @@ const Index = () => {
               </div>
 
               {/* Content */}
-              {viewMode === "college_futures" ? (
+              {viewMode === "parlay_edge" ? (
+                <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} />
+              ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
               ) : viewMode === "props" ? (
                 <PlayerEdgeSection />
