@@ -21,6 +21,10 @@ interface ImportMetaEnv {
    * See GET /v4/sports?all=true — keys vary by season.
    */
   readonly VITE_THE_ODDS_API_NFL_DRAFT_SPORT_KEY?: string;
+  /** Optional Odds API sport_key overrides for college futures outrights (see collegeFuturesConfig). */
+  readonly VITE_ODDS_COLLEGE_FOOTBALL_SPORT_KEY?: string;
+  readonly VITE_ODDS_COLLEGE_BASKETBALL_SPORT_KEY?: string;
+  readonly VITE_ODDS_COLLEGE_BASEBALL_SPORT_KEY?: string;
   /**
    * Optional override: absolute URL to GET `{ items, accuracy? }` (query: sport, statType, id).
    * If unset, `VITE_SUPABASE_URL` + anon key target `/functions/v1/player-edge`. Mock fallback on error.

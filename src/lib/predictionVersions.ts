@@ -186,24 +186,30 @@ function liveAdjustedHomeProb(game: GamePrediction, pregameHomeProb: number): nu
   return clamp(Math.round(pregameHomeProb + adjustment), 5, 95);
 }
 
+/**
+ * Live home win probability (0–100) for checkpoint / live betting math.
+ * Mirrors `buildLiveVersion` home-side calculation (including MLB pitcher blend).
+ */
+export function computeLiveHomeWinPercent(game: GamePrediction, pregameHomePct: number): number {
+  let liveHomeProb = liveAdjustedHomeProb(game, pregameHomePct);
+  if (game.league === "mlb") {
+    const pitcherScore = game.mlb?.modelOutput?._debug?.pitcherScore ?? 0;
+    const pitcherAdj = clamp(Math.round(pitcherScore * 3), -3, 3);
+    const scoreDelta = liveHomeProb - pregameHomePct;
+    liveHomeProb = clamp(
+      Math.round(pregameHomePct + scoreDelta * 0.70 + pitcherAdj * 0.30),
+      5, 95
+    );
+  }
+  return liveHomeProb;
+}
+
 /** Build the live prediction version. Returns null if trigger not met. */
 export function buildLiveVersion(game: GamePrediction): PredictionVersion | null {
   if (!isLiveTriggerMet(game)) return null;
   const ls = game._meta!.liveState!;
 
-  let liveHomeProb = liveAdjustedHomeProb(game, game.winProbability.home);
-
-  // MLB F5: starter is usually still pitching — blend in the pregame pitcher quality lean.
-  // Weight: 70% score-based + 30% pitcher ERA quality (capped at ±3pp).
-  if (game.league === "mlb") {
-    const pitcherScore = game.mlb?.modelOutput?._debug?.pitcherScore ?? 0;
-    const pitcherAdj = clamp(Math.round(pitcherScore * 3), -3, 3);
-    const scoreDelta = liveHomeProb - game.winProbability.home;
-    liveHomeProb = clamp(
-      Math.round(game.winProbability.home + scoreDelta * 0.70 + pitcherAdj * 0.30),
-      5, 95
-    );
-  }
+  let liveHomeProb = computeLiveHomeWinPercent(game, game.winProbability.home);
   const liveAwayProb = 100 - liveHomeProb;
   const pickedHome = liveHomeProb >= liveAwayProb;
   const predictedSide = pickedHome ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
