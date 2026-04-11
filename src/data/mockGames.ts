@@ -195,6 +195,14 @@ export interface PredictionIntelMeta {
     correlation_failures: string;
     confidence_curve: string;
   };
+  /** 0–100 inverse of missing lineup / injury / pitcher certainty gaps */
+  data_completeness_score?: number;
+  /** 0–100 consistency of recent form vs season baseline */
+  statistical_stability_score?: number;
+  /** 0–100 line move likely driven by public steam vs sharp info */
+  market_sentiment_steam_score?: number;
+  /** 0–100 heuristic usage spike vs season for key players */
+  role_change_volatility_score?: number;
 }
 
 /**
@@ -261,6 +269,8 @@ export interface PredictionQualityMeta {
   /** True when material late info should surface an extra prediction version. */
   late_news_refresh?: boolean;
   version_timestamp?: string;
+  /** Tags used for interaction learning at settlement time */
+  learning_context_tags?: string[];
 }
 
 export interface GameLines {

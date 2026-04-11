@@ -1,5 +1,5 @@
 import type { League } from "@/data/mockGames";
-import { getLearnedEdgeFloor } from "@/lib/predictionLearningStorage";
+import { getLearnedEdgeFloor, getSportEngineLearningState } from "@/lib/predictionLearningStorage";
 
 /** Sport floors for “value still alive” / ranking / recommendations (GameLens v2). */
 export const VALUE_GONE_EDGE_BY_SPORT: Record<League, number> = {
@@ -17,11 +17,42 @@ const EDGE_CEILING: Record<League, number> = {
   soccer: 0.04,
 };
 
+const UNDERPERFORM_MIN_N: Record<League, number> = {
+  nba: 42,
+  nfl: 42,
+  mlb: 30,
+  soccer: 30,
+};
+
+const UNDERPERFORM_BOOST: Record<League, number> = {
+  nba: 0.0035,
+  nfl: 0.0035,
+  mlb: 0.005,
+  soccer: 0.005,
+};
+
+/** Hit-rate ceiling before we ask for extra edge (MLB/soccer lines are noisier). */
+const UNDERPERFORM_HIT_EMA: Record<League, number> = {
+  nba: 0.501,
+  nfl: 0.501,
+  mlb: 0.508,
+  soccer: 0.508,
+};
+
 export function defaultMinEdgeForRecommend(league: League): number {
   const base = VALUE_GONE_EDGE_BY_SPORT[league];
   const ceil = EDGE_CEILING[league];
   const learned = getLearnedEdgeFloor(league);
-  return Math.min(ceil, Math.max(base, learned));
+  const eng = getSportEngineLearningState(league);
+  const minN = UNDERPERFORM_MIN_N[league];
+  const hitCeil = UNDERPERFORM_HIT_EMA[league];
+  const underperformBoost =
+    eng.n >= minN && eng.hitEma < hitCeil ? UNDERPERFORM_BOOST[league] : 0;
+  let overperformTrim = eng.n >= 80 && eng.hitEma > 0.585 ? -0.0015 : 0;
+  if (league === "nba" && eng.n >= 44 && eng.hitEma > 0.568) {
+    overperformTrim = Math.min(overperformTrim, -0.0022);
+  }
+  return Math.min(ceil, Math.max(base, learned + underperformBoost + overperformTrim));
 }
 
 /** True when edge is below sport floor — treat as value gone for ranking / parlay. */

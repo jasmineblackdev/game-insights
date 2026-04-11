@@ -266,6 +266,7 @@ const Index = () => {
         pickType: "team_moneyline",
         hit,
         errorTags: inferMissTagsForLearning(g, hit),
+        game: g,
       });
       void submitTeamMoneylineLearningRecord(g, ctx);
       if (!hit) recordCorrelationFailurePattern([g.id, ctx.pickedSide]);
