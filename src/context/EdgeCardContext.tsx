@@ -25,6 +25,7 @@ import {
   defaultEdgeHubFilters,
   draftEdgeToSlipItem,
   isTeamSlipItem,
+  normalizeEdgeCardSizeFromStorage,
   normalizeSlipItem,
   playerPropToSlipItem,
   slipAggregateConfidence,
@@ -47,6 +48,8 @@ interface EdgeCardContextValue {
   removePick: (itemId: string) => void;
   replacePick: (itemId: string, item: TeamEdgeSlipItem) => void;
   clearSlip: () => void;
+  /** Remove slip items whose league is not in `allowed`. Returns how many were removed. No-op when `allowed` is `"all"`. */
+  trimSlipToAllowedLeagues: (allowed: League[] | "all") => number;
   autoBuild: (candidates: EdgeCandidate[], size: EdgeCardSize) => void;
   saveSlipToHistory: () => void;
   setHistoryOutcome: (entryId: string, outcome: EdgeSlipOutcome | null) => void;
@@ -71,9 +74,8 @@ function loadSlip(): { cardSize: EdgeCardSize; items: EdgeSlipItem[] } {
   try {
     const raw = localStorage.getItem(STORAGE_SLIP);
     if (!raw) return { cardSize: 3, items: [] };
-    const p = JSON.parse(raw) as { cardSize?: EdgeCardSize; items?: unknown[] };
-    const size =
-      p.cardSize === 4 || p.cardSize === 6 || p.cardSize === 10 ? p.cardSize : 3;
+    const p = JSON.parse(raw) as { cardSize?: unknown; items?: unknown[] };
+    const size = normalizeEdgeCardSizeFromStorage(p.cardSize);
     return { cardSize: size, items: parseSlipItems(p.items) };
   } catch {
     return { cardSize: 3, items: [] };
@@ -193,7 +195,27 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clearSlip = useCallback(() => {
-    setSlipState((s) => ({ ...s, items: [] }));
+    setSlipState((s) => {
+      const next = { ...s, items: [] as EdgeSlipItem[] };
+      try {
+        localStorage.setItem(STORAGE_SLIP, JSON.stringify({ cardSize: next.cardSize, items: [] }));
+      } catch {
+        /* quota / private mode */
+      }
+      return next;
+    });
+  }, []);
+
+  const trimSlipToAllowedLeagues = useCallback((allowed: League[] | "all"): number => {
+    if (allowed === "all") return 0;
+    let removed = 0;
+    setSlipState((s) => {
+      const next = s.items.filter((x) => allowed.includes(x.league));
+      removed = s.items.length - next.length;
+      if (removed === 0) return s;
+      return { ...s, items: next };
+    });
+    return removed;
   }, []);
 
   const autoBuild = useCallback((candidates: EdgeCandidate[], size: EdgeCardSize) => {
@@ -212,8 +234,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       (i) => isTeamSlipItem(i) && i.snapshot.volatilityLabel === "high"
     ).length;
     const aggregateConfidence = slipAggregateConfidence(
-      slip.map((i) => ({ confidence: i.snapshot.confidence })),
-      { correlationScore, highVolatilityTeamPicks }
+      slip.map((i) => ({ confidence: i.snapshot.confidence }))
     );
     let riskLabel: EdgeHistoryEntry["riskLabel"] = "controlled";
     if (
@@ -274,6 +295,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       removePick,
       replacePick,
       clearSlip,
+      trimSlipToAllowedLeagues,
       autoBuild,
       saveSlipToHistory,
       setHistoryOutcome,
@@ -294,6 +316,7 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       removePick,
       replacePick,
       clearSlip,
+      trimSlipToAllowedLeagues,
       autoBuild,
       saveSlipToHistory,
       setHistoryOutcome,

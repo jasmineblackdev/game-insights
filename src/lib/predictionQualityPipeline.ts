@@ -18,14 +18,22 @@ import {
   type CalibrationRow,
 } from "@/lib/confidenceCalibration";
 import { parseRecord, winProbFromOdds } from "@/lib/espnShared";
-
-const BLEND_WEIGHTS = {
-  historical_baseline: 0.18,
-  recent_trend: 0.12,
-  matchup: 0.28,
-  market: 0.27,
-  live: 0.15,
-} as const;
+import {
+  buildPipelinePredictionIntel,
+  computeLiveUpdateLatencyMs,
+  computePublicBiasScore,
+} from "@/lib/predictionIntelCompute";
+import { deriveLearningContextTags } from "@/lib/predictionLearningStorage";
+import {
+  computeContextAwareBlendWeights,
+  computeDataCompletenessScore,
+  computeLearningProbabilityStackPp,
+  computeMarketSentimentSteamScore,
+  computeRoleChangeVolatilityScore,
+  computeStatisticalStabilityScore,
+  shouldDowngradeForHighVariance,
+  shouldDowngradeForPredictionStale,
+} from "@/lib/learningSignalAdjustments";
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -263,19 +271,42 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
   );
   const live = liveSubScore(next);
 
+  const weights = computeContextAwareBlendWeights(next.league, next, fat, vol, sch);
   const blended =
-    BLEND_WEIGHTS.historical_baseline * hist +
-    BLEND_WEIGHTS.recent_trend * recent +
-    BLEND_WEIGHTS.matchup * match +
-    BLEND_WEIGHTS.market * mkt +
-    BLEND_WEIGHTS.live * live;
+    weights.historical_baseline * hist +
+    weights.recent_trend * recent +
+    weights.matchup * match +
+    weights.market * mkt +
+    weights.live * live;
 
   const blended_adjustment_pp = clamp((blended - 50) * 0.065, -3, 3);
   next = applyBoundedProbShift(next, blended_adjustment_pp);
+  const modelHomeAfterBlend = next.threeWay ? next.threeWay.home : next.winProbability.home;
+  const publicBiasForLearn = computePublicBiasScore(next);
+  const learning_adjustment_pp = clamp(
+    computeLearningProbabilityStackPp({
+      league: next.league,
+      g: next,
+      modelHome: modelHomeAfterBlend,
+      closeH,
+      lineMove,
+      sharpMove,
+      publicBiasScore: publicBiasForLearn,
+      volLabel: vol.volatility_label,
+    }),
+    -2.6,
+    2.6
+  );
+  next = applyBoundedProbShift(next, learning_adjustment_pp);
   const finalModelHome = next.threeWay ? next.threeWay.home : next.winProbability.home;
+
+  const dataCompletenessScore = computeDataCompletenessScore(next);
+  const statisticalStabilityScore = computeStatisticalStabilityScore(next);
+  const roleChangeVolatilityScore = computeRoleChangeVolatilityScore(next);
 
   let conf = rawConfidence;
   if (vol.volatility_label === "high") conf = downgradeConfidence(conf);
+  else if (shouldDowngradeForHighVariance(vol.volatility_score)) conf = downgradeConfidence(conf);
   if (marketImpClose != null && Math.abs(marketImpClose - finalModelHome) >= 9) conf = downgradeConfidence(conf);
   if (sch.recent_schedule_difficulty >= 65 && Math.max(next.winProbability.home, next.winProbability.away) >= 60) {
     conf = downgradeConfidence(conf);
@@ -285,16 +316,50 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
       (i) => (i.status === "GTD" || i.status === "QUESTIONABLE") && i.impactScore >= 7
     ).length >= 2;
   if (gtdHeavy) conf = downgradeConfidence(conf);
+  if (dataCompletenessScore <= 58) conf = downgradeConfidence(conf);
+  if (statisticalStabilityScore <= 38) conf = downgradeConfidence(conf);
+  if (roleChangeVolatilityScore >= 72) conf = downgradeConfidence(conf);
+  if (shouldDowngradeForPredictionStale(next)) conf = downgradeConfidence(conf);
 
   const cal = calibrateConfidenceForSport(next.league, conf, calibrationRows);
   conf = cal.confidence;
 
+  const blendObj = {
+    historical_baseline: Math.round(hist * 10) / 10,
+    recent_trend: Math.round(recent * 10) / 10,
+    matchup: Math.round(match * 10) / 10,
+    market: Math.round(mkt * 10) / 10,
+    live: Math.round(live * 10) / 10,
+    blended_adjustment_pp: Math.round(blended_adjustment_pp * 100) / 100,
+    learning_adjustment_pp: Math.round(learning_adjustment_pp * 100) / 100,
+  };
+
+  const modelVsCloseHomePp = closeH != null ? Math.round((finalModelHome - closeH) * 100) / 100 : null;
+  const liveLatMs = computeLiveUpdateLatencyMs(next);
+  const predictionIntel = buildPipelinePredictionIntel(next, blendObj, modelVsCloseHomePp);
+  predictionIntel.live_update_latency_ms = liveLatMs;
+  predictionIntel.live_latency_confidence_penalty = liveLatMs > 12_000 && next.status === "live";
+  const lineMoveAbsIntel = lineMove != null ? Math.abs(lineMove) : null;
+  const pubBiasIntel = computePublicBiasScore(next);
+  predictionIntel.market_sentiment_steam_score = computeMarketSentimentSteamScore(
+    lineMoveAbsIntel,
+    sharpMove,
+    pubBiasIntel
+  );
+  predictionIntel.data_completeness_score = dataCompletenessScore;
+  predictionIntel.statistical_stability_score = statisticalStabilityScore;
+  predictionIntel.role_change_volatility_score = roleChangeVolatilityScore;
+
+  if ((predictionIntel.model_disagreement_score ?? 0) >= 74) conf = downgradeConfidence(conf);
+  if ((predictionIntel.injury_uncertainty_score ?? 0) >= 64) conf = downgradeConfidence(conf);
+  if (predictionIntel.live_latency_confidence_penalty) conf = downgradeConfidence(conf);
+
   const agreeMove =
     lineMove != null &&
-    ((lineMove > 1.5 && modelHome >= 52) || (lineMove < -1.5 && modelHome <= 48));
+    ((lineMove > 1.5 && finalModelHome >= 52) || (lineMove < -1.5 && finalModelHome <= 48));
   const disagreeMove =
     lineMove != null &&
-    ((lineMove > 2 && modelHome <= 48) || (lineMove < -2 && modelHome >= 52));
+    ((lineMove > 2 && finalModelHome <= 48) || (lineMove < -2 && finalModelHome >= 52));
 
   const extraReasons: string[] = [...sty.style_notes];
   if (agreeMove) extraReasons.push("Line movement aligns with the model lean — slightly higher conviction.");
@@ -313,8 +378,16 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
   if (fat.fatigue_score >= 62) {
     extraReasons.push("Rest / congestion profile adds fatigue risk — projection confidence capped.");
   }
+  if ((predictionIntel.blowout_risk_score ?? 0) >= 62) {
+    extraReasons.push("Blowout script risk elevated — pace and minutes variance can swing props.");
+  }
 
   const extraRisks: string[] = [];
+  if ((predictionIntel.model_disagreement_score ?? 0) >= 72) {
+    extraRisks.push(
+      "Model pillars diverge — historical/trend/market reads disagree; treat lean as softer."
+    );
+  }
   if (disagreeMove) extraRisks.push("Market disagreement: consider shrinking stake size.");
   if (sharpMove) extraRisks.push("Sharp line move detected (open vs close) — re-check news before lock.");
   if (sty.style_risk_flag) extraRisks.push("Style clash increases script volatility — same-game parlays carry extra correlation risk.");
@@ -327,16 +400,14 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
 
   const lateNews = detectLateNews(next, sharpMove);
 
+  const brI = predictionIntel.blowout_risk_score ?? 0;
+  const mdI = predictionIntel.model_disagreement_score ?? 0;
+  const corrScore = Math.round(brI * 0.32 + mdI * 0.48);
+  const corrPen = Math.round(brI * 0.14 + mdI * 0.17);
+
   const quality: PredictionQualityMeta = {
     pipelineVersion: 1,
-    modelBlend: {
-      historical_baseline: Math.round(hist * 10) / 10,
-      recent_trend: Math.round(recent * 10) / 10,
-      matchup: Math.round(match * 10) / 10,
-      market: Math.round(mkt * 10) / 10,
-      live: Math.round(live * 10) / 10,
-      blended_adjustment_pp: Math.round(blended_adjustment_pp * 100) / 100,
-    },
+    modelBlend: blendObj,
     market: {
       opening_implied_home: openH,
       closing_implied_home: closeH,
@@ -357,15 +428,29 @@ export function applyQualityToOneGame(g: GamePrediction, calibrationRows: Calibr
     style: sty,
     volatility: vol,
     schedule: sch,
-    correlation: { correlation_score: 0, card_risk_penalty: 0 },
+    correlation: {
+      correlation_score: Math.min(100, corrScore),
+      card_risk_penalty: Math.min(100, corrPen),
+    },
+    predictionIntel,
     risk_flags: [
       ...(vol.volatility_label === "high" ? ["high_volatility"] : []),
       ...(disagreeMove ? ["market_disagreement"] : []),
       ...(sharpMove ? ["line_move_sharp"] : []),
       ...(lateNews ? ["late_news_trigger"] : []),
+      ...((predictionIntel.model_disagreement_score ?? 0) >= 74 ? ["model_pillar_disagreement"] : []),
+      ...((predictionIntel.injury_uncertainty_score ?? 0) >= 64 ? ["injury_uncertainty_elevated"] : []),
+      ...(dataCompletenessScore <= 55 ? ["data_incomplete"] : []),
+      ...(statisticalStabilityScore <= 36 ? ["low_statistical_stability"] : []),
+      ...(roleChangeVolatilityScore >= 74 ? ["role_usage_shift"] : []),
+      ...(shouldDowngradeForPredictionStale(next) ? ["prediction_stale"] : []),
     ],
     late_news_refresh: lateNews,
     version_timestamp: new Date().toISOString(),
+    learning_context_tags: deriveLearningContextTags(next, {
+      volatilityLabel: vol.volatility_label,
+      publicBiasScore: pubBiasIntel,
+    }),
   };
 
   next._meta!.quality = quality;

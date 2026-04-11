@@ -7,7 +7,7 @@ create table if not exists public.prediction_versions (
   id              text primary key,              -- "{game_id}-{phase}"
   game_id         text not null,
   sport           text not null,                 -- "NBA" | "NFL" | "MLB" | "SOCCER"
-  phase           text not null,                 -- "pregame" | "live_q1" | "live_f5" | "live_15min" | "final"
+  phase           text not null,                 -- "pregame" | "live_q1" | "live_f5" | "live_15min" | "live_halftime" | "final"
   trigger_type    text not null,                 -- "scheduled" | "end_q1_signal" | ...
   predicted_side  text not null,                 -- team abbreviation
   probability     integer not null,              -- 0–100

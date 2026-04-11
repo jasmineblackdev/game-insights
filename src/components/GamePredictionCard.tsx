@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { GamePrediction } from "@/data/mockGames";
@@ -15,14 +16,33 @@ import {
 } from "@/lib/liveGameState";
 import { ChevronRight, AlertTriangle, Zap, Shield, Clock, TrendingUp, ArrowRight } from "lucide-react";
 import { buildPredictionVersions, isLiveTriggerMet, phaseColor } from "@/lib/predictionVersions";
+import type { LivePickOverlay } from "@/lib/livePickRanking";
+import type { LiveRankedProp } from "@/lib/livePropRanking";
+
+const DEFAULT_LIVE_PROP_VISIBLE = 3;
+
+function formatStatLabel(statType: string): string {
+  return statType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
 
 interface GamePredictionCardProps {
   game: GamePrediction;
   index: number;
   onSelect: (game: GamePrediction) => void;
+  /** Main-screen ranked live pick fallback (Pick 1–6 / Value Gone / Pass). */
+  livePickOverlay?: LivePickOverlay | null;
+  /** Ranked live player props after checkpoint (same gates as team picks). */
+  livePropRankings?: LiveRankedProp[];
 }
 
-export function GamePredictionCard({ game, index, onSelect }: GamePredictionCardProps) {
+export function GamePredictionCard({
+  game,
+  index,
+  onSelect,
+  livePickOverlay = null,
+  livePropRankings = [],
+}: GamePredictionCardProps) {
+  const [livePropsExpanded, setLivePropsExpanded] = useState(false);
   const tw = game.threeWay;
   const favored = game.winProbability.home >= game.winProbability.away ? "home" : "away";
   const favoredTeam = favored === "home" ? game.homeTeam : game.awayTeam;
@@ -45,7 +65,13 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
   const versions = buildPredictionVersions(game);
   const pregameVer = versions.find((v) => v.phase === "pregame");
   const liveVer =
-    versions.find((v) => v.phase === "live_q1" || v.phase === "live_f5" || v.phase === "live_15min") ??
+    versions.find(
+      (v) =>
+        v.phase === "live_q1" ||
+        v.phase === "live_f5" ||
+        v.phase === "live_15min" ||
+        v.phase === "live_halftime"
+    ) ??
     versions.find((v) => v.phase === "late_news");
   const liveTriggerMet = isLiveTriggerMet(game);
   const showProbShift =
@@ -60,7 +86,7 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.1 }}
       onClick={() => onSelect(game)}
-      className="card-shine bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
+      className="card-shine relative bg-card rounded-lg border border-border hover:border-primary/30 transition-all cursor-pointer group touch-manipulation active:scale-[0.99]"
     >
       {/* Header */}
       <div className="px-4 pt-3 pb-2 flex items-center justify-between gap-2">
@@ -118,6 +144,76 @@ export function GamePredictionCard({ game, index, onSelect }: GamePredictionCard
             ))}
         </div>
       </div>
+
+      {livePickOverlay?.kind === "ranked" ? (
+        <div
+          className="mx-4 mb-2 rounded-md border border-emerald-500/25 bg-emerald-500/[0.07] px-2.5 py-2 space-y-1"
+          aria-label={`Live pick ${livePickOverlay.rank}`}
+        >
+          <p className="text-[11px] font-black tracking-wide text-foreground leading-tight">Pick {livePickOverlay.rank}</p>
+          <p className="text-[10px] font-bold tracking-wide text-emerald-600 dark:text-emerald-400 leading-tight">
+            {livePickOverlay.badgeLine}
+          </p>
+          <p className="text-[11px] font-semibold tabular-nums text-foreground leading-tight">
+            Edge {livePickOverlay.edgePct >= 0 ? "+" : ""}
+            {livePickOverlay.edgePct}%
+          </p>
+          <p className="text-[10px] font-semibold text-muted-foreground leading-tight">
+            Confidence <span className="text-foreground">{livePickOverlay.modelConfidenceLabel}</span>
+            <span className="text-muted-foreground font-normal"> · Live model {livePickOverlay.liveConfidencePct}%</span>
+          </p>
+          {livePickOverlay.recommendedAction ? (
+            <p className="text-[10px] font-semibold text-foreground leading-tight">{livePickOverlay.recommendedAction}</p>
+          ) : null}
+        </div>
+      ) : livePickOverlay?.kind === "stale" ? (
+        <div className="mx-4 mb-2 rounded-md border border-border/80 bg-muted/40 px-2.5 py-1.5">
+          <p className="text-[10px] font-bold tracking-wide text-muted-foreground">{livePickOverlay.label}</p>
+        </div>
+      ) : null}
+
+      {livePropRankings.length > 0 ? (
+        <div
+          className="mx-4 mb-2 rounded-md border border-violet-500/20 bg-violet-500/[0.06] px-2.5 py-2 space-y-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          <p className="text-[10px] font-bold text-violet-700 dark:text-violet-300 leading-tight">
+            {livePropRankings[0]?.badgeLine ?? "Live Edge"}
+          </p>
+          {(livePropsExpanded ? livePropRankings : livePropRankings.slice(0, DEFAULT_LIVE_PROP_VISIBLE)).map((p) => (
+            <div key={`${p.rank}-${p.playerName}-${p.statType}`} className="border-t border-violet-500/15 first:border-t-0 first:pt-0 pt-2 space-y-0.5">
+              <p className="text-[11px] font-black tracking-wide text-foreground">Pick {p.rank}</p>
+              <p className="text-[11px] font-semibold text-foreground leading-snug">
+                {p.playerName}{" "}
+                <span className="text-violet-600 dark:text-violet-400">{p.recommendedSide}</span> {p.lineValue}{" "}
+                {formatStatLabel(p.statType)}
+              </p>
+              <p className="text-[10px] font-semibold tabular-nums text-foreground">
+                Edge {p.edgePct >= 0 ? "+" : ""}
+                {p.edgePct}%
+                <span className="text-muted-foreground font-normal"> · Confidence {p.confidenceLabel}</span>
+              </p>
+              <p className="text-[9px] text-muted-foreground leading-snug line-clamp-2">{p.liveSignalReason}</p>
+            </div>
+          ))}
+          {livePropRankings.length > DEFAULT_LIVE_PROP_VISIBLE ? (
+            <button
+              type="button"
+              className="text-[10px] font-bold text-violet-600 dark:text-violet-400 hover:underline w-full text-left pt-1"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLivePropsExpanded((v) => !v);
+              }}
+            >
+              {livePropsExpanded
+                ? "Show fewer live props"
+                : `+${livePropRankings.length - DEFAULT_LIVE_PROP_VISIBLE} more live prop${livePropRankings.length - DEFAULT_LIVE_PROP_VISIBLE === 1 ? "" : "s"}`}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* Teams + Probability */}
       <div className="px-4 py-3 flex items-center gap-4">

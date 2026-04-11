@@ -19,14 +19,21 @@ function diversificationScore(legs: ValueBetCandidate[]): number {
 }
 
 function correlationPenalty(legs: ValueBetCandidate[]): number {
-  const byGame = new Map<string, number>();
+  const byGame = new Map<string, ValueBetCandidate[]>();
   for (const l of legs) {
-    byGame.set(l.gameId, (byGame.get(l.gameId) ?? 0) + 1);
+    const arr = byGame.get(l.gameId) ?? [];
+    arr.push(l);
+    byGame.set(l.gameId, arr);
   }
   let pen = 0;
-  for (const n of byGame.values()) {
-    if (n >= 3) pen += 28;
-    else if (n === 2) pen += 10;
+  for (const [, arr] of byGame) {
+    const n = arr.length;
+    if (n >= 3) pen += 32;
+    else if (n === 2) {
+      pen += 22;
+      const types = new Set(arr.map((x) => x.pickType));
+      if (types.size > 1) pen += 14;
+    }
   }
   const byCorr = new Map<string, number>();
   for (const l of legs) {
@@ -34,7 +41,7 @@ function correlationPenalty(legs: ValueBetCandidate[]): number {
     byCorr.set(g, (byCorr.get(g) ?? 0) + 1);
   }
   for (const n of byCorr.values()) {
-    if (n >= 2) pen += 6;
+    if (n >= 2) pen += 8;
   }
   return Math.min(100, pen);
 }
@@ -144,7 +151,13 @@ function scoreParlay(legs: ValueBetCandidate[]): SmartParlayResult {
 function greedyBuild(
   pool: ValueBetCandidate[],
   targetLegs: number,
-  opts: { maxPerSport: number; preferSafer: boolean; preferPayout: boolean }
+  opts: {
+    maxPerSport: number;
+    preferSafer: boolean;
+    preferPayout: boolean;
+    /** When true, first pass ignores `isRecommended` (ranked-live pool). */
+    skipRecommendedFilter?: boolean;
+  }
 ): ValueBetCandidate[] {
   const sorted = [...pool].sort((a, b) => {
     if (opts.preferSafer) {
@@ -166,7 +179,7 @@ function greedyBuild(
 
   for (const c of sorted) {
     if (picked.length >= targetLegs) break;
-    if (!c.isRecommended) continue;
+    if (!opts.skipRecommendedFilter && !c.isRecommended) continue;
     const gc = (gameCounts.get(c.gameId) ?? 0) + 1;
     if (gc > 2) continue;
     const sc = (sportC[c.sport] ?? 0) + 1;
@@ -251,4 +264,41 @@ export function optimizeSmartParlays(
 
 export function optimizeForMode(candidates: ValueBetCandidate[], mode: ParlayBuildMode): SmartParlayResult {
   return optimizeSmartParlays(candidates, mode).bestValue;
+}
+
+/**
+ * Best-effort fixed-size parlay from a pre-filtered pool (e.g. main-screen ranked live ML legs).
+ */
+export function optimizeFixedLegCount(
+  candidates: ValueBetCandidate[],
+  legCount: number,
+  maxPerSport = 4
+): SmartParlayResult | null {
+  const pool = candidates.filter(
+    (c) => c.edge > 0 && c.confidence !== "low" && legPassesParlayBuildFilters(c)
+  );
+  if (pool.length < legCount) return null;
+
+  let legs = greedyBuild(pool, legCount, {
+    maxPerSport,
+    preferSafer: false,
+    preferPayout: false,
+    skipRecommendedFilter: true,
+  });
+  while (legs.length > 2 && !passesHardRules(legs, maxPerSport)) {
+    legs = legs.slice(0, -1);
+  }
+  if (legs.length < legCount) {
+    legs = greedyBuild(pool, legCount, {
+      maxPerSport,
+      preferSafer: true,
+      preferPayout: false,
+      skipRecommendedFilter: true,
+    });
+    while (legs.length > 2 && !passesHardRules(legs, maxPerSport)) {
+      legs = legs.slice(0, -1);
+    }
+  }
+  if (legs.length < legCount) return null;
+  return scoreParlay(legs);
 }

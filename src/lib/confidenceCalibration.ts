@@ -4,6 +4,7 @@
  */
 
 import type { ConfidenceLevel, League } from "@/data/mockGames";
+import { getConfidenceAccuracyCurve } from "@/lib/predictionLearningStorage";
 import { supabase } from "@/lib/supabase";
 
 export type CalibrationRow = {
@@ -53,21 +54,43 @@ export function calibrateConfidenceForSport(
   raw: ConfidenceLevel,
   rows: CalibrationRow[]
 ): { confidence: ConfidenceLevel; empirical_hit_rate?: number | null; calibration_window?: string } {
-  if (!rows.length) return { confidence: raw };
-
-  const m = bucketMapForSport(league, rows);
+  const m = rows.length ? bucketMapForSport(league, rows) : {};
   const hi = m.high;
   const med = m.medium;
   const lo = m.low;
 
   let out = raw;
-  if (hi && med && hi.n >= 25 && med.n >= 25 && hi.rate < med.rate - 0.02) {
-    if (out === "high") out = downgrade(out);
+  if (rows.length) {
+    if (hi && med && hi.n >= 25 && med.n >= 25 && hi.rate < med.rate - 0.02) {
+      if (out === "high") out = downgrade(out);
+    }
+    if (med && lo && med.n >= 25 && lo.n >= 25 && med.rate < lo.rate - 0.02) {
+      if (out === "medium") out = downgrade(out);
+    }
+    if (hi && hi.n >= 40 && hi.rate < 0.51 && out === "high") {
+      out = downgrade(out);
+    }
   }
-  if (med && lo && med.n >= 25 && lo.n >= 25 && med.rate < lo.rate - 0.02) {
-    if (out === "medium") out = downgrade(out);
+
+  const curve = getConfidenceAccuracyCurve();
+  if (
+    curve.samples.high >= 14 &&
+    curve.samples.medium >= 14 &&
+    curve.highRate != null &&
+    curve.mediumRate != null &&
+    curve.highRate < curve.mediumRate - 0.034 &&
+    out === "high"
+  ) {
+    out = downgrade(out);
   }
-  if (hi && hi.n >= 40 && hi.rate < 0.51 && out === "high") {
+  if (
+    curve.samples.medium >= 14 &&
+    curve.samples.low >= 14 &&
+    curve.mediumRate != null &&
+    curve.lowRate != null &&
+    curve.mediumRate < curve.lowRate - 0.034 &&
+    out === "medium"
+  ) {
     out = downgrade(out);
   }
 

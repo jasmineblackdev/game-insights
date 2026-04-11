@@ -305,13 +305,17 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
   const modelP = row.recommendedSide === "OVER" ? row.overProbability : row.underProbability;
   const edge = modelP - implied;
 
+  const blowout = game._meta?.quality?.predictionIntel?.blowout_risk_score ?? 0;
+  const volB = blowout >= 58 ? row.volatilityScore + 14 : row.volatilityScore;
+  const uncB = blowout >= 58 ? row.uncertaintyScore + 16 : row.uncertaintyScore;
+
   const valueScore = computeValueScore({
     edge,
     confidence: row.confidence,
     impliedProbability: implied,
     modelProbability: modelP,
-    volatilityScore: row.volatilityScore,
-    uncertaintyScore: row.uncertaintyScore,
+    volatilityScore: Math.min(100, volB),
+    uncertaintyScore: Math.min(100, uncB),
   });
 
   const risk = compositeRiskScore({
@@ -332,7 +336,8 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     row.confidence !== "low" &&
     !flags.injuryUncertainty &&
     !(game.league === "mlb" && game.mlb && game.mlb.pitcherCertainty !== "confirmed" && !eliteValue) &&
-    row.volatilityScore < 62 &&
+    volB < 66 &&
+    blowout < 72 &&
     (american > -400 || eliteValue);
 
   const label = `${row.playerName} ${row.recommendedSide} ${row.lineValue} ${row.statType.replace(/_/g, " ")}`;
@@ -354,8 +359,8 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     edge,
     edgeScore: Math.round(edge * 1000) / 10,
     confidence: row.confidence,
-    volatilityScore: row.volatilityScore,
-    uncertaintyScore: row.uncertaintyScore,
+    volatilityScore: Math.min(100, volB),
+    uncertaintyScore: Math.min(100, uncB),
     correlationGroupId: `game-${game.id}-prop-${row.statType}`,
     valueScore,
     valueGrade: valueGrade(valueScore),

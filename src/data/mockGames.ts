@@ -200,6 +200,53 @@ export interface MarketMlSnapshot {
 export type VolatilityLabel = "low" | "medium" | "high";
 
 /**
+ * Extended signals for calibration, live timing, learning, and parlay risk (no UI requirement).
+ * Populated by predictionQualityPipeline + client enrichment pass.
+ */
+export interface PredictionIntelMeta {
+  /** ms since ESPN/board timestamp vs client now for live games */
+  live_update_latency_ms?: number;
+  /** When latency exceeds target, pipeline may soften confidence */
+  live_latency_confidence_penalty?: boolean;
+  /** Injury/pitcher snapshot changed materially vs last client view */
+  late_change_flag?: boolean;
+  /** 0–100 materiality of late change */
+  late_change_impact_score?: number;
+  /** Estimated edge erosion per minute (positive = edge falling) from client snapshots */
+  edge_decay_rate_pp_per_min?: number;
+  /** Current model edge vs opening implied, pp (moneyline layer) when known */
+  edge_current_vs_open_pp?: number | null;
+  /** Sport-specific floor learned + bounded (see sportEdgeThresholds) */
+  optimal_edge_threshold?: number;
+  /** 0–100 role/minutes certainty proxy */
+  role_stability_score?: number;
+  /** 0–100 blowout script risk (props/minutes) */
+  blowout_risk_score?: number;
+  /** 0–100 spread across model blend pillars */
+  model_disagreement_score?: number;
+  /** 0–100 uncertain injury / GTD mass */
+  injury_uncertainty_score?: number;
+  /** 0–100 season phase variance / rest context */
+  season_phase_score?: number;
+  /** 0–100 public-side overpricing hint (model fades popular side) */
+  public_bias_score?: number;
+  /** Keys into local learning store (accuracy, failure heatmap) */
+  learning_store_keys?: {
+    accuracy_summary: string;
+    correlation_failures: string;
+    confidence_curve: string;
+  };
+  /** 0–100 inverse of missing lineup / injury / pitcher certainty gaps */
+  data_completeness_score?: number;
+  /** 0–100 consistency of recent form vs season baseline */
+  statistical_stability_score?: number;
+  /** 0–100 line move likely driven by public steam vs sharp info */
+  market_sentiment_steam_score?: number;
+  /** 0–100 heuristic usage spike vs season for key players */
+  role_change_volatility_score?: number;
+}
+
+/**
  * Layered quality / calibration metadata — populated by predictionQualityPipeline.
  * UI may ignore; used for Edge Card risk, versions, and future analytics persistence.
  */
@@ -257,10 +304,14 @@ export interface PredictionQualityMeta {
     correlation_score: number;
     card_risk_penalty: number;
   };
+  /** v2 intelligence — live latency, decay, diversification inputs, learning hooks */
+  predictionIntel?: PredictionIntelMeta;
   risk_flags: string[];
   /** True when material late info should surface an extra prediction version. */
   late_news_refresh?: boolean;
   version_timestamp?: string;
+  /** Tags used for interaction learning at settlement time */
+  learning_context_tags?: string[];
 }
 
 export interface GameLines {
@@ -300,6 +351,46 @@ export interface BettingIntelligenceMeta {
   lineMovementSharpTowardPick?: boolean | null;
   filterNotes: string[];
 }
+
+/** Live / pregame value stages — see `liveBettingIntelligence.ts`. */
+export type LiveRecommendedAction =
+  | "Bet Now"
+  | "Wait"
+  | "Pass"
+  | "Value Gone"
+  | "Live Edge Active";
+
+export interface LiveBettingStageRow {
+  stageId: string;
+  stageLabel: string;
+  pickAbbrev: string;
+  pickSide: "home" | "away" | "draw";
+  /** Model win probability for the pick (0–1). */
+  modelProbability: number;
+  confidence: "HIGH" | "MED" | "LOW";
+  americanOdds: number;
+  impliedProbability: number;
+  edge: number;
+  recommendedAction: LiveRecommendedAction;
+  /** Sport-specific live inputs (heuristic until vendor feeds). */
+  sportSignals: string[];
+  liveStateSnapshot?: { period: number; scoreHome: number; scoreAway: number };
+  capturedAt: string;
+  oddsSource?: "sportsbook" | "estimated";
+}
+
+export interface LiveBettingIntelMeta {
+  schemaVersion: 1;
+  /** Frozen opening read when available (localStorage); else current book row. */
+  pregame: LiveBettingStageRow;
+  /** One row per active checkpoint (refreshed each fetch while in-window). */
+  checkpoints: LiveBettingStageRow[];
+  /** Outcome vs pregame pick when final. */
+  final?: LiveBettingStageRow;
+  /** First view was after tip — pregame row is a best-effort replay. */
+  pregameSnapshotMissing?: boolean;
+}
+
 
 export interface GamePrediction {
   id: string;
@@ -361,10 +452,16 @@ export interface GamePrediction {
     /** Boxing: Supabase fight ID for this matchup. */
     boxingFightId?: string;
     marketMl?: MarketMlSnapshot;
+    /** The Odds API event id — used for in-play line refresh (see `oddsEvents.ts`). */
+    oddsApiEventId?: string;
+    bookmakerLastUpdate?: string;
+    oddsFetchedAt?: string;
     /** Layered scoring outputs (market, calibration, volatility, etc.). */
     quality?: PredictionQualityMeta;
     /** Model vs book value for primary pick — see `bettingIntelligence.ts`. */
     bettingIntel?: BettingIntelligenceMeta;
+    /** Pregame vs live checkpoint vs final value — see `liveBettingIntelligence.ts`. */
+    liveBetting?: LiveBettingIntelMeta;
   };
 }
 
