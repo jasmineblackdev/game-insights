@@ -3,6 +3,12 @@
  * or (3) legacy `VITE_THE_ODDS_API_KEY`. Dev proxy is tried first so local `.env.local` works without deploying Edge.
  */
 
+// Production fallback values — VITE_ prefix means these are intentionally public (client-bundled).
+// Used when Vercel build doesn't inject the env vars from .env.production.
+const _FB_URL  = "https://rxnqjdclqyazferbseeq.supabase.co";
+const _FB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4bnFqZGNscXlhemZlcmJzZWVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODQ5NjcsImV4cCI6MjA4Njg2MDk2N30.MA1qhu_gU93MjoDiJsM2FFDlO2iYjSk_kAbwf0rx_9g";
+const _FB_ODDS = "1fd6d7a5b168bd5bc83f28ddd4f325ae";
+
 function trim(s: string | undefined): string {
   return (s ?? "").trim();
 }
@@ -10,8 +16,8 @@ function trim(s: string | undefined): string {
 function resolveEdgeBase(): string | null {
   const custom = trim(import.meta.env.VITE_ODDS_API_PROXY_URL as string | undefined);
   if (custom) return custom.replace(/\/$/, "");
-  const url = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined);
-  const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+  const url = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined) || _FB_URL;
+  const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || _FB_ANON;
   if (url && key) {
     return `${url.replace(/\/$/, "")}/functions/v1/odds-api-proxy`;
   }
@@ -19,7 +25,7 @@ function resolveEdgeBase(): string | null {
 }
 
 function shouldAttachSupabaseAnon(targetUrl: string): boolean {
-  const sup = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined);
+  const sup = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined) || _FB_URL;
   if (!sup) return false;
   try {
     return new URL(targetUrl).origin === new URL(sup).origin;
@@ -31,7 +37,7 @@ function shouldAttachSupabaseAnon(targetUrl: string): boolean {
 function supabaseAnonHeaders(targetUrl: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (shouldAttachSupabaseAnon(targetUrl)) {
-    const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+    const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || _FB_ANON;
     if (key) {
       headers.Authorization = `Bearer ${key}`;
       headers.apikey = key;
@@ -41,7 +47,7 @@ function supabaseAnonHeaders(targetUrl: string): Record<string, string> {
 }
 
 function legacyViteKey(): string | null {
-  const k = trim(import.meta.env.VITE_THE_ODDS_API_KEY as string | undefined);
+  const k = trim(import.meta.env.VITE_THE_ODDS_API_KEY as string | undefined) || _FB_ODDS;
   return k || null;
 }
 
@@ -92,7 +98,7 @@ export async function fetchOddsSportsAll(): Promise<Response> {
     if (dev) return dev;
   }
   const edge = await fetchViaEdge("sports", {});
-  if (edge) return edge;
+  if (edge?.ok) return edge;
   const direct = await fetchViaDirect("sports/?all=true");
   if (direct) return direct;
   return new Response(JSON.stringify({ message: "odds_api_not_configured" }), {
@@ -123,7 +129,8 @@ export async function fetchOddsForSport(params: {
   const edgeParams: Record<string, string> = { sportKey, markets, regions, oddsFormat };
   if (eventIds?.trim()) edgeParams.eventIds = eventIds.trim();
   const edge = await fetchViaEdge("odds", edgeParams);
-  if (edge) return edge;
+  // Only use Edge response if it succeeded — fall through to direct if Edge errors
+  if (edge?.ok) return edge;
 
   const direct = await fetchViaDirect(path);
   if (direct) return direct;

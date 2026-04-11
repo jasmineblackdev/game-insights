@@ -3,9 +3,10 @@
  * No mock data — every player, team, opponent, and stat is live from ESPN.
  *
  * How it works:
- *  1. Fetches today's scoreboard for NBA, MLB, and Soccer (NFL is offseason Apr-Aug)
+ *  1. Fetches today's scoreboard for NBA and MLB
  *  2. For each upcoming/live game, extracts team leaders (top scorers, rebounders, etc.)
- *  3. Builds a PlayerEdgePrediction using the player's season average as the baseline "line"
+ *     from competitor.leaders — ESPN populates this with season leaders for all game states
+ *  3. Builds a PlayerEdgePrediction using the player's season stat as the baseline "line"
  *  4. Projects above/below the line based on opponent quality (win% proxy)
  *  5. Confidence is derived from edge magnitude
  */
@@ -13,19 +14,10 @@
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
 // ── ESPN endpoints ────────────────────────────────────────────────────────────
-// Scoreboard: used to find today's games and opponent context.
-// Leaders:    season statistical leaders — always populated, unlike competitor.leaders
-//             which is empty for pre-game events in the scoreboard response.
 
 const SCOREBOARDS: Record<string, string> = {
   NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
   MLB: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
-};
-
-// Season stat leaders — gives us players + stats regardless of game state
-const LEADERS_ENDPOINTS: Record<string, string> = {
-  NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/leaders",
-  MLB: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/leaders",
 };
 
 // ── ESPN stat-category name → our PlayerEdgeStatFilter ────────────────────────
@@ -37,24 +29,16 @@ const NBA_STAT_MAP: Record<string, { statType: string; unit: string }> = {
 };
 
 const MLB_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  batting:      { statType: "hits", unit: "hits" },
-  homeRuns:     { statType: "total_bases", unit: "HR" },
-  strikeouts:   { statType: "strikeouts", unit: "K" },
-  hits:         { statType: "hits", unit: "hits" },
-  RBIs:         { statType: "hits", unit: "RBI" },
-};
-
-const SOCCER_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  goals:          { statType: "shots", unit: "goals" },
-  assists:        { statType: "shots_on_target", unit: "assists" },
-  shotsOnTarget:  { statType: "shots_on_target", unit: "SoT" },
-  shots:          { statType: "shots", unit: "shots" },
+  batting:    { statType: "hits", unit: "hits" },
+  homeRuns:   { statType: "total_bases", unit: "HR" },
+  strikeouts: { statType: "strikeouts", unit: "K" },
+  hits:       { statType: "hits", unit: "hits" },
+  RBIs:       { statType: "hits", unit: "RBI" },
 };
 
 const SPORT_STAT_MAP: Record<string, typeof NBA_STAT_MAP> = {
   NBA: NBA_STAT_MAP,
   MLB: MLB_STAT_MAP,
-  Soccer: SOCCER_STAT_MAP,
 };
 
 // ── ESPN raw types ─────────────────────────────────────────────────────────────
@@ -65,8 +49,9 @@ interface EspnLeaderEntry {
   athlete?: {
     id?: string;
     displayName?: string;
+    fullName?: string;
     position?: { abbreviation?: string };
-    team?: { id?: string; abbreviation?: string; displayName?: string };
+    team?: { id?: string; abbreviation?: string };
   };
 }
 
@@ -82,11 +67,6 @@ interface EspnCompetitorRaw {
   team?: { id?: string; abbreviation?: string; displayName?: string };
   records?: { type?: string; summary?: string }[];
   leaders?: EspnLeaderCategory[];
-}
-
-// ESPN /leaders endpoint shape
-interface EspnLeadersResponse {
-  categories?: EspnLeaderCategory[];
 }
 
 interface EspnCompetitionRaw {
@@ -115,9 +95,6 @@ function overallWinPct(competitor: EspnCompetitorRaw): number {
 /**
  * Project a player's output above/below their season average
  * based on opponent quality (win% proxy) and home/away context.
- * Weak opponent (< 40%): boost +6-8% above average
- * Strong opponent (> 60%): reduce 6-8% below average
- * Home players receive a +2.5% usage/comfort boost.
  */
 function projectValue(seasonAvg: number, opponentWinPct: number, isHome: boolean): number {
   let multiplier: number;
@@ -177,166 +154,113 @@ function buildReasons(
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
 
-interface GameContext {
-  eventId: string;
-  gameTime: string;
-  teamAbbr: string;
-  oppAbbr: string;
-  isHome: boolean;
-  opponentWinPct: number;
-}
-
-/**
- * Build a map of teamAbbr → GameContext from today's scoreboard.
- * Only includes upcoming/live games (not "post").
- */
-async function fetchGameContextMap(
-  sport: "NBA" | "MLB" | "Soccer"
-): Promise<Map<string, GameContext>> {
-  const url = SCOREBOARDS[sport];
-  if (!url) return new Map();
-  const map = new Map<string, GameContext>();
-
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return map;
-    const data = (await res.json()) as { events?: EspnEventRaw[] };
-
-    for (const event of data.events ?? []) {
-      const comp = event.competitions?.[0];
-      if (!comp?.competitors || comp.competitors.length < 2) continue;
-      if (comp.status?.type?.state === "post") continue;
-
-      const home = comp.competitors.find((c) => c.homeAway === "home");
-      const away = comp.competitors.find((c) => c.homeAway === "away");
-      if (!home || !away) continue;
-
-      const homeAbbr = home.team?.abbreviation ?? "HOM";
-      const awayAbbr = away.team?.abbreviation ?? "AWY";
-      const gameTime = formatGameTime(comp.date ?? "");
-      const eventId = event.id ?? `${sport}-${Date.now()}`;
-
-      for (const [competitor, isHome] of [[home, true], [away, false]] as const) {
-        const teamAbbr = competitor.team?.abbreviation ?? "";
-        if (!teamAbbr) continue;
-        const oppAbbr = isHome ? awayAbbr : homeAbbr;
-        const oppCompetitor = isHome ? away : home;
-        map.set(teamAbbr, {
-          eventId,
-          gameTime,
-          teamAbbr,
-          oppAbbr,
-          isHome,
-          opponentWinPct: overallWinPct(oppCompetitor),
-        });
-      }
-    }
-  } catch {
-    // swallow
-  }
-
-  return map;
-}
-
 async function fetchSportPlayerEdge(
-  sport: "NBA" | "MLB" | "Soccer",
+  sport: "NBA" | "MLB",
   sortBase: number
 ): Promise<PlayerEdgePrediction[]> {
+  const url = SCOREBOARDS[sport];
+  if (!url) return [];
   const statMap = SPORT_STAT_MAP[sport] ?? {};
-  const leadersUrl = LEADERS_ENDPOINTS[sport];
-  if (!leadersUrl) return [];
 
-  // Fetch game context (matchup info) and season leaders in parallel
-  const [gameMap, leadersRes] = await Promise.all([
-    fetchGameContextMap(sport),
-    fetch(leadersUrl).catch(() => null),
-  ]);
+  let res: Response;
+  try {
+    res = await fetch(url);
+    if (!res.ok) return [];
+  } catch {
+    return [];
+  }
 
-  if (!leadersRes?.ok) return [];
-  const leadersData = (await leadersRes.json()) as EspnLeadersResponse;
-  const categories = leadersData.categories ?? [];
-
+  const data = (await res.json()) as { events?: EspnEventRaw[] };
+  const events = data.events ?? [];
   const predictions: PlayerEdgePrediction[] = [];
-  const seenPlayers = new Set<string>();
 
-  for (const category of categories) {
-    const catName = category.name ?? "";
-    const mapping = statMap[catName];
-    if (!mapping) continue;
+  for (const event of events) {
+    const comp = event.competitions?.[0];
+    if (!comp?.competitors || comp.competitors.length < 2) continue;
 
-    // Take top 3 leaders per category to get more coverage
-    const leaders = (category.leaders ?? []).slice(0, 3);
+    const state = comp.status?.type?.state;
+    // Only upcoming or live games
+    if (state === "post") continue;
 
-    for (const leader of leaders) {
-      if (!leader.athlete?.displayName) continue;
+    const home = comp.competitors.find((c) => c.homeAway === "home");
+    const away = comp.competitors.find((c) => c.homeAway === "away");
+    if (!home || !away) continue;
 
-      const athleteId = leader.athlete.id ?? `ath-${catName}`;
-      const playerKey = `${athleteId}-${catName}`;
-      if (seenPlayers.has(playerKey)) continue;
-      seenPlayers.add(playerKey);
+    const homeAbbr = home.team?.abbreviation ?? "HOM";
+    const awayAbbr = away.team?.abbreviation ?? "AWY";
+    const gameTime = formatGameTime(comp.date ?? "");
+    const eventId = event.id ?? `${sport}-${Date.now()}`;
 
-      const value = leader.value ?? Number.parseFloat(leader.displayValue);
-      if (!Number.isFinite(value) || value <= 0) continue;
+    for (const competitor of [home, away]) {
+      const teamAbbr = competitor.team?.abbreviation ?? "";
+      const isHome = competitor === home;
+      const oppAbbr = isHome ? awayAbbr : homeAbbr;
+      const oppCompetitor = isHome ? away : home;
+      const opponentWinPct = overallWinPct(oppCompetitor);
 
-      // Find the player's team in today's games
-      const teamAbbr = leader.athlete.team?.abbreviation ?? "";
-      const ctx = teamAbbr ? gameMap.get(teamAbbr) : undefined;
+      // ESPN populates competitor.leaders with season leaders for all game states
+      for (const category of competitor.leaders ?? []) {
+        const catName = category.name ?? "";
+        const mapping = statMap[catName];
+        if (!mapping) continue;
 
-      // Use game context if available, otherwise use neutral defaults
-      const opponentWinPct = ctx?.opponentWinPct ?? 0.5;
-      const isHome = ctx?.isHome ?? false;
-      const oppAbbr = ctx?.oppAbbr ?? "OPP";
-      const gameTime = ctx?.gameTime ?? "Today";
-      const eventId = ctx?.eventId ?? `${sport}-leaders-${athleteId}`;
+        // Take top 2 leaders per category for better coverage
+        const leaders = (category.leaders ?? []).slice(0, 2);
+        for (const topLeader of leaders) {
+          const name = topLeader.athlete?.displayName ?? topLeader.athlete?.fullName;
+          if (!name) continue;
 
-      // Skip players with no game today if we have game data
-      if (gameMap.size > 0 && !ctx) continue;
+          const value = topLeader.value ?? Number.parseFloat(topLeader.displayValue);
+          if (!Number.isFinite(value) || value <= 0) continue;
 
-      const projected = projectValue(value, opponentWinPct, isHome);
-      const edge = projected - value;
-      const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
-      const edgeMag = Math.abs(edge);
-      const confidence = edgeToConfidence(edgeMag);
-      const id = `espn-${sport.toLowerCase()}-${eventId}-${athleteId}-${catName}`;
+          const projected = projectValue(value, opponentWinPct, isHome);
+          const edge = projected - value;
+          const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
+          const edgeMag = Math.abs(edge);
+          const confidence = edgeToConfidence(edgeMag);
+          const athleteId = topLeader.athlete?.id ?? `ath-${catName}-${name.replace(/\s+/g, "-")}`;
+          const id = `espn-${sport.toLowerCase()}-${eventId}-${athleteId}-${catName}`;
 
-      const { reason_1, reason_2, risk_factor } = buildReasons(
-        leader.athlete.displayName,
-        mapping.statType,
-        mapping.unit,
-        value,
-        projected,
-        oppAbbr,
-        opponentWinPct,
-        direction
-      );
+          const { reason_1, reason_2, risk_factor } = buildReasons(
+            name,
+            mapping.statType,
+            mapping.unit,
+            value,
+            projected,
+            oppAbbr,
+            opponentWinPct,
+            direction
+          );
 
-      predictions.push({
-        id,
-        game_id: eventId,
-        player_id: athleteId,
-        player_name: leader.athlete.displayName,
-        sport,
-        team: teamAbbr || ctx?.teamAbbr || sport,
-        opponent: oppAbbr,
-        game_time: gameTime,
-        stat_type: mapping.statType,
-        line_value: value,
-        projected_value: projected,
-        prediction_direction: direction,
-        edge: Math.round(edge * 10) / 10,
-        confidence,
-        reason_1,
-        reason_2,
-        risk_factor,
-        game_sort: sortBase + predictions.length,
-        confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
-        risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "high_upside",
-        consistency_label: edgeMag >= 2.5 ? "stable" : edgeMag >= 1.0 ? "medium" : "volatile",
-        trend_note:
-          direction === "MORE"
-            ? `Trending ↑ vs ${oppAbbr}`
-            : `Fade opportunity vs ${oppAbbr}`,
-      });
+          predictions.push({
+            id,
+            game_id: eventId,
+            player_id: athleteId,
+            player_name: name,
+            sport,
+            team: teamAbbr,
+            opponent: oppAbbr,
+            game_time: gameTime,
+            stat_type: mapping.statType,
+            line_value: value,
+            projected_value: projected,
+            prediction_direction: direction,
+            edge: Math.round(edge * 10) / 10,
+            confidence,
+            reason_1,
+            reason_2,
+            risk_factor,
+            game_sort: sortBase + predictions.length,
+            confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
+            risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "high_upside",
+            consistency_label: edgeMag >= 2.5 ? "stable" : edgeMag >= 1.0 ? "medium" : "volatile",
+            trend_note:
+              direction === "MORE"
+                ? `Trending ↑ vs ${oppAbbr}`
+                : `Fade opportunity vs ${oppAbbr}`,
+          });
+        }
+      }
     }
   }
 
