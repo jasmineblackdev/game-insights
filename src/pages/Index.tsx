@@ -468,8 +468,12 @@ const Index = () => {
                     <>Live NFL predictions — win probability, spread lean, injuries, weather, and team trends.</>
                   ) : league === "mlb" ? (
                     <>Live MLB predictions — probable starters, runline lean, and lineup trends. Confidence adjusts when pitchers are unconfirmed.</>
+                  ) : league === "boxing" ? (
+                    <>Boxing fight predictions — fighter profiles, reach/age/style edges, and method of victory probabilities. Data from The Odds API; richer model when fighter DB is populated.</>
+                  ) : league === "mma" ? (
+                    <>UFC/MMA fight predictions — style matchup, grappling vs striking edge, method of victory. Data from The Odds API; richer model when fighter DB is populated.</>
                   ) : (
-                    <>Boxing fight predictions — fighter profiles, reach/age/style edges, and method of victory probabilities.</>
+                    <>Fight predictions — fighter profiles and method of victory probabilities.</>
                   )}
                 </motion.p>
 
@@ -513,7 +517,7 @@ const Index = () => {
                       <div className="flex items-center gap-2 text-xs">
                         <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
                         <span className="text-muted-foreground">
-                          {league === "boxing" ? "Fights loaded:" : "Games loaded:"}
+                          {(league === "boxing" || league === "mma") ? "Fights loaded (14d):" : "Games loaded:"}
                         </span>
                         <span className="text-confidence-high font-semibold">
                           {leagueGames.length}
@@ -522,7 +526,7 @@ const Index = () => {
                       <div className="flex items-center gap-2 text-xs">
                         <Zap className="w-3.5 h-3.5 text-primary" />
                         <span className="text-muted-foreground">
-                          {league === "boxing" ? "High conf picks:" : "High conf (spread lean):"}
+                          {(league === "boxing" || league === "mma") ? "High conf picks:" : "High conf (spread lean):"}
                         </span>
                         <span className="text-primary font-semibold">
                           {highConfCount} of {filteredGames.length}
@@ -605,7 +609,9 @@ const Index = () => {
                   </div>
                 </div>
 
-                {/* Date switcher only visible in Games mode */}
+                {/* Date switcher only visible in Games mode.
+                    Combat sports show "Next 14 days" as the third option
+                    since fights rarely fall on exact today/tomorrow dates. */}
                 {viewMode === "games" && (
                   <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible [scrollbar-width:thin] min-w-0 w-full sm:w-auto">
                     <DatePicker
@@ -613,7 +619,11 @@ const Index = () => {
                       onChange={handleDateChange}
                       todayLabel={todayLabel}
                       tomorrowLabel={tomorrowLabel}
-                      weekLabel={undefined}
+                      weekLabel={
+                        league === "boxing" || league === "mma"
+                          ? "Next 14 days"
+                          : undefined
+                      }
                     />
                   </div>
                 )}
@@ -662,9 +672,10 @@ const Index = () => {
                 </div>
               ) : activeQuery.isError ? (
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-                  Could not load ESPN {leagueLabel(league)} data (
-                  {activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network;
-                  if the API blocks the browser, proxy through Supabase Edge Functions.
+                  {(league === "boxing" || league === "mma")
+                    ? `Could not load ${leagueLabel(league)} fight data. Check your Odds API key or network connection.`
+                    : `Could not load ESPN ${leagueLabel(league)} data (${activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network; if the API blocks the browser, proxy through Supabase Edge Functions.`
+                  }
                 </div>
               ) : filteredGames.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -680,15 +691,29 @@ const Index = () => {
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 text-center">
                   <div className="text-4xl mb-3">
-                    {league === "nfl" ? "🏈" : league === "mlb" ? "⚾" : league === "soccer" ? "⚽" : "📭"}
+                    {league === "nfl" ? "🏈" : league === "mlb" ? "⚾" : league === "boxing" ? "🥊" : league === "mma" ? "🥋" : "📭"}
                   </div>
                   <p className="text-muted-foreground text-sm max-w-md">
-                    {league === "soccer" && dateFilter === "week"
-                      ? "No EPL fixtures in the next 7 days on the ESPN board (US Eastern). International breaks or between matchweeks can look like this."
-                      : league === "soccer"
-                        ? `No EPL games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). That’s normal — try Next 7 days for the nearest kickoffs.`
-                        : `No ${leagueLabel(league)} games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are normal — try the other day tab.`}
+                    {league === "boxing"
+                      ? dateFilter === "today"
+                        ? "No boxing fights scheduled for today. Most fights are on weekends — try Tomorrow or the date tabs."
+                        : dateFilter === "tomorrow"
+                          ? "No boxing fights scheduled for tomorrow. Try changing the date or check back closer to fight week."
+                          : "No boxing fights in the next 14 days from The Odds API. Check back during active fight weeks."
+                      : league === "mma"
+                        ? dateFilter === "today"
+                          ? "No UFC/MMA fights scheduled for today. Events typically run on Saturday nights — try Tomorrow or the date tabs."
+                          : dateFilter === "tomorrow"
+                            ? "No UFC/MMA fights scheduled for tomorrow. Try changing the date or check back during UFC fight week."
+                            : "No UFC/MMA fights in the next 14 days from The Odds API. Check back closer to the next event."
+                        : `No ${leagueLabel(league)} games on the ESPN board for ${dateFilter === "today" ? "today" : "tomorrow"} (US Eastern). Off-days and offseason slates are normal — try the other day tab.`
+                    }
                   </p>
+                  {(league === "boxing" || league === "mma") && leagueGames.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-2 opacity-70">
+                      {leagueGames.length} fight{leagueGames.length !== 1 ? "s" : ""} loaded — switch date tabs to find them.
+                    </p>
+                  )}
                 </div>
               )}
             </motion.div>

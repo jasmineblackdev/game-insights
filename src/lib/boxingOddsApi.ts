@@ -1,102 +1,142 @@
 /**
  * Boxing odds via The Odds API.
- * Sport key: "boxing" (fight winner, method of victory, over/under rounds).
- * Called from boxingFetch.ts after Supabase fight data is loaded.
- * NO direct client calls — this module is imported by boxingFetch.ts (server/edge context).
+ * Sport key: "boxing" (fight winner, over/under rounds).
+ *
+ * Uses the shared fetchOddsForSport proxy so local dev proxy,
+ * Supabase Edge proxy, and legacy VITE_THE_ODDS_API_KEY all work.
  */
 
-const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
+import { fetchOddsForSport, isOddsApiAvailable } from "@/lib/oddsApiFetch";
 
-/** The Odds API sport key for boxing moneylines (fight winner). */
+/** The Odds API sport key for boxing moneylines. */
 export const BOXING_ODDS_SPORT_KEY = "boxing";
-/** Method of victory (KO/TKO, decision, draw) when available. */
-export const BOXING_ODDS_PROP_KEY = "boxing_fight_result";
 
 export interface BoxingOddsLine {
   fightId: string;      // Odds API event ID
   homeMoneyline?: number;
   awayMoneyline?: number;
-  /** Over/under scheduled rounds */
   overUnderRounds?: number;
   overOdds?: number;
   underOdds?: number;
   sportsbookKey?: string;
 }
 
-interface OddsApiOutcome {
-  name: string;
-  price: number;
+/** Full event with fighter names + odds — primary data source when DB tables are empty. */
+export interface BoxingCombatEvent {
+  eventId: string;
+  commenceTime: string;  // ISO UTC
+  homeName: string;
+  awayName: string;
+  line: BoxingOddsLine | null;
 }
 
-interface OddsApiBookmaker {
-  key: string;
-  markets: { key: string; outcomes: OddsApiOutcome[] }[];
-}
-
-interface OddsApiEvent {
-  id: string;
+interface OddsEvent {
+  id?: string;
+  commence_time: string;
   home_team: string;
   away_team: string;
-  bookmakers: OddsApiBookmaker[];
+  bookmakers?: {
+    key?: string;
+    title?: string;
+    markets?: { key?: string; outcomes?: { name?: string; price?: number; point?: number }[] }[];
+  }[];
 }
 
-const PREFERRED_BOOKS = ["draftkings", "fanduel", "betmgm", "caesars", "pointsbetus"];
+const PREFERRED_BOOKS = ["draftkings", "fanduel", "betmgm", "caesars", "pointsbetus", "betrivers"];
 
-function pickBestBook(bookmakers: OddsApiBookmaker[]): OddsApiBookmaker | null {
+function pickBestBook(bookmakers: OddsEvent["bookmakers"]): OddsEvent["bookmakers"][0] | undefined {
+  if (!bookmakers?.length) return undefined;
   for (const key of PREFERRED_BOOKS) {
-    const bm = bookmakers.find((b) => b.key === key);
+    const bm = bookmakers.find((b) => (b.key ?? "").includes(key));
     if (bm) return bm;
   }
-  return bookmakers[0] ?? null;
+  return bookmakers[0];
 }
 
-export async function fetchBoxingOdds(): Promise<BoxingOddsLine[]> {
-  const apiKey = (import.meta as unknown as Record<string, Record<string, string>>).env?.VITE_ODDS_API_KEY;
-  if (!apiKey) return [];
+function extractMoneyline(
+  book: OddsEvent["bookmakers"][0] | undefined,
+  homeName: string,
+  awayName: string,
+): { home: number; away: number } | null {
+  const m = book?.markets?.find((x) => x.key === "h2h");
+  if (!m?.outcomes?.length) return null;
+  let home: number | undefined;
+  let away: number | undefined;
+  for (const o of m.outcomes) {
+    if (typeof o.price !== "number") continue;
+    const nl = (o.name ?? "").toLowerCase();
+    const hn = homeName.toLowerCase();
+    const an = awayName.toLowerCase();
+    if (nl.includes(hn.split(" ").pop() ?? hn)) home = o.price;
+    else if (nl.includes(an.split(" ").pop() ?? an)) away = o.price;
+    else if (!home) home = o.price;
+    else if (!away) away = o.price;
+  }
+  if (home == null || away == null) return null;
+  return { home, away };
+}
 
-  const url = `${ODDS_API_BASE}/sports/${BOXING_ODDS_SPORT_KEY}/odds?apiKey=${apiKey}&regions=us&markets=h2h&oddsFormat=american`;
+function extractTotals(
+  book: OddsEvent["bookmakers"][0] | undefined,
+): { over: number; under: number; point: number } | null {
+  const m = book?.markets?.find((x) => x.key === "totals");
+  if (!m?.outcomes?.length) return null;
+  let over: number | undefined;
+  let under: number | undefined;
+  let point: number | undefined;
+  for (const o of m.outcomes) {
+    if (typeof o.price !== "number") continue;
+    const nl = (o.name ?? "").toLowerCase();
+    if (nl.includes("over")) { over = o.price; if (o.point != null) point = o.point; }
+    else if (nl.includes("under")) { under = o.price; if (o.point != null && point == null) point = o.point; }
+  }
+  if (over == null || under == null) return null;
+  return { over, under, point: point ?? 9.5 };
+}
 
-  let events: OddsApiEvent[] = [];
+// ─── fetchBoxingEvents (primary — for when DB tables are empty) ──
+
+export async function fetchBoxingEvents(): Promise<BoxingCombatEvent[]> {
+  if (!isOddsApiAvailable()) return [];
   try {
-    const res = await fetch(url);
+    const res = await fetchOddsForSport({
+      sportKey: BOXING_ODDS_SPORT_KEY,
+      markets: "h2h,totals",
+      regions: "us",
+      oddsFormat: "american",
+    });
     if (!res.ok) return [];
-    events = await res.json();
+    const events = (await res.json()) as OddsEvent[];
+    if (!Array.isArray(events)) return [];
+
+    const out: BoxingCombatEvent[] = [];
+    for (const ev of events) {
+      if (!ev.id || !ev.home_team || !ev.away_team) continue;
+      const book = pickBestBook(ev.bookmakers);
+      const ml   = extractMoneyline(book, ev.home_team, ev.away_team);
+      const tot  = extractTotals(book);
+      const line: BoxingOddsLine | null = ml
+        ? {
+            fightId: ev.id,
+            homeMoneyline: ml.home,
+            awayMoneyline: ml.away,
+            ...(tot != null ? { overUnderRounds: tot.point, overOdds: tot.over, underOdds: tot.under } : {}),
+            sportsbookKey: book?.key ?? "unknown",
+          }
+        : null;
+      out.push({ eventId: ev.id, commenceTime: ev.commence_time, homeName: ev.home_team, awayName: ev.away_team, line });
+    }
+    return out;
   } catch {
     return [];
   }
+}
 
-  const lines: BoxingOddsLine[] = [];
+// ─── fetchBoxingOdds (legacy — used when DB fights have odds_event_id) ──
 
-  for (const ev of events) {
-    const book = pickBestBook(ev.bookmakers);
-    if (!book) continue;
-
-    const h2h = book.markets.find((m) => m.key === "h2h");
-    if (!h2h) continue;
-
-    const homeOutcome = h2h.outcomes.find((o) => o.name === ev.home_team);
-    const awayOutcome = h2h.outcomes.find((o) => o.name === ev.away_team);
-
-    const line: BoxingOddsLine = {
-      fightId: ev.id,
-      homeMoneyline: homeOutcome?.price,
-      awayMoneyline: awayOutcome?.price,
-      sportsbookKey: book.key,
-    };
-
-    // Check for totals (rounds over/under) if available
-    const totals = book.markets.find((m) => m.key === "totals");
-    if (totals) {
-      const over = totals.outcomes.find((o) => o.name.toLowerCase() === "over");
-      const under = totals.outcomes.find((o) => o.name.toLowerCase() === "under");
-      if (over) line.overOdds = over.price;
-      if (under) line.underOdds = under.price;
-    }
-
-    lines.push(line);
-  }
-
-  return lines;
+export async function fetchBoxingOdds(): Promise<BoxingOddsLine[]> {
+  const events = await fetchBoxingEvents();
+  return events.filter((e) => e.line != null).map((e) => e.line!);
 }
 
 /** Convert American moneyline to implied probability (with vig). */

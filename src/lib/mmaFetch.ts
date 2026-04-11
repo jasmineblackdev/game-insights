@@ -1,9 +1,12 @@
 /**
- * MMA data layer — reads upcoming fights from Supabase mma_fights/mma_fighters,
- * merges odds from The Odds API, applies the prediction model, and returns
- * GamePrediction[] using the same contract as all other sport fetchers.
+ * MMA data layer.
  *
- * Fighter data is written by backend ingestion (Boxing Data API + manual entry).
+ * Primary source: The Odds API (fetchMmaEvents) — works with no DB data.
+ * Enhanced source: Supabase mma_fights / mma_fighters — richer model inputs
+ *   when fighter records exist. Supabase is tried first; Odds API is the
+ *   fallback when DB tables are empty or Supabase is not configured.
+ *
+ * Fighter data is written by backend ingestion.
  * Learning weights are read from mma_learning_history (sport-isolated).
  */
 
@@ -19,9 +22,11 @@ import {
 } from "@/lib/mmaPredictionModel";
 import {
   fetchMmaOdds,
+  fetchMmaEvents,
   americanToImplied,
   deVigTwoWay,
   type MmaOddsLine,
+  type MmaCombatEvent,
 } from "@/lib/mmaOddsApi";
 import { easternYmd } from "@/lib/espnShared";
 
@@ -130,6 +135,54 @@ function dbFighterToProfile(row: DbMmaFighter): MmaFighterProfile {
   };
 }
 
+// ── Minimal profile from fighter name (Odds-API-only path) ────────────────���───
+// All stat fields are undefined — model uses neutral defaults.
+// Record is shown as "—" until DB records are available.
+
+function minimalProfile(name: string): MmaFighterProfile {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return {
+    fighterId: `odds-${slug}`,
+    name,
+    record: "—",
+    wins: 0, losses: 0, draws: 0, noContests: 0,
+    koTkoWins: 0, subWins: 0, decisionWins: 0,
+    weightClass: "Unknown",
+    shortNotice: false,
+  };
+}
+
+// ── Convert UTC ISO commence_time → Eastern YYYY-MM-DD ────────────────────────
+
+function commenceToEasternYmd(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return easternYmd();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d);
+    const y   = parts.find((p) => p.type === "year")?.value  ?? "2026";
+    const m   = parts.find((p) => p.type === "month")?.value ?? "01";
+    const day = parts.find((p) => p.type === "day")?.value   ?? "01";
+    return `${y}-${m}-${day}`;
+  } catch {
+    return easternYmd();
+  }
+}
+
+// ── Date bucket helper ─────────────────────────────────────────────────────���──
+
+function fightGameDate(fightDate: string): "today" | "tomorrow" | "week" {
+  const today    = easternYmd();
+  const tomorrow = easternYmd(new Date(Date.now() + 86_400_000));
+  if (fightDate === today)    return "today";
+  if (fightDate === tomorrow) return "tomorrow";
+  return "week";
+}
+
 // ── Learned weights from Supabase ─────────────────────────────────────────────
 
 async function fetchMmaModelWeights(): Promise<MmaFactorWeights> {
@@ -163,16 +216,6 @@ async function fetchMmaModelWeights(): Promise<MmaFactorWeights> {
   }
 }
 
-// ── Date bucket helper ────────────────────────────────────────────────────────
-
-function fightGameDate(fightDate: string): "today" | "tomorrow" | "week" {
-  const today = easternYmd();
-  const tomorrow = easternYmd(new Date(Date.now() + 86_400_000));
-  if (fightDate === today) return "today";
-  if (fightDate === tomorrow) return "tomorrow";
-  return "week";
-}
-
 // ── Build GamePrediction ──────────────────────────────────────────────────────
 
 function buildMmaPrediction(
@@ -183,7 +226,6 @@ function buildMmaPrediction(
   weights: MmaFactorWeights,
   oddsLine: MmaOddsLine | undefined,
 ): GamePrediction {
-  // Compute market context for market movement factor
   let marketCtx: { homeOpenImplied?: number; homeCurrentImplied?: number } | undefined;
   if (oddsLine?.homeMoneylineOpen != null && oddsLine?.homeMoneyline != null) {
     const open = americanToImplied(oddsLine.homeMoneylineOpen);
@@ -192,8 +234,8 @@ function buildMmaPrediction(
   }
 
   const modeledIntel = applyMmaModel(intel, weights, marketCtx);
-  const winProb = mmaWinProbability(home, away, weights, intel.scheduledRounds, marketCtx);
-  const confidence = mmaConfidence(home, away, winProb);
+  const winProb      = mmaWinProbability(home, away, weights, intel.scheduledRounds, marketCtx);
+  const confidence   = mmaConfidence(home, away, winProb);
 
   const topReasons = modeledIntel.modelNotes.slice(0, 3);
   const riskFactors = modeledIntel.modelOutput?.riskFlag
@@ -210,7 +252,6 @@ function buildMmaPrediction(
       ? `${home.name} wins if grappling neutralized and fight stays standing`
       : `${away.name} wins by late submission if ${home.name} gasses`;
 
-  // Build lines from odds
   let lines: GamePrediction["lines"] | undefined;
   if (oddsLine?.homeMoneyline != null && oddsLine?.awayMoneyline != null) {
     lines = {
@@ -220,19 +261,16 @@ function buildMmaPrediction(
     };
   }
 
-  // De-vig implied probability
   let threeWay: GamePrediction["threeWay"] | undefined;
   if (oddsLine?.homeMoneyline != null && oddsLine?.awayMoneyline != null) {
     const hRaw = americanToImplied(oddsLine.homeMoneyline);
     const aRaw = americanToImplied(oddsLine.awayMoneyline);
     const { p1: hImp, p2: aImp } = deVigTwoWay(hRaw, aRaw);
-    // MMA draws are extremely rare (~1%) — use 0 for display
     const hAdj = Math.round(hImp * 100);
     const aAdj = 100 - hAdj;
     threeWay = { home: hAdj, away: aAdj, draw: 0 };
   }
 
-  // Compute volatility score from risk flags
   const rf = modeledIntel.modelOutput?.riskFlag ?? "";
   const volatilityScore = Math.min(
     100,
@@ -243,20 +281,18 @@ function buildMmaPrediction(
     (rf.includes("instability") ? 10 : 0),
   );
 
-  // Data completeness (how many key fields are populated)
   const keyFields = [
     home.opponentQualityScore, away.opponentQualityScore,
-    home.styleTag, away.styleTag,
-    home.koTkoPct, away.koTkoPct,
+    home.styleTag,             away.styleTag,
+    home.koTkoPct,             away.koTkoPct,
     home.sigStrikesLandedPerMin, away.sigStrikesLandedPerMin,
-    home.takedownAccuracy, away.takedownAccuracy,
+    home.takedownAccuracy,     away.takedownAccuracy,
   ];
   const dataCompleteness = Math.round(keyFields.filter(Boolean).length / keyFields.length * 100);
 
-  // Parlay fit
   const homeImplied = oddsLine?.homeMoneyline != null ? americanToImplied(oddsLine.homeMoneyline) : 0.5;
-  const modelProb = winProb.home / 100;
-  const edge = modelProb - homeImplied;
+  const modelProb   = winProb.home / 100;
+  const edge        = modelProb - homeImplied;
   const styleStability = (home.styleTag != null ? 50 : 0) + (away.styleTag != null ? 50 : 0);
   const parlayFit = mmaParlayFitScore({
     confidence,
@@ -273,24 +309,12 @@ function buildMmaPrediction(
     name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 3);
 
   const homeTeam = {
-    name: home.name,
-    abbreviation: abbr(home.name),
-    record: home.record,
-    logo: "",
-    recentForm: "",
-    offensiveRating: 0,
-    defensiveRating: 0,
-    pace: 0,
+    name: home.name, abbreviation: abbr(home.name), record: home.record,
+    logo: "", recentForm: "", offensiveRating: 0, defensiveRating: 0, pace: 0,
   };
   const awayTeam = {
-    name: away.name,
-    abbreviation: abbr(away.name),
-    record: away.record,
-    logo: "",
-    recentForm: "",
-    offensiveRating: 0,
-    defensiveRating: 0,
-    pace: 0,
+    name: away.name, abbreviation: abbr(away.name), record: away.record,
+    logo: "", recentForm: "", offensiveRating: 0, defensiveRating: 0, pace: 0,
   };
 
   const gameTime = fight.fight_time
@@ -321,7 +345,7 @@ function buildMmaPrediction(
     situationalTags: [
       fight.is_championship_bout ? "TITLE BOUT" : fight.is_main_event ? "MAIN EVENT" : null,
       fight.scheduled_rounds === 5 ? "5 ROUNDS" : "3 ROUNDS",
-      intel.weightClass,
+      fight.weight_class !== "Unknown" ? intel.weightClass : null,
       fight.promotion ?? null,
     ].filter(Boolean) as string[],
     lines,
@@ -349,13 +373,64 @@ function buildMmaPrediction(
   };
 }
 
-// ── Main fetch function ───────────────────────────────────────────────────────
+// ── Build predictions from raw Odds API events (no DB required) ──────────────
 
-export async function fetchMmaPredictions(): Promise<GamePrediction[]> {
+function buildPredictionsFromOddsEvents(
+  events: MmaCombatEvent[],
+  weights: MmaFactorWeights,
+): GamePrediction[] {
+  const predictions: GamePrediction[] = [];
+  for (const ev of events) {
+    const fightDate = commenceToEasternYmd(ev.commenceTime);
+    const home = minimalProfile(ev.homeName);
+    const away = minimalProfile(ev.awayName);
+
+    // Estimate scheduled rounds from over/under line: >3.5 → likely 5-round; else 3-round
+    const scheduledRounds =
+      ev.line?.overRounds != null && ev.line.overRounds > 3 ? 5 : 3;
+
+    const fight: DbMmaFight = {
+      fight_id: ev.eventId,
+      home_fighter_id: home.fighterId,
+      away_fighter_id: away.fighterId,
+      weight_class: "Unknown",
+      scheduled_rounds: scheduledRounds,
+      fight_date: fightDate,
+      fight_time: null,
+      venue: null,
+      is_main_event: false,
+      is_championship_bout: false,
+      title_description: null,
+      promotion: "UFC / MMA",
+      status: "upcoming",
+      odds_event_id: ev.eventId,
+      result_winner_id: null,
+    };
+
+    const intel: MmaIntel = {
+      homeFighter: home,
+      awayFighter: away,
+      weightClass: "Unknown",
+      scheduledRounds,
+      isMainEvent: false,
+      isChampionshipBout: false,
+      modelNotes: [],
+      oddsSource: "The Odds API",
+    };
+
+    const line: MmaOddsLine | undefined = ev.line ?? undefined;
+    predictions.push(buildMmaPrediction(fight, home, away, intel, weights, line));
+  }
+  return predictions;
+}
+
+// ── Supabase-enhanced path (when fighter DB is populated) ─────────────────────
+
+async function fetchMmaFromSupabase(weights: MmaFactorWeights): Promise<GamePrediction[]> {
   if (!supabase) return [];
 
-  const today = easternYmd();
-  const windowEnd = new Date();
+  const today      = easternYmd();
+  const windowEnd  = new Date();
   windowEnd.setDate(windowEnd.getDate() + 14);
   const windowEndYmd = easternYmd(windowEnd);
 
@@ -385,30 +460,20 @@ export async function fetchMmaPredictions(): Promise<GamePrediction[]> {
   const fighterMap = new Map<string, DbMmaFighter>();
   for (const f of fighters as DbMmaFighter[]) fighterMap.set(f.fighter_id, f);
 
-  const [weights, oddsLines] = await Promise.all([
-    fetchMmaModelWeights(),
-    fetchMmaOdds().catch(() => [] as MmaOddsLine[]),
-  ]);
-
-  // Match odds lines to fights by odds_event_id stored in DB
+  const oddsLines = await fetchMmaOdds().catch(() => [] as MmaOddsLine[]);
   const oddsMap = new Map<string, MmaOddsLine>();
-  for (const line of oddsLines) {
-    oddsMap.set(line.oddsEventId, line);
-  }
+  for (const line of oddsLines) oddsMap.set(line.oddsEventId, line);
 
   const predictions: GamePrediction[] = [];
-
   for (const fight of fights as DbMmaFight[]) {
     const homeDb = fighterMap.get(fight.home_fighter_id);
     const awayDb = fighterMap.get(fight.away_fighter_id);
     if (!homeDb || !awayDb) continue;
 
-    const home = dbFighterToProfile(homeDb);
-    const away = dbFighterToProfile(awayDb);
-
+    const home  = dbFighterToProfile(homeDb);
+    const away  = dbFighterToProfile(awayDb);
     const intel: MmaIntel = {
-      homeFighter: home,
-      awayFighter: away,
+      homeFighter: home, awayFighter: away,
       weightClass: fight.weight_class,
       scheduledRounds: fight.scheduled_rounds,
       venue: fight.venue ?? undefined,
@@ -419,12 +484,30 @@ export async function fetchMmaPredictions(): Promise<GamePrediction[]> {
       modelNotes: [],
       oddsSource: "The Odds API",
     };
-
-    // Match odds by stored odds_event_id
     const oddsLine = fight.odds_event_id ? oddsMap.get(fight.odds_event_id) : undefined;
-
     predictions.push(buildMmaPrediction(fight, home, away, intel, weights, oddsLine));
   }
-
   return predictions;
+}
+
+// ── Main fetch function ───────────────────────────────────────────────────────
+// Strategy:
+//   1. Try Supabase (fighter DB populated) → richest model output
+//   2. Fallback: Odds API events → minimal profiles, market-signal-only model
+//   3. Both empty → return []
+
+export async function fetchMmaPredictions(): Promise<GamePrediction[]> {
+  const weights = await fetchMmaModelWeights();
+
+  // Path 1: Supabase has fight + fighter records
+  const supabasePredictions = await fetchMmaFromSupabase(weights);
+  if (supabasePredictions.length > 0) return supabasePredictions;
+
+  // Path 2: Odds API primary (no DB required)
+  const events = await fetchMmaEvents().catch(() => [] as MmaCombatEvent[]);
+  if (events.length > 0) {
+    return buildPredictionsFromOddsEvents(events, weights);
+  }
+
+  return [];
 }

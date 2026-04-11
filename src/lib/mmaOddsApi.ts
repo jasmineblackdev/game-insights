@@ -157,6 +157,57 @@ export async function fetchMmaOdds(): Promise<MmaOddsLine[]> {
   }
 }
 
+// ─── Full event fetch (primary data source) ──────────────────────
+// Returns one entry per event with fighter names + odds bundled.
+// mmaFetch.ts uses this when Supabase fight tables are empty.
+
+export interface MmaCombatEvent {
+  eventId: string;
+  commenceTime: string;   // ISO UTC (e.g. "2026-04-20T22:00:00Z")
+  homeName: string;
+  awayName: string;
+  line: MmaOddsLine | null;
+}
+
+export async function fetchMmaEvents(): Promise<MmaCombatEvent[]> {
+  if (!isOddsApiAvailable()) return [];
+  try {
+    const res = await fetchOddsForSport({
+      sportKey: MMA_ODDS_SPORT_KEY,
+      markets: "h2h,totals",
+      regions: "us",
+      oddsFormat: "american",
+    });
+    if (!res.ok) return [];
+    const events = (await res.json()) as OddsEvent[];
+    if (!Array.isArray(events)) return [];
+    const now = new Date().toISOString();
+    const out: MmaCombatEvent[] = [];
+    for (const ev of events) {
+      if (!ev.id || !ev.home_team || !ev.away_team) continue;
+      const book = pickBook(ev.bookmakers);
+      const ml   = extractMoneyline(book, ev.home_team, ev.away_team);
+      const tot  = extractTotals(book);
+      const line: MmaOddsLine | null = ml
+        ? {
+            fightId: ev.id,
+            oddsEventId: ev.id,
+            homeMoneyline: ml.home,
+            awayMoneyline: ml.away,
+            ...(ml.draw != null ? { drawMoneyline: ml.draw } : {}),
+            ...(tot != null ? { overRounds: tot.point, overOdds: tot.over, underOdds: tot.under } : {}),
+            sportsbook: book?.key ?? "unknown",
+            fetchedAt: now,
+          }
+        : null;
+      out.push({ eventId: ev.id, commenceTime: ev.commence_time, homeName: ev.home_team, awayName: ev.away_team, line });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Given a fight's home/away names, find the best matching odds line from a list.
  */
