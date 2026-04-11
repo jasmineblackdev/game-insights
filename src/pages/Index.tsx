@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
 import { fetchDraftPicks } from "@/data/draftPicks";
@@ -10,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Layers, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { ClipboardList, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -352,23 +351,9 @@ const Index = () => {
             <div className="flex items-center gap-2 shrink-0">
               <div className="sm:hidden flex items-center gap-1.5">
                 <UnitSizeCalculator variant="compact" className="h-10 w-10 shrink-0 touch-manipulation" />
-                <Link
-                  to="/edge"
-                  className="inline-flex items-center justify-center min-h-10 min-w-10 rounded-lg border border-border bg-card text-primary touch-manipulation"
-                  aria-label="Edge Card"
-                >
-                  <Layers className="w-4 h-4" />
-                </Link>
               </div>
               <div className="hidden sm:flex items-center gap-2">
                 <UnitSizeCalculator variant="compact" className="h-9 w-9" />
-                <Link
-                  to="/edge"
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-2 sm:py-1 text-xs font-semibold text-foreground hover:border-primary/40 hover:bg-primary/5 transition-colors touch-manipulation"
-                >
-                  <Layers className="w-3.5 h-3.5 text-primary" />
-                  Edge Card
-                </Link>
                 <DataSourceStatus />
                 <LeaguePicker value={league} onChange={handleLeagueChange} />
               </div>
