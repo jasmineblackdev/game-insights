@@ -357,8 +357,10 @@ export function PlayerEdgeSection() {
     queryKey: ["player-edge-v2"],
     queryFn: () => fetchPlayerEdgePredictions("all", "all"),
     staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
 
   const allItems = useMemo(() => sortPlayerEdgePredictions(data?.items ?? []), [data]);
@@ -371,7 +373,7 @@ export function PlayerEdgeSection() {
 
   // Section groupings
   const topProps  = useMemo(() => allItems.slice(0, showAllTop ? 12 : 6), [allItems, showAllTop]);
-  const highConf  = useMemo(() => allItems.filter((p) => p.confidence === "HIGH" && p.consistency_label === "stable"), [allItems]);
+  const highConf  = useMemo(() => allItems.filter((p) => p.confidence === "HIGH"), [allItems]);
   const highUp    = useMemo(() => allItems.filter((p) => p.risk_tier === "high_upside" || p.risk_tier === "longshot"), [allItems]);
   const volatile  = useMemo(() => allItems.filter((p) => p.consistency_label === "volatile"), [allItems]);
 

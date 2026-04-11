@@ -118,6 +118,14 @@ function buildMethodProp(
 
   if (!method) return null;
 
+  // Skip method props when fighter profiles are minimal (no real stats).
+  // All minimal profiles produce identical defaults (decision≈67%, ko_tko≈20%),
+  // so the prop would be noise rather than signal.
+  const homeFighter = game.mma?.homeFighter ?? game.boxing?.homeFighter;
+  const awayFighter = game.mma?.awayFighter ?? game.boxing?.awayFighter;
+  const hasRealStats = homeFighter?.koTkoPct != null || awayFighter?.koTkoPct != null;
+  if (!hasRealStats) return null;
+
   const koProb = ("ko_tko" in method ? method.ko_tko : 0) as number;
   const decProb = ("decision" in method ? method.decision : 0) as number;
 

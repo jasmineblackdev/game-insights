@@ -27,7 +27,7 @@ function confidenceLabel(c: CollegeFuturesIntelRow["confidence"]): string {
 }
 
 export function CollegeFuturesSection() {
-  const [sportId, setSportId] = useState<CollegeSportId>("college_football");
+  const [sportId, setSportId] = useState<CollegeSportId>("college_baseball");
   const [expanded, setExpanded] = useState(false);
 
   const query = useQuery({
@@ -98,20 +98,14 @@ export function CollegeFuturesSection() {
           <span className="font-mono text-xs">VITE_THE_ODDS_API_KEY</span>) to load college futures.
         </div>
       ) : !rows.length ? (
-        <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground space-y-2">
-          <p>No outright outcomes returned for this sport key.</p>
-          <p className="text-xs">
-            Keys change by season — set{" "}
-            <span className="font-mono">
-              {sportId === "college_football"
-                ? "VITE_ODDS_COLLEGE_FOOTBALL_SPORT_KEY"
-                : sportId === "college_basketball"
-                  ? "VITE_ODDS_COLLEGE_BASKETBALL_SPORT_KEY"
-                  : "VITE_ODDS_COLLEGE_BASEBALL_SPORT_KEY"}
-            </span>{" "}
-            after checking <span className="font-mono">GET /v4/sports?all=true</span>.
+        <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground space-y-1">
+          <p>
+            {sportId === "college_football"
+              ? "College Football championship futures aren't available right now — the season hasn't started yet. Try College Baseball (CWS) instead."
+              : sportId === "college_basketball"
+                ? "College Basketball championship futures are not currently available. The tournament has ended — check back next season."
+                : "College Baseball (CWS) futures aren't posted yet. Check back closer to the College World Series in June."}
           </p>
-          {note ? <p className="text-xs font-mono text-foreground/70">note: {note}</p> : null}
         </div>
       ) : (
         <>

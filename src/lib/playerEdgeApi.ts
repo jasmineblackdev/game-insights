@@ -151,10 +151,13 @@ export async function fetchPlayerEdgeProjectionById(id: string): Promise<PlayerE
       console.warn("[GameLens] Player Edge detail fetch failed:", e);
     }
   }
-  // Try to find in ESPN live data
+  // Try ESPN live data and combat predictions in parallel
   try {
-    const espnItems = await fetchLivePlayerEdgePredictions();
-    return espnItems.find((p) => p.id === id) ?? null;
+    const [espnItems, combatItems] = await Promise.all([
+      fetchLivePlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
+      fetchCombatPlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
+    ]);
+    return [...espnItems, ...combatItems].find((p) => p.id === id) ?? null;
   } catch {
     return null;
   }
