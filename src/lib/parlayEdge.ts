@@ -34,24 +34,66 @@ export interface ParlayEdgeDebugInfo {
   coverageBug: boolean;
 }
 
+// ─── Timing weights ───────────────────────────────────────────────
+// Pregame weight = confidence multiplier for pre-game parlay selection.
+// Live weight = how much stronger the bet becomes at the optimal live checkpoint.
+// These drive both scoreLeg() adjustment and the timing tag UI copy.
+export interface TimingConfig {
+  pregameWeight: number;
+  liveWeight: number;
+  liveCheckpoint: string;  // human-readable checkpoint label
+  liveUplift: number;      // liveWeight - pregameWeight (pre-computed for display)
+}
+
+export const TIMING_CONFIGS: Record<League, TimingConfig> = {
+  nba:    { pregameWeight: 0.85, liveWeight: 1.05, liveCheckpoint: "after Q1",    liveUplift: 0.20 },
+  nfl:    { pregameWeight: 0.88, liveWeight: 1.04, liveCheckpoint: "after Q1",    liveUplift: 0.16 },
+  mlb:    { pregameWeight: 0.95, liveWeight: 1.07, liveCheckpoint: "after 5th",   liveUplift: 0.12 },
+  mma:    { pregameWeight: 0.93, liveWeight: 1.08, liveCheckpoint: "after R1",    liveUplift: 0.15 },
+  boxing: { pregameWeight: 0.94, liveWeight: 1.06, liveCheckpoint: "after R2–3",  liveUplift: 0.12 },
+};
+
 // ─── Timing tags ─────────────────────────────────────────────────
-/** Best window to place the bet for each sport/market combo. */
+/**
+ * Returns a timing label for a leg, including the live uplift signal.
+ * MLB shows "Pregame (F5) · +12% edge after 5th" so users know the bet
+ * strengthens mid-game — the pre-game entry is still valid, just not peak.
+ */
 export function timingTag(sport: League, marketType: ValueMarketType | string): string {
+  const cfg = TIMING_CONFIGS[sport];
+  const upliftPct = Math.round(cfg.liveUplift * 100);
+
   if (sport === "nba") {
-    if (marketType === "player_prop") return "Pregame · Best after Q1";
-    return "Pregame";
+    if (marketType === "player_prop") return `Pregame · ↑${upliftPct}% after Q1`;
+    return `Pregame · ↑${upliftPct}% after Q1`;
   }
   if (sport === "nfl") {
-    if (marketType === "player_prop") return "Pregame · Best after Q1";
-    return "Pregame";
+    if (marketType === "player_prop") return `Pregame · ↑${upliftPct}% after Q1`;
+    return `Pregame · ↑${upliftPct}% after Q1`;
   }
   if (sport === "mlb") {
-    if (marketType === "player_prop") return "Pregame (K props)";
-    return "Pregame (F5 window)";
+    // MLB pregame window is F5 or pitcher props; full-game total/ML improves post-5th
+    if (marketType === "player_prop") return `Pregame (K/hits props) · ↑${upliftPct}% after 5th`;
+    if (marketType === "moneyline")   return `Pregame (F5 ML) · ↑${upliftPct}% after 5th`;
+    return `Pregame · ↑${upliftPct}% after 5th inning`;
   }
-  if (sport === "mma") return "Pregame · Best after R1";
-  if (sport === "boxing") return "Pregame · Best after R2";
+  if (sport === "mma")    return `Pregame · ↑${upliftPct}% after R1`;
+  if (sport === "boxing") return `Pregame · ↑${upliftPct}% after R2–3`;
   return "Pregame";
+}
+
+/**
+ * Short single-line timing label for compact card display.
+ * e.g. "F5 window · ↑12% post-5th"
+ */
+export function timingTagShort(sport: League, marketType: ValueMarketType | string): string {
+  const cfg = TIMING_CONFIGS[sport];
+  const upliftPct = Math.round(cfg.liveUplift * 100);
+  if (sport === "mlb") {
+    if (marketType === "moneyline") return `F5 window · ↑${upliftPct}% post-5th`;
+    return `Pregame · ↑${upliftPct}% post-5th`;
+  }
+  return `Pregame · ↑${upliftPct}% ${cfg.liveCheckpoint}`;
 }
 
 // ─── Sport filter helpers ────────────────────────────────────────
@@ -123,6 +165,12 @@ function oddsSweetSpot(american: number): number {
 //   safe       → maximize probability + confidence
 //   balanced   → maximize edge + probability + confidence
 //   aggressive → maximize edge + payout potential
+//
+// Timing weight: each sport's pregame signal strength is baked in so that
+// MLB legs (pregame: 0.95) are correctly weighted vs NBA (pregame: 0.85)
+// in the same pool. MLB scores better pre-game because it has more predictable
+// F5/pitcher data; NBA is slightly discounted because live Q1 info improves
+// the pick materially. Combat sports (MMA 0.93, Boxing 0.94) sit between.
 
 export function scoreLeg(c: ValueBetCandidate, mode: ParlayBuildMode): number {
   const confidence =
@@ -134,14 +182,18 @@ export function scoreLeg(c: ValueBetCandidate, mode: ParlayBuildMode): number {
       ? 0.75
       : Math.max(0, 1 - Math.abs(c.lineMovementDeltaPp) / 10);
   const sweet = oddsSweetSpot(c.americanOdds);
+  // Pregame timing weight — reflects how much pre-game info is worth per sport.
+  // MLB 0.95: starter data is rich pre-game (F5 window).
+  // NBA 0.85: rotations/pace confirm after Q1, so pre-game is slightly discounted.
+  const timingW = TIMING_CONFIGS[c.sport as League]?.pregameWeight ?? 1.0;
 
   if (mode === "safe") {
     return (
-      c.modelProbability * 0.40 +
+      (c.modelProbability * 0.40 +
       confidence         * 0.25 +
       c.edge             * 0.20 -
       volatility         * 0.15 +
-      sweet
+      sweet) * timingW
     );
   }
 
@@ -149,23 +201,23 @@ export function scoreLeg(c: ValueBetCandidate, mode: ParlayBuildMode): number {
     const payoutPotential =
       c.americanOdds > 0 ? Math.min(1, c.americanOdds / 300) : 0;
     return (
-      c.edge          * 0.45 +
+      (c.edge          * 0.45 +
       payoutPotential * 0.25 +
       confidence      * 0.15 -
       volatility      * 0.15 +
-      sweet
+      sweet) * timingW
     );
   }
 
   // balanced
   return (
-    c.edge           * 0.35 +
+    (c.edge           * 0.35 +
     c.modelProbability * 0.20 +
     confidence       * 0.20 -
     volatility       * 0.15 +
     dataQuality      * 0.05 +
     marketStability  * 0.05 +
-    sweet
+    sweet) * timingW
   );
 }
 

@@ -25,12 +25,13 @@ import {
   type SportCoverageInfo,
   type SportFilterMode,
   COMBO_WARNINGS,
+  TIMING_CONFIGS,
   generateParlayEdge,
   getLearningInsights,
   parlayModeDescription,
   parlayModeLabel,
   SPORT_TIERS,
-  timingTag,
+  timingTagShort,
 } from "@/lib/parlayEdge";
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -338,9 +339,15 @@ function ModeSelector({
 // ─── Timing Badge ─────────────────────────────────────────────────
 
 function TimingBadge({ sport, marketType }: { sport: League; marketType: string }) {
-  const tag = timingTag(sport, marketType);
+  const tag   = timingTagShort(sport, marketType);
+  const cfg   = TIMING_CONFIGS[sport];
+  // MLB and combat sports show the live uplift more prominently since it's meaningful
+  const isNonTrival = sport === "mlb" || sport === "mma" || sport === "boxing";
   return (
-    <span className="inline-flex items-center gap-0.5 text-[9px] text-muted-foreground">
+    <span className={cn(
+      "inline-flex items-center gap-0.5 text-[9px]",
+      isNonTrival ? "text-amber-600 dark:text-amber-500" : "text-muted-foreground"
+    )}>
       <Clock className="w-2.5 h-2.5 shrink-0" />
       {tag}
     </span>
@@ -757,6 +764,38 @@ export function ParlayEdgeSection({ allGames, oddsMap, currentLeague = "nba" }: 
           <Brain className="w-4 h-4 text-primary" />
           <h3 className="font-display font-bold text-base text-foreground">Learning Insights</h3>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground">PHASE 1</span>
+        </div>
+
+        {/* Timing weights reference */}
+        <div className="rounded-lg border border-border bg-card/60 p-3 mb-4 space-y-2">
+          <p className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
+            Timing weights — pregame vs live signal strength
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+            {(["nba","nfl","mlb","mma","boxing"] as League[]).map((sport) => {
+              const cfg = TIMING_CONFIGS[sport];
+              return (
+                <div key={sport} className="rounded bg-muted/40 px-2 py-1.5 text-center">
+                  <div className="text-[9px] font-bold text-muted-foreground uppercase mb-1">
+                    {sport === "mma" ? "UFC" : sport.toUpperCase()}
+                  </div>
+                  <div className="text-[10px] font-semibold text-foreground">
+                    {cfg.pregameWeight}x pregame
+                  </div>
+                  <div className="text-[9px] text-amber-500 font-semibold">
+                    {cfg.liveWeight}x {cfg.liveCheckpoint}
+                  </div>
+                  <div className="text-[9px] text-confidence-high mt-0.5">
+                    ↑{Math.round(cfg.liveUplift * 100)}% uplift
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            MLB gets the highest live uplift (+12% after 5th) because bullpen exposure, starter performance, and live totals shift dramatically mid-game.
+            NBA/NFL confirm rotations after Q1 (+20%/+16%). Combat sports improve post-round-1 when fight style is readable.
+          </p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {(showInsightsAll ? insights : insights.slice(0, 4)).map((ins) => (
