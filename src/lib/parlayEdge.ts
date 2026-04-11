@@ -10,7 +10,75 @@
  */
 
 import type { League } from "@/data/mockGames";
-import type { ParlayBuildMode, ValueBetCandidate } from "@/lib/valueParlay/types";
+import type { ParlayBuildMode, ValueBetCandidate, ValueMarketType } from "@/lib/valueParlay/types";
+
+// ─── Sport filter modes ──────────────────────────────────────────
+/** Global: all sports. Biased: current sport preferred but not exclusive. Sport-only: hard filter. */
+export type SportFilterMode = "global" | "biased" | "sport_only";
+
+// ─── Debug / coverage types ──────────────────────────────────────
+export interface SportCoverageInfo {
+  sport: League;
+  totalCandidates: number;
+  positiveEdgeCandidates: number;
+  qualifyingCandidates: number; // edge > 0 AND confidence !== "low"
+}
+
+export interface ParlayEdgeDebugInfo {
+  sportCoverage: SportCoverageInfo[];
+  sportsInPool: League[];       // sports present after mode filter
+  totalCandidatesConsidered: number;
+  filterMode: SportFilterMode;
+  biasSport?: League;
+  /** True if pool has only 1 sport when multiple sports have qualifying candidates — indicates bug. */
+  coverageBug: boolean;
+}
+
+// ─── Timing tags ─────────────────────────────────────────────────
+/** Best window to place the bet for each sport/market combo. */
+export function timingTag(sport: League, marketType: ValueMarketType | string): string {
+  if (sport === "nba") {
+    if (marketType === "player_prop") return "Pregame · Best after Q1";
+    return "Pregame";
+  }
+  if (sport === "nfl") {
+    if (marketType === "player_prop") return "Pregame · Best after Q1";
+    return "Pregame";
+  }
+  if (sport === "mlb") {
+    if (marketType === "player_prop") return "Pregame (K props)";
+    return "Pregame (F5 window)";
+  }
+  if (sport === "mma") return "Pregame · Best after R1";
+  if (sport === "boxing") return "Pregame · Best after R2";
+  return "Pregame";
+}
+
+// ─── Sport filter helpers ────────────────────────────────────────
+const ALL_SUPPORTED_SPORTS: League[] = ["nba", "nfl", "mlb", "boxing", "mma"];
+
+export function filterCandidatesByMode(
+  candidates: ValueBetCandidate[],
+  mode: SportFilterMode,
+  biasSport?: League
+): ValueBetCandidate[] {
+  if (mode === "sport_only" && biasSport) {
+    return candidates.filter((c) => c.sport === biasSport);
+  }
+  return candidates; // global + biased: full pool (bias handled via score boost below)
+}
+
+/** Apply a 15% score boost to the biased sport so it's preferred but not exclusive. */
+export function applyBiasBoost(
+  candidates: ValueBetCandidate[],
+  mode: SportFilterMode,
+  biasSport?: League
+): ValueBetCandidate[] {
+  if (mode !== "biased" || !biasSport) return candidates;
+  return candidates.map((c) =>
+    c.sport === biasSport ? { ...c, valueScore: c.valueScore * 1.15 } : c
+  );
+}
 import {
   parlayAmericanOdds,
   parlayHitProbability,
@@ -348,17 +416,51 @@ export interface ParlayEdgeOutput {
   balanced: AutoParlay | null;
   aggressive: AutoParlay | null;
   candidatePool: ValueBetCandidate[];
+  debug: ParlayEdgeDebugInfo;
 }
 
-export function generateParlayEdge(candidates: ValueBetCandidate[]): ParlayEdgeOutput {
+export function generateParlayEdge(
+  candidates: ValueBetCandidate[],
+  filterMode: SportFilterMode = "global",
+  biasSport?: League
+): ParlayEdgeOutput {
+  // Build sport coverage from the full unfiltered pool
+  const sportCoverage: SportCoverageInfo[] = ALL_SUPPORTED_SPORTS.map((sport) => {
+    const sc = candidates.filter((c) => c.sport === sport);
+    return {
+      sport,
+      totalCandidates: sc.length,
+      positiveEdgeCandidates: sc.filter((c) => c.edge > 0).length,
+      qualifyingCandidates: sc.filter((c) => c.edge > 0 && c.confidence !== "low").length,
+    };
+  });
+
+  // Apply mode filter then bias boost
+  const filtered = filterCandidatesByMode(candidates, filterMode, biasSport);
+  const pool     = applyBiasBoost(filtered, filterMode, biasSport);
+
+  const sportsInPool = [...new Set(pool.map((c) => c.sport))] as League[];
+  const qualifyingMultipleSports = sportCoverage.filter((s) => s.qualifyingCandidates > 0).length;
+  const coverageBug = sportsInPool.length === 1 && qualifyingMultipleSports > 1;
+
+  const debug: ParlayEdgeDebugInfo = {
+    sportCoverage,
+    sportsInPool,
+    totalCandidatesConsidered: pool.length,
+    filterMode,
+    biasSport,
+    coverageBug,
+  };
+
   return {
-    safe:       buildAutoParlay(candidates, "safe"),
-    balanced:   buildAutoParlay(candidates, "balanced"),
-    aggressive: buildAutoParlay(candidates, "aggressive"),
-    candidatePool: [...candidates]
+    safe:       buildAutoParlay(pool, "safe"),
+    balanced:   buildAutoParlay(pool, "balanced"),
+    aggressive: buildAutoParlay(pool, "aggressive"),
+    candidatePool: [...pool]
       .filter((c) => c.edge > 0 && c.confidence !== "low")
       .sort((a, b) => b.valueScore - a.valueScore)
       .slice(0, 12),
+    debug,
   };
 }
 

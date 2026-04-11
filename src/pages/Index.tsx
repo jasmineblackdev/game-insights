@@ -614,7 +614,7 @@ const Index = () => {
 
               {/* Content */}
               {viewMode === "parlay_edge" ? (
-                <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} />
+                <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
               ) : viewMode === "props" ? (
