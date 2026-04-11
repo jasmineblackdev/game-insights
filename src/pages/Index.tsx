@@ -324,7 +324,15 @@ const Index = () => {
   const handleLeagueChange = (l: League) => {
     setLeague(l);
     setSelectedGame(null);
-    if (dateFilter === "week") setDateFilter("today");
+    const isCombat = l === "boxing" || l === "mma";
+    const wasCombat = league === "boxing" || league === "mma";
+    if (isCombat) {
+      // Combat sports: fights are weekly events — default to "week" to show upcoming card
+      setDateFilter("week");
+    } else if (wasCombat || dateFilter === "week") {
+      // Switching away from combat to a daily sport — reset to today
+      setDateFilter("today");
+    }
   };
 
   const handleViewModeChange = (m: ViewMode) => {
