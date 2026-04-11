@@ -27,7 +27,7 @@ import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/m
 interface GameDetailViewProps {
   game: GamePrediction;
   onBack: () => void;
-  /** Bump after toggling “starters verified” so the home tab can re-run the MLB model. */
+  /** Bump after toggling "starters verified" so the home tab can re-run the MLB model. */
   onMlbStartersConfirmChange?: () => void;
 }
 
@@ -547,36 +547,36 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
 
         {/* Boxing-specific model layer */}
         {game.boxing && (
-          <div className=”card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2”>
-            <h3 className=”font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3”>
-              <Info className=”w-4 h-4 text-primary” />
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
+              <Info className="w-4 h-4 text-primary" />
               Boxing Model · {game.boxing.weightClass}
               {game.boxing.isTitleFight && (
-                <span className=”ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20”>
-                  {game.boxing.titleDescription ?? “TITLE FIGHT”}
+                <span className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  {game.boxing.titleDescription ?? "TITLE FIGHT"}
                 </span>
               )}
             </h3>
             {game.boxing.modelOutput && (
-              <div className=”space-y-3”>
-                <div className=”grid grid-cols-2 gap-2 text-xs”>
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-xs">
                   {[
-                    { label: “Reach”, text: game.boxing.modelOutput.reachEdge },
-                    { label: “Age”, text: game.boxing.modelOutput.ageEdge },
-                    { label: “Stance”, text: game.boxing.modelOutput.stanceEdge },
-                    { label: “Activity”, text: game.boxing.modelOutput.activityEdge },
-                    { label: “Style”, text: game.boxing.modelOutput.styleEdge },
-                    { label: “Opp Quality”, text: game.boxing.modelOutput.opponentQualityEdge },
+                    { label: "Reach", text: game.boxing.modelOutput.reachEdge },
+                    { label: "Age", text: game.boxing.modelOutput.ageEdge },
+                    { label: "Stance", text: game.boxing.modelOutput.stanceEdge },
+                    { label: "Activity", text: game.boxing.modelOutput.activityEdge },
+                    { label: "Style", text: game.boxing.modelOutput.styleEdge },
+                    { label: "Opp Quality", text: game.boxing.modelOutput.opponentQualityEdge },
                   ].map(({ label, text }) => (
-                    <div key={label} className=”rounded bg-muted/30 px-2 py-1.5”>
-                      <p className=”text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5”>{label.toUpperCase()}</p>
-                      <p className=”text-secondary-foreground leading-tight”>{text}</p>
+                    <div key={label} className="rounded bg-muted/30 px-2 py-1.5">
+                      <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5">{label.toUpperCase()}</p>
+                      <p className="text-secondary-foreground leading-tight">{text}</p>
                     </div>
                   ))}
                 </div>
-                <div className=”rounded-lg bg-muted/25 border border-border p-3 text-xs space-y-1 text-secondary-foreground”>
-                  <p className=”font-semibold text-foreground text-[10px] tracking-wider mb-1”>METHOD OF VICTORY</p>
-                  <div className=”flex gap-4”>
+                <div className="rounded-lg bg-muted/25 border border-border p-3 text-xs space-y-1 text-secondary-foreground">
+                  <p className="font-semibold text-foreground text-[10px] tracking-wider mb-1">METHOD OF VICTORY</p>
+                  <div className="flex gap-4">
                     <span>KO/TKO: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.ko_tko * 100)}%</strong></span>
                     <span>Decision: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.decision * 100)}%</strong></span>
                     <span>Draw: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.draw * 100)}%</strong></span>
@@ -585,22 +585,22 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                     <p>Model avg rounds: ~<strong>{game.boxing.modelOutput.overUnderRoundsPivot}</strong> of {game.boxing.scheduledRounds} scheduled</p>
                   )}
                 </div>
-                <p className=”text-xs text-muted-foreground”>{game.boxing.modelOutput.koPctNote}</p>
+                <p className="text-xs text-muted-foreground">{game.boxing.modelOutput.koPctNote}</p>
                 {game.boxing.modelOutput.riskFlag && (
-                  <div className=”flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-xs text-amber-700 dark:text-amber-400”>
-                    <AlertTriangle className=”w-3.5 h-3.5 mt-0.5 shrink-0” />
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                     <span>{game.boxing.modelOutput.riskFlag}</span>
                   </div>
                 )}
               </div>
             )}
             {!game.boxing.modelOutput && game.boxing.modelNotes.length > 0 && (
-              <ul className=”space-y-2 text-sm text-secondary-foreground list-disc list-inside”>
+              <ul className="space-y-2 text-sm text-secondary-foreground list-disc list-inside">
                 {game.boxing.modelNotes.map((note, i) => <li key={i}>{note}</li>)}
               </ul>
             )}
             {game.boxing.venue && (
-              <p className=”text-xs text-muted-foreground mt-3”>Venue: {game.boxing.venue}</p>
+              <p className="text-xs text-muted-foreground mt-3">Venue: {game.boxing.venue}</p>
             )}
           </div>
         )}
