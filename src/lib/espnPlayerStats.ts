@@ -29,11 +29,9 @@ const NBA_STAT_MAP: Record<string, { statType: string; unit: string }> = {
 };
 
 const MLB_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  batting:    { statType: "hits", unit: "hits" },
   homeRuns:   { statType: "total_bases", unit: "HR" },
   strikeouts: { statType: "strikeouts", unit: "K" },
   hits:       { statType: "hits", unit: "hits" },
-  RBIs:       { statType: "hits", unit: "RBI" },
 };
 
 const SPORT_STAT_MAP: Record<string, typeof NBA_STAT_MAP> = {
@@ -252,12 +250,11 @@ async function fetchSportPlayerEdge(
             risk_factor,
             game_sort: sortBase + predictions.length,
             confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
-            risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "high_upside",
+            // LOW confidence = longshot (uncertain), not high_upside (which implies a real signal)
+            risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
             consistency_label: edgeMag >= 2.5 ? "stable" : edgeMag >= 1.0 ? "medium" : "volatile",
-            trend_note:
-              direction === "MORE"
-                ? `Trending ↑ vs ${oppAbbr}`
-                : `Fade opportunity vs ${oppAbbr}`,
+            // Only signal a trend when edge is meaningful — avoids inflating recent_form score for every prop
+            trend_note: edgeMag >= 2.5 ? (direction === "MORE" ? `Trending ↑ vs ${oppAbbr}` : `Fade vs ${oppAbbr}`) : undefined,
           });
         }
       }

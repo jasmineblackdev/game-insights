@@ -297,13 +297,12 @@ function SectionHeading({ title, count, subtitle }: { title: string; count?: num
 // ── Sport section (best N props per sport) ────────────────────────────────────
 
 function SportSection({
-  label, sport, all, favs, fav, rankOffset,
+  label, sport, all, favs, rankOffset,
 }: {
   label: string;
   sport: PlayerEdgeSportFilter;
   all: PlayerEdgePrediction[];
   favs: ReturnType<typeof import("@/hooks/usePlayerEdgeFavorites").usePlayerEdgeFavorites>;
-  fav: ReturnType<typeof import("@/hooks/usePlayerEdgeFavorites").usePlayerEdgeFavorites>;
   rankOffset: number;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -336,7 +335,7 @@ function SportSection({
             pred={pred}
             rank={rankOffset + i + 1}
             favorited={favs.showFavoritesUi && favs.isFav(pred)}
-            onToggleFavorite={() => fav.toggleFavorite(pred)}
+            onToggleFavorite={() => favs.toggleFavorite(pred)}
             favoritesUi={favs.showFavoritesUi}
           />
         ))}
@@ -544,7 +543,6 @@ export function PlayerEdgeSection() {
                   sport={s}
                   all={allItems}
                   favs={favs}
-                  fav={favs}
                   rankOffset={0}
                 />
               );
