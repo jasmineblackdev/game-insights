@@ -57,7 +57,9 @@ function draftPicksUrl(league: League, season: number): string {
 function prospectsUrl(league: League): string {
   const sp = sportPath(league);
   if (!sp) return "";
-  return `https://sports.core.api.espn.com/v2/sports/${sp}/draft/prospects?limit=100&sortBy=rank&sort=asc`;
+  // Use site API (browser-accessible, no CORS issues).
+  // sports.core.api.espn.com blocks cross-origin browser requests.
+  return `https://site.api.espn.com/apis/site/v2/sports/${sp}/draft/prospects?limit=100`;
 }
 
 // ── ESPN raw types ─────────────────────────────────────────────────────────────
