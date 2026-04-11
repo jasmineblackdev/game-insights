@@ -17,7 +17,6 @@ import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 const SCOREBOARDS: Record<string, string> = {
   NBA: "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
   MLB: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
-  Soccer: "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard",
 };
 
 // ── ESPN stat-category name → our PlayerEdgeStatFilter ────────────────────────
@@ -276,10 +275,9 @@ async function fetchSportPlayerEdge(
  * Source is always ESPN — no mock data involved.
  */
 export async function fetchLivePlayerEdgePredictions(): Promise<PlayerEdgePrediction[]> {
-  const [nba, mlb, soccer] = await Promise.all([
+  const [nba, mlb] = await Promise.all([
     fetchSportPlayerEdge("NBA", 0),
     fetchSportPlayerEdge("MLB", 1000),
-    fetchSportPlayerEdge("Soccer", 2000),
   ]);
-  return [...nba, ...mlb, ...soccer];
+  return [...nba, ...mlb];
 }

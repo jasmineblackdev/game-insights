@@ -75,10 +75,6 @@ function fatigueMeta(g: GamePrediction): PredictionQualityMeta["fatigue"] {
     score += 14;
     travel += 8;
   }
-  if (g.league === "soccer" && g.soccer?.congestion) {
-    const { homeLast7, awayLast7 } = g.soccer.congestion;
-    score += clamp(Math.abs(homeLast7 - awayLast7) * 5, 0, 20);
-  }
   if (g.mlb?.modelOutput?._debug?.layerDebug?.bullpenUsedFatigueRows) {
     score += 8;
   }
@@ -186,7 +182,7 @@ function liveSubScore(g: GamePrediction): number {
   const ls = g._meta?.liveState;
   if (!ls || g.status !== "live") return 50;
   const d = ls.homeScore - ls.awayScore;
-  const cap = g.league === "soccer" ? 2.2 : g.league === "mlb" ? 1.8 : 1.4;
+  const cap = g.league === "mlb" ? 1.8 : 1.4;
   return clamp(50 + d * cap, 15, 85);
 }
 

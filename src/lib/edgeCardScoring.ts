@@ -24,7 +24,7 @@ export interface EdgePickFlags {
   injuryUncertainty: boolean;
   pitcherUnconfirmed: boolean;
   highVolatility: boolean;
-  soccerDrawHeavy: boolean;
+  drawHeavy: boolean;
 }
 
 export interface EdgeSlipSnapshot {
@@ -127,7 +127,7 @@ export interface PlayerPropInput {
   game_id: string;
   player_id: string;
   player_name: string;
-  sport: "NBA" | "NFL" | "MLB" | "Soccer";
+  sport: "NBA" | "NFL" | "MLB" | "Boxing";
   team: string;
   opponent: string;
   game_time: string;
@@ -146,7 +146,7 @@ function sportToLeague(s: PlayerPropInput["sport"]): League {
   if (s === "NBA") return "nba";
   if (s === "NFL") return "nfl";
   if (s === "MLB") return "mlb";
-  return "soccer";
+  return "boxing";
 }
 
 function apiConfidenceToLevel(c: PlayerPropInput["confidence"]): ConfidenceLevel {
@@ -336,7 +336,7 @@ export function getFavoredSide(game: GamePrediction): EdgeSide {
  * MLB/Soccer have more variance → caps lower.
  */
 function confidenceStability(conf: ConfidenceLevel, league?: string): number {
-  const isHighVariance = league === "mlb" || league === "soccer";
+  const isHighVariance = league === "mlb" || league === "boxing";
   if (conf === "high") return isHighVariance ? 10 : 14;
   if (conf === "medium") return isHighVariance ? 5 : 7;
   return 2;
@@ -380,9 +380,9 @@ function marketVolatility(game: GamePrediction, side: EdgeSide): number {
   const sp = game.lines?.spreadNum;
   if (sp != null && Math.abs(sp) <= 1.5) v += 5;
 
-  if (game.league === "soccer" && game.threeWay) {
-    v += game.threeWay.draw * 0.12;
-    if (game.threeWay.draw >= 28) v += 6;
+  if (game.league === "boxing" && game.threeWay) {
+    // Boxing draws are rare (4%) — large draw probability is a model anomaly
+    if (game.threeWay.draw >= 15) v += 4;
   }
 
   if (game.soccer?.congestion) {
@@ -405,8 +405,8 @@ export function computePickFlags(game: GamePrediction, side: EdgeSide): EdgePick
     game.league === "mlb" && game.mlb != null && game.mlb.pitcherCertainty !== "confirmed";
   const vol = marketVolatility(game, side);
   const highVolatility = vol >= 18;
-  const soccerDrawHeavy = Boolean(game.threeWay && game.threeWay.draw >= 28);
-  return { injuryUncertainty, pitcherUnconfirmed, highVolatility, soccerDrawHeavy };
+  const drawHeavy = Boolean(game.threeWay && game.threeWay.draw >= 28);
+  return { injuryUncertainty, pitcherUnconfirmed, highVolatility, drawHeavy };
 }
 
 /**
@@ -527,14 +527,14 @@ export function rankCandidatesForHub(games: GamePrediction[], filters: EdgeHubFi
   return out.sort((a, b) => b.pickScore - a.pickScore);
 }
 
-const LEAGUE_ORDER: League[] = ["nba", "nfl", "mlb", "soccer"];
+const LEAGUE_ORDER: League[] = ["nba", "nfl", "mlb", "boxing"];
 
 export function groupCandidatesByLeague(candidates: EdgeCandidate[]): Record<League, EdgeCandidate[]> {
   const acc: Record<League, EdgeCandidate[]> = {
     nba: [],
     nfl: [],
     mlb: [],
-    soccer: [],
+    boxing: [],
   };
   for (const c of candidates) {
     acc[c.game.league].push(c);
@@ -627,7 +627,7 @@ export function edgeSlipWarningLines(items: EdgeSlipItem[]): string[] {
 export function slipRiskLabel(items: { flags: EdgePickFlags }[]): "elevated" | "moderate" | "controlled" {
   const anyPitch = items.some((i) => i.flags.pitcherUnconfirmed);
   const anyInj = items.some((i) => i.flags.injuryUncertainty);
-  const anyVol = items.some((i) => i.flags.highVolatility || i.flags.soccerDrawHeavy);
+  const anyVol = items.some((i) => i.flags.highVolatility || i.flags.drawHeavy);
   const n = [anyPitch, anyInj, anyVol].filter(Boolean).length;
   if (n >= 2) return "elevated";
   if (n === 1) return "moderate";

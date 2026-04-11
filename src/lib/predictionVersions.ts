@@ -154,8 +154,6 @@ export function isLiveTriggerMet(game: GamePrediction): boolean {
       return periodNum >= 2 && !isHalftime && diff <= 8;
     case "mlb":
       return periodNum >= 5;
-    case "soccer":
-      return !isHalftime && periodNum >= 15 && periodNum <= 30;
     default:
       return false;
   }
@@ -180,8 +178,8 @@ function liveAdjustedHomeProb(game: GamePrediction, pregameHomeProb: number): nu
   const { periodNum, homeScore, awayScore } = ls;
   const scoreDiff = homeScore - awayScore; // + = home leading
 
-  const maxPeriod: Record<string, number> = { nba: 4, nfl: 4, mlb: 9, soccer: 90 };
-  const factor: Record<string, number> = { nba: 0.7, nfl: 0.6, mlb: 5, soccer: 8 };
+  const maxPeriod: Record<string, number> = { nba: 4, nfl: 4, mlb: 9, boxing: 12 };
+  const factor: Record<string, number> = { nba: 0.7, nfl: 0.6, mlb: 5, boxing: 0 };
   const fraction = Math.min(1, periodNum / (maxPeriod[game.league] ?? 4));
   const adjustment = scoreDiff * (factor[game.league] ?? 1) * fraction;
 
@@ -213,12 +211,10 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
 
   const phase: PredictionPhase =
     game.league === "mlb" ? "live_f5"
-    : game.league === "soccer" ? "live_15min"
     : "live_q1";
 
   const triggerType: TriggerType =
     game.league === "mlb" ? "end_f5_signal"
-    : game.league === "soccer" ? "early_pattern_signal"
     : "end_q1_signal";
 
   // Sport-specific live reasons

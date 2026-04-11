@@ -33,7 +33,7 @@ import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
-import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { fetchBoxingPredictions } from "@/lib/boxingFetch";
 import {
   type EdgeCandidate,
   type EdgeCardSize,
@@ -48,10 +48,10 @@ import {
   suggestReplacement,
 } from "@/lib/edgeCardScoring";
 
-const LEAGUES: League[] = ["nba", "nfl", "mlb", "soccer"];
+const LEAGUES: League[] = ["nba", "nfl", "mlb", "boxing"];
 
 function leagueShort(l: League) {
-  return l === "soccer" ? "EPL" : l.toUpperCase();
+  return l.toUpperCase();
 }
 
 /** MLB totals (~7–11) vs NBA (~210+) — surfaces board context on hub cards. */
@@ -151,7 +151,7 @@ function HubPickCard({
         {c.flags.pitcherUnconfirmed ? (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 dark:text-amber-400">SP unconfirmed</span>
         ) : null}
-        {c.flags.highVolatility || c.flags.soccerDrawHeavy ? (
+        {c.flags.highVolatility ? (
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Volatile</span>
         ) : null}
       </div>
@@ -219,9 +219,9 @@ function EdgeCardPageInner() {
         staleTime: 2 * 60 * 1000,
       },
       {
-        queryKey: ["soccer-espn-scoreboard", easternYmd()],
-        queryFn: fetchSoccerGamePredictions,
-        staleTime: 2 * 60 * 1000,
+        queryKey: ["boxing-predictions"],
+        queryFn: fetchBoxingPredictions,
+        staleTime: 5 * 60 * 1000,
       },
     ],
   });
@@ -234,9 +234,7 @@ function EdgeCardPageInner() {
     return merged.filter(
       (g) =>
         g.status === "upcoming" &&
-        (g.gameDate === "today" ||
-          g.gameDate === "tomorrow" ||
-          (g.league === "soccer" && g.gameDate === "week"))
+        (g.gameDate === "today" || g.gameDate === "tomorrow")
     );
   }, [results]);
 

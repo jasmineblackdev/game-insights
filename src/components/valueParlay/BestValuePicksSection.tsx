@@ -21,10 +21,10 @@ type PickKind = "all" | "team" | "props";
 type LeagueFilter = "all" | League;
 type RiskPreset = "all" | ParlayBuildMode;
 
-const LEAGUES: League[] = ["nba", "nfl", "mlb", "soccer"];
+const LEAGUES: League[] = ["nba", "nfl", "mlb", "boxing"];
 
 function leagueShort(l: League) {
-  return l === "soccer" ? "EPL" : l.toUpperCase();
+  return l.toUpperCase();
 }
 
 function formatPct(x: number) {

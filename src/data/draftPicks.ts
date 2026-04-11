@@ -31,6 +31,6 @@ export interface DraftPickPrediction {
  * Uses the current draft season (calendar year).
  */
 export async function fetchDraftPicks(league: League): Promise<DraftPickPrediction[]> {
-  if (league === "soccer") return [];
+  if (league === "boxing") return [];
   return fetchLiveDraftPicks(league, currentDraftSeason());
 }

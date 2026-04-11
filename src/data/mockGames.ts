@@ -1,42 +1,12 @@
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
-export type League = "nba" | "nfl" | "mlb" | "soccer";
-/** Soccer also uses "week" for fixtures within the next 7 days (sparse EPL calendar). */
+export type League = "nba" | "nfl" | "mlb" | "boxing";
 export type GameDate = "today" | "tomorrow" | "week";
 
 /** "partial" = one pitcher confirmed, the other still unknown. */
 export type PitcherCertainty = "confirmed" | "probable" | "partial" | "unknown";
 
-/**
- * Soccer is modeled on a different axis than NBA/NFL/MLB: low scoring, draws matter,
- * and the strongest engines lean on xG, possession profile, congestion, and lineups.
- * ESPN covers fixtures and 1X2 odds; layer SportsDataIO / football-data.org for ops data
- * and StatsBomb (or similar) for xG and event-level tactics when you wire APIs.
- */
-export interface SoccerIntel {
-  competition: string;
-  /** Human-readable factors we’d score with vendor + event data (placeholders until wired). */
-  modelNotes: string[];
-  /** What this build does not yet ingest — drives conservative confidence. */
-  dataGaps: string[];
-  /** Completed league matches in rolling windows (fatigue / rotation signal). */
-  congestion?: {
-    homeLast7: number;
-    awayLast7: number;
-    homeLast14: number;
-    awayLast14: number;
-  };
-  /** From football-data.org standings when mapped by club TLA. */
-  table?: {
-    homePosition?: number;
-    awayPosition?: number;
-    homePoints?: number;
-    awayPoints?: number;
-  };
-  /** Where schedule/table numbers came from for transparency. */
-  scheduleSource?: "football-data.org" | "espn-scoreboard";
-}
 
 /**
  * Structured output from the MLB weighted prediction model.
@@ -104,6 +74,77 @@ export interface MlbIntel {
   modelNotes: string[];
   /** Structured output from the MLB weighted prediction model. */
   modelOutput?: MlbModelOutput;
+}
+
+/** Boxing fighter physical/record profile — populated from Supabase boxing_fighters. */
+export interface BoxingFighterProfile {
+  fighterId: string;
+  name: string;
+  record: string;          // e.g. "28-2-0 (20 KOs)"
+  wins: number;
+  losses: number;
+  draws: number;
+  koWins: number;
+  weightClass: string;
+  reach?: number;          // inches
+  height?: number;         // inches
+  stance?: "orthodox" | "southpaw" | "switch";
+  age?: number;
+  /** Last fight date ISO string — used to compute inactivity penalty. */
+  lastFightDate?: string;
+  /** Avg opponent quality score 0-100 (based on opponent records). */
+  opponentQualityScore?: number;
+  /** % of fights won by KO/TKO */
+  koPct?: number;
+  /** % of fights going to decision */
+  decisionPct?: number;
+  /** Style tags e.g. "pressure_fighter", "boxer_puncher", "counterpuncher", "brawler" */
+  styleTag?: string;
+  /** Chin durability score 0-10 (knockdowns taken / fights) */
+  chinScore?: number;
+}
+
+/** Structured output from the boxing prediction model. */
+export interface BoxingModelOutput {
+  reachEdge: string;
+  ageEdge: string;
+  stanceEdge: string;
+  activityEdge: string;
+  styleEdge: string;
+  opponentQualityEdge: string;
+  koPctNote: string;
+  methodProbabilities: {
+    ko_tko: number;
+    decision: number;
+    draw: number;
+  };
+  overUnderRoundsPivot?: number;   // model-estimated avg rounds
+  riskFlag: string | null;
+  _debug: {
+    reachDelta: number | null;
+    ageDelta: number | null;
+    stanceAdvantage: number;
+    inactivityPenalty: number;
+    styleMatchup: number;
+    opponentQuality: number;
+    combinedDelta: number;
+  };
+}
+
+/** Boxing-specific intel for a fight — parallel to MlbIntel. */
+export interface BoxingIntel {
+  homeFighter: BoxingFighterProfile;   // "home" = fighter A (displayed left)
+  awayFighter: BoxingFighterProfile;   // "away" = fighter B (displayed right)
+  weightClass: string;
+  scheduledRounds: number;
+  venue?: string;
+  isTitleFight?: boolean;
+  titleDescription?: string;          // e.g. "IBF Heavyweight Title"
+  promoter?: string;
+  modelNotes: string[];
+  modelOutput?: BoxingModelOutput;
+  /** Source of odds data. */
+  oddsSource?: string;
 }
 
 export interface PlayerInjury {
@@ -285,7 +326,7 @@ export interface GamePrediction {
   /** Cross-book odds, weather, etc. */
   enrichmentNotes?: string[];
   mlb?: MlbIntel;
-  soccer?: SoccerIntel;
+  boxing?: BoxingIntel;
   /** ESPN / client-only sort key */
   _meta?: {
     easternYmd: string;
@@ -313,22 +354,12 @@ export interface GamePrediction {
     /** ESPN athlete IDs for probable pitchers — used to fetch ERA/WHIP stats. */
     homePitcherAthleteId?: string;
     awayPitcherAthleteId?: string;
-    /** ESPN soccer league path segment e.g. eng.1, esp.1 — team/summary URLs. */
-    soccerLeagueSlug?: string;
     /** Client-only: user marked probable starters as verified (localStorage). */
     userConfirmedMlbStarters?: boolean;
     /** Populated after park weather fetch during MLB enrichment (model confidence). */
     mlbWeather?: { tempF: number | null; windMph: number | null };
-    /** Soccer: normalized fixture row after multi-competition merge (ET kickoff date in easternYmd). */
-    soccerFixture?: {
-      matchId: string;
-      competition: string;
-      homeTeam: string;
-      awayTeam: string;
-      startTimeIso: string;
-      venue: string | null;
-      status: "upcoming" | "live" | "final";
-    };
+    /** Boxing: Supabase fight ID for this matchup. */
+    boxingFightId?: string;
     marketMl?: MarketMlSnapshot;
     /** Layered scoring outputs (market, calibration, volatility, etc.). */
     quality?: PredictionQualityMeta;

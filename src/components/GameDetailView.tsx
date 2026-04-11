@@ -334,12 +334,12 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                     <p>Innings 6–7 → bullpen matchup data adds an edge before closer usage</p>
                   </div>
                 )}
-                {game.league === "soccer" && (
+                {game.league === "boxing" && (
                   <div className="space-y-1 text-[11px] text-muted-foreground">
-                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">SOCCER TIMING GUIDE</p>
-                    <p>15'–45' → opening shape, press intensity, and possession tendency visible</p>
-                    <p>Halftime → substitution hints and tactical shape are most predictive signal</p>
-                    <p>60'–70' → fatigue-driven substitutions create the last live edge window</p>
+                    <p className="font-semibold text-foreground/70 text-[10px] tracking-wider">BOXING TIMING GUIDE</p>
+                    <p>Rounds 1–3 → fighters feeling out each other; avoid live betting</p>
+                    <p>Rounds 4–8 → pace, stamina and chin durability become readable</p>
+                    <p>Rounds 9+ → late stoppage probability spikes for tiring fighters</p>
                   </div>
                 )}
               </div>
@@ -545,58 +545,63 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
           </div>
         </div>
 
-        {/* Soccer-specific model framing (different from NBA/NFL/MLB scoring). */}
-        {game.soccer && (
-          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
-            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
-              <Info className="w-4 h-4 text-primary" />
-              Soccer model layer · {game.soccer.competition}
+        {/* Boxing-specific model layer */}
+        {game.boxing && (
+          <div className=”card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2”>
+            <h3 className=”font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3”>
+              <Info className=”w-4 h-4 text-primary” />
+              Boxing Model · {game.boxing.weightClass}
+              {game.boxing.isTitleFight && (
+                <span className=”ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20”>
+                  {game.boxing.titleDescription ?? “TITLE FIGHT”}
+                </span>
+              )}
             </h3>
-            <p className="text-xs text-muted-foreground mb-3">
-              Predictions here foreground <span className="text-foreground font-semibold">1X2 implied prices</span>{" "}
-              (de-vig) and table context — not the same “spread-first” engine as NBA/NFL/MLB. Layer vendor data for xG,
-              congestion, lineups, and set pieces to replace placeholders below.
-            </p>
-            {(game.soccer.congestion ||
-              game.soccer.table?.homePosition != null ||
-              game.soccer.table?.awayPosition != null) && (
-              <div className="rounded-lg bg-muted/25 border border-border p-3 mb-4 text-xs space-y-2 text-secondary-foreground">
-                {game.soccer.table?.homePosition != null && game.soccer.table?.awayPosition != null && (
-                  <p>
-                    <span className="font-semibold text-foreground">Table · </span>
-                    {game.homeTeam.abbreviation} {game.soccer.table.homePosition}th
-                    {game.soccer.table.homePoints != null ? ` (${game.soccer.table.homePoints} pts)` : ""} vs{" "}
-                    {game.awayTeam.abbreviation} {game.soccer.table.awayPosition}th
-                    {game.soccer.table.awayPoints != null ? ` (${game.soccer.table.awayPoints} pts)` : ""}
-                    {game.soccer.scheduleSource === "football-data.org" ? " · football-data.org" : ""}
-                  </p>
-                )}
-                {game.soccer.congestion && (
-                  <p>
-                    <span className="font-semibold text-foreground">Fixture congestion · </span>
-                    Completed PL matches: {game.homeTeam.abbreviation}{" "}
-                    {game.soccer.congestion.homeLast7} in last 7d / {game.soccer.congestion.homeLast14} in 14d ·{" "}
-                    {game.awayTeam.abbreviation} {game.soccer.congestion.awayLast7} in 7d /{" "}
-                    {game.soccer.congestion.awayLast14} in 14d
-                    {game.soccer.scheduleSource === "espn-scoreboard"
-                      ? " (ESPN scoreboard finals; 7d window only — add API token for 14d via football-data.org)"
-                      : " (football-data.org)"}
-                  </p>
+            {game.boxing.modelOutput && (
+              <div className=”space-y-3”>
+                <div className=”grid grid-cols-2 gap-2 text-xs”>
+                  {[
+                    { label: “Reach”, text: game.boxing.modelOutput.reachEdge },
+                    { label: “Age”, text: game.boxing.modelOutput.ageEdge },
+                    { label: “Stance”, text: game.boxing.modelOutput.stanceEdge },
+                    { label: “Activity”, text: game.boxing.modelOutput.activityEdge },
+                    { label: “Style”, text: game.boxing.modelOutput.styleEdge },
+                    { label: “Opp Quality”, text: game.boxing.modelOutput.opponentQualityEdge },
+                  ].map(({ label, text }) => (
+                    <div key={label} className=”rounded bg-muted/30 px-2 py-1.5”>
+                      <p className=”text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5”>{label.toUpperCase()}</p>
+                      <p className=”text-secondary-foreground leading-tight”>{text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className=”rounded-lg bg-muted/25 border border-border p-3 text-xs space-y-1 text-secondary-foreground”>
+                  <p className=”font-semibold text-foreground text-[10px] tracking-wider mb-1”>METHOD OF VICTORY</p>
+                  <div className=”flex gap-4”>
+                    <span>KO/TKO: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.ko_tko * 100)}%</strong></span>
+                    <span>Decision: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.decision * 100)}%</strong></span>
+                    <span>Draw: <strong>{Math.round(game.boxing.modelOutput.methodProbabilities.draw * 100)}%</strong></span>
+                  </div>
+                  {game.boxing.modelOutput.overUnderRoundsPivot != null && (
+                    <p>Model avg rounds: ~<strong>{game.boxing.modelOutput.overUnderRoundsPivot}</strong> of {game.boxing.scheduledRounds} scheduled</p>
+                  )}
+                </div>
+                <p className=”text-xs text-muted-foreground”>{game.boxing.modelOutput.koPctNote}</p>
+                {game.boxing.modelOutput.riskFlag && (
+                  <div className=”flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-xs text-amber-700 dark:text-amber-400”>
+                    <AlertTriangle className=”w-3.5 h-3.5 mt-0.5 shrink-0” />
+                    <span>{game.boxing.modelOutput.riskFlag}</span>
+                  </div>
                 )}
               </div>
             )}
-            <h4 className="text-[10px] font-semibold text-muted-foreground tracking-wide mb-1.5">WHAT TO SCORE NEXT</h4>
-            <ul className="space-y-2 text-sm text-secondary-foreground list-disc list-inside mb-4">
-              {game.soccer.modelNotes.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
-            <h4 className="text-[10px] font-semibold text-muted-foreground tracking-wide mb-1.5">DATA GAPS (THIS BUILD)</h4>
-            <ul className="space-y-1.5 text-xs text-muted-foreground list-disc list-inside">
-              {game.soccer.dataGaps.map((note, i) => (
-                <li key={i}>{note}</li>
-              ))}
-            </ul>
+            {!game.boxing.modelOutput && game.boxing.modelNotes.length > 0 && (
+              <ul className=”space-y-2 text-sm text-secondary-foreground list-disc list-inside”>
+                {game.boxing.modelNotes.map((note, i) => <li key={i}>{note}</li>)}
+              </ul>
+            )}
+            {game.boxing.venue && (
+              <p className=”text-xs text-muted-foreground mt-3”>Venue: {game.boxing.venue}</p>
+            )}
           </div>
         )}
 
@@ -785,51 +790,35 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
         const spreadFavorsHome = (game.lines.spreadNum ?? 0) < 0;
         const modelVsMarketAgree = modelFavorsHome === spreadFavorsHome;
 
-        if (game.league === "soccer" && tw) {
+        if (game.league === "boxing" && tw) {
           return (
             <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5">
               <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-4">
                 <DollarSign className="w-4 h-4 text-confidence-high" />
-                Betting Lines (1X2)
-                <span className="text-[10px] font-normal text-muted-foreground ml-1">via DraftKings</span>
+                Fight Odds (Moneyline)
+                <span className="text-[10px] font-normal text-muted-foreground ml-1">via The Odds API</span>
               </h3>
-
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4 text-center mb-4">
                 <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
-                  <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">HANDICAP</div>
-                  <div className="text-base font-display font-bold text-foreground">{spread ?? "—"}</div>
+                  <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">{game.awayTeam.abbreviation}</div>
+                  <div className="text-base font-display font-bold text-foreground">{awayMl ?? "—"}</div>
                 </div>
                 <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
-                  <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">TOTAL (O/U)</div>
-                  <div className="text-base font-display font-bold text-foreground">
-                    {total != null ? total : "—"}
-                  </div>
+                  <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">{game.homeTeam.abbreviation}</div>
+                  <div className="text-base font-display font-bold text-foreground">{homeMl ?? "—"}</div>
                 </div>
-                <div className="bg-muted/30 rounded-lg p-2 sm:p-3 col-span-2 sm:col-span-1">
-                  <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">1X2 PRICES</div>
-                  <div className="flex flex-row sm:flex-col justify-around sm:justify-start gap-1 text-xs font-bold text-foreground">
-                    <span>
-                      {game.awayTeam.abbreviation}{" "}
-                      <span className={awayMl?.startsWith("-") ? "text-confidence-high" : ""}>{awayMl ?? "—"}</span>
-                    </span>
-                    <span>
-                      Draw <span className="text-muted-foreground font-semibold">{drawMl ?? "—"}</span>
-                    </span>
-                    <span>
-                      {game.homeTeam.abbreviation}{" "}
-                      <span className={homeMl?.startsWith("-") ? "text-confidence-high" : ""}>{homeMl ?? "—"}</span>
-                    </span>
+                {drawMl && (
+                  <div className="bg-muted/30 rounded-lg p-2 sm:p-3">
+                    <div className="text-[10px] text-muted-foreground font-semibold tracking-wider mb-1">DRAW</div>
+                    <div className="text-base font-display font-bold text-foreground">{drawMl}</div>
                   </div>
-                </div>
+                )}
               </div>
-
               <div className="rounded-lg p-3 text-xs flex items-start gap-2 bg-muted/20 border border-border">
                 <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-muted-foreground" />
                 <div className="text-secondary-foreground">
-                  <span className="font-semibold text-foreground">1X2 implied (de-vig): </span>
-                  {game.awayTeam.abbreviation} {tw.away}% · Draw {tw.draw}% · {game.homeTeam.abbreviation} {tw.home}
-                  %. Soccer uses a different engine than spread sports — these are normalized from the three-way book
-                  prices, not an independent xG model. Add StatsBomb / vendor xG to disagree with the market on purpose.
+                  <span className="font-semibold text-foreground">Model implied (de-vig): </span>
+                  {game.awayTeam.abbreviation} {tw.away}% · Draw {tw.draw}% · {game.homeTeam.abbreviation} {tw.home}%.
                 </div>
               </div>
             </div>
@@ -915,15 +904,9 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
             )}
           </p>
         )}
-        {game.league === "soccer" && (
+        {game.league === "boxing" && (
           <p className="text-[11px] text-muted-foreground mb-3">
-            Goals for and against per match from ESPN. Possession % is approximate; expected goals and richer shape stats are
-            not in this view yet.
-            {import.meta.env.DEV ? (
-              <span className="block mt-1 font-mono text-[10px] text-muted-foreground/90">
-                Event-level feeds (e.g. StatsBomb) for xG / truer possession
-              </span>
-            ) : null}
+            Fighter physical stats — reach, height, and style from Supabase boxing_fighters.
           </p>
         )}
         <div className="grid grid-cols-3 gap-2 sm:gap-4 text-center">
@@ -939,13 +922,7 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                   { label: "Runs allowed", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
                   { label: "Innings", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
                 ]
-              : game.league === "soccer"
-                ? [
-                    { label: "GF / match", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
-                    { label: "GA / match", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },
-                    { label: "Poss. (est.)", away: game.awayTeam.pace, home: game.homeTeam.pace, lowerBetter: false },
-                  ]
-                : game._meta?.nbaRatingsFromStats
+              : game._meta?.nbaRatingsFromStats
                   ? [
                       { label: "ORtg", away: game.awayTeam.offensiveRating, home: game.homeTeam.offensiveRating, lowerBetter: false },
                       { label: "DRtg", away: game.awayTeam.defensiveRating, home: game.homeTeam.defensiveRating, lowerBetter: true },

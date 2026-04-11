@@ -17,7 +17,7 @@ import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
-import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
+import { fetchBoxingPredictions } from "@/lib/boxingFetch";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
@@ -41,7 +41,7 @@ function DataSourceStatus() {
   if (!isSupabaseConfigured) {
     return (
       <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
-        ESPN NBA · NFL · MLB · Soccer
+        ESPN NBA · NFL · MLB · Boxing
       </span>
     );
   }
@@ -79,7 +79,7 @@ function LeaguePicker({
 }) {
   return (
     <div className={cn("inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5 shrink-0", className)}>
-      {(["nba", "nfl", "mlb", "soccer"] as League[]).map((l) => (
+      {(["nba", "nfl", "mlb", "boxing"] as League[]).map((l) => (
         <button
           key={l}
           type="button"
@@ -91,7 +91,7 @@ function LeaguePicker({
               : "text-muted-foreground hover:text-foreground active:bg-muted"
           )}
         >
-          {l === "soccer" ? "SOC" : l.toUpperCase()}
+          {l.toUpperCase()}
         </button>
       ))}
     </div>
@@ -145,7 +145,7 @@ function formatDate(date: Date) {
 }
 
 function leagueLabel(league: League): string {
-  return league === "soccer" ? "EPL" : league.toUpperCase();
+  return league.toUpperCase();
 }
 
 const Index = () => {
@@ -186,11 +186,11 @@ const Index = () => {
     staleTime: Infinity,
   });
 
-  const soccerQuery = useQuery({
-    queryKey: ["soccer-espn-scoreboard", easternYmd()],
-    queryFn: fetchSoccerGamePredictions,
-    staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+  const boxingQuery = useQuery({
+    queryKey: ["boxing-predictions"],
+    queryFn: fetchBoxingPredictions,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
     refetchIntervalInBackground: false,
   });
 
@@ -206,7 +206,7 @@ const Index = () => {
               isError: mlbBaseQuery.isError || mlbModeledQuery.isError,
               error: mlbBaseQuery.error ?? mlbModeledQuery.error,
             }
-          : soccerQuery;
+          : boxingQuery;
   const leagueGames =
     league === "nba"
       ? (nbaQuery.data ?? [])
@@ -214,7 +214,7 @@ const Index = () => {
         ? (nflQuery.data ?? [])
         : league === "mlb"
           ? (mlbModeledQuery.data ?? [])
-          : (soccerQuery.data ?? []);
+          : (boxingQuery.data ?? []);
 
   const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
 
@@ -286,7 +286,7 @@ const Index = () => {
   const handleLeagueChange = (l: League) => {
     setLeague(l);
     setSelectedGame(null);
-    if (l !== "soccer" && dateFilter === "week") setDateFilter("today");
+    if (dateFilter === "week") setDateFilter("today");
   };
 
   const handleViewModeChange = (m: ViewMode) => {
@@ -369,7 +369,7 @@ const Index = () => {
                 >
                   {viewMode === "draft" ? (
                     <>
-                      {league === "soccer" ? "Soccer" : leagueLabel(league)}{" "}
+                      {leagueLabel(league)}{" "}
                       <span className="text-gradient-primary">Draft Edge</span>
                     </>
                   ) : viewMode === "props" ? (
@@ -404,7 +404,7 @@ const Index = () => {
                       ) : null}
                     </>
                   ) : viewMode === "props" ? (
-                    <>Player prop edges across NBA, NFL, MLB, and Soccer — filter by sport and stat type.</>
+                    <>Player prop edges across NBA, NFL, and MLB — filter by sport and stat type.</>
                   ) : league === "nba" ? (
                     <>Live NBA predictions — win probability, spread lean, injuries, and team trends.</>
                   ) : league === "nfl" ? (
@@ -412,7 +412,7 @@ const Index = () => {
                   ) : league === "mlb" ? (
                     <>Live MLB predictions — probable starters, runline lean, and lineup trends. Confidence adjusts when pitchers are unconfirmed.</>
                   ) : (
-                    <>Premier League predictions — 1X2 win/draw/loss probability, fixture congestion, and goals data. EPL often has no fixtures today — try <span className="text-foreground/80">Next 7 days</span>.</>
+                    <>Boxing fight predictions — fighter profiles, reach/age/style edges, and method of victory probabilities.</>
                   )}
                 </motion.p>
 
@@ -443,22 +443,16 @@ const Index = () => {
                       <div className="flex items-center gap-2 text-xs">
                         <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
                         <span className="text-muted-foreground">
-                          {league === "soccer" ? "In this tab:" : "Games loaded:"}
+                          {league === "boxing" ? "Fights loaded:" : "Games loaded:"}
                         </span>
                         <span className="text-confidence-high font-semibold">
-                          {league === "soccer" ? filteredGames.length : leagueGames.length}
+                          {leagueGames.length}
                         </span>
-                        {league === "soccer" && (
-                          <span className="text-muted-foreground font-normal">
-                            {" "}
-                            ({leagueGames.length} in 7d fetch)
-                          </span>
-                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs">
                         <Zap className="w-3.5 h-3.5 text-primary" />
                         <span className="text-muted-foreground">
-                          {league === "soccer" ? "High conf (rare for 1X2):" : "High conf (spread lean):"}
+                          {league === "boxing" ? "High conf picks:" : "High conf (spread lean):"}
                         </span>
                         <span className="text-primary font-semibold">
                           {highConfCount} of {filteredGames.length}
@@ -523,7 +517,7 @@ const Index = () => {
                       onChange={handleDateChange}
                       todayLabel={todayLabel}
                       tomorrowLabel={tomorrowLabel}
-                      weekLabel={league === "soccer" ? "Next 7 days" : undefined}
+                      weekLabel={undefined}
                     />
                   </div>
                 )}

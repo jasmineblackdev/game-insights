@@ -23,7 +23,7 @@ const DRAFT_EDGE_YEAR: Record<League, number> = {
   nfl: 2026,
   nba: 2026,
   mlb: 2026,
-  soccer: 2026,
+  boxing: 2026,
 };
 
 function round1PickCap(league: League): number {
@@ -160,7 +160,7 @@ function DraftEdgeCardView({ card, league }: { card: DraftEdgeCard; league: Leag
         <div className="text-xs space-y-1 border-t border-border pt-2">
           <p>
             <span className="text-muted-foreground">
-              {league === "soccer" ? "Composite rank O/U" : "Draft position O/U"} {card.ou_line ?? "—"} ·{" "}
+              Draft position O/U {card.ou_line ?? "—"} ·{" "}
             </span>
             <span className="font-bold text-foreground">{card.ou_prediction ?? "—"}</span>
           </p>
@@ -181,7 +181,7 @@ function DraftEdgeCardView({ card, league }: { card: DraftEdgeCard; league: Leag
       {card.kind === "round_yes_no" ? (
         <div className="text-xs border-t border-border pt-2">
           <span className="text-muted-foreground">
-            {league === "soccer" ? "Big-5 league move · " : "1st round · "}
+            1st round ·{" "}
           </span>
           <span className="font-bold text-foreground">{card.round_prediction === "yes" ? "Yes" : "No"}</span>
           {card.probability != null ? (
@@ -193,7 +193,7 @@ function DraftEdgeCardView({ card, league }: { card: DraftEdgeCard; league: Leag
       {card.kind === "team_position" ? (
         <div className="text-xs border-t border-border pt-2">
           <span className="text-muted-foreground">
-            {card.team_target_abbr ?? "?"} · {league === "soccer" ? "Early window" : "Round 1"} ·{" "}
+            {card.team_target_abbr ?? "?"} · Round 1 ·{" "}
           </span>
           <span className="font-bold text-foreground">{card.team_need_position ?? "—"}</span>
           {card.probability != null ? (
@@ -262,8 +262,8 @@ function leagueDraftTitle(league: League): string {
       return "NBA";
     case "mlb":
       return "MLB";
-    case "soccer":
-      return "Soccer (summer window)";
+    case "boxing":
+      return "Boxing";
   }
 }
 
@@ -275,8 +275,8 @@ function leagueDraftBlurb(league: League): string {
       return "NBA 2026: same card mix as NFL — lottery range, positional scarcity, and team timelines.";
     case "mlb":
       return "MLB 2026 draft: slot variance, bonus strategy, and org needs in the same Draft Edge card types.";
-    case "soccer":
-      return "Summer window board: ranked targets, composite-rank O/U, club move props, and first-to-sign positions — transfer-market framing, not a domestic draft.";
+    case "boxing":
+      return "Boxing does not have a draft. Use the Games tab for upcoming fight predictions.";
   }
 }
 

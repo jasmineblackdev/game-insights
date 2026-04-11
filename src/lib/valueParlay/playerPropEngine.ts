@@ -27,10 +27,6 @@ function trendToStatType(league: League, trend: PlayerTrendData): string | null 
     if (km.includes("RBI")) return "rbi";
     if (km.includes("R") && !km.includes("HR")) return "runs";
   }
-  if (league === "soccer") {
-    if (km === "G" || km.includes("GOAL")) return "shots";
-    if (km.includes("AST")) return "shots_on_target";
-  }
   return null;
 }
 
@@ -55,32 +51,7 @@ function projectStat(
     const avgP = (hp + ap) / 2;
     paceAdj = (avgP - 100) * 0.04;
   }
-  if (league === "soccer" && statType === "shots") {
-    const proj = Math.max(0.8, base * 3.2 + paceAdj * 0.1);
-    const line = Math.max(0.5, Math.round((proj - 0.35) * 2) / 2);
-    return {
-      projected: Math.round(proj * 10) / 10,
-      line,
-      volatility: 38,
-      reasons: [
-        "Shot volume estimated from attacking role & fixture pace.",
-        "SoT props tighten when opponent sits deep — watch confirmed XI.",
-      ],
-    };
-  }
-  if (league === "soccer" && statType === "shots_on_target") {
-    const proj = Math.max(0.35, base * 1.8);
-    const line = Math.max(0.5, Math.round((proj - 0.2) * 2) / 2);
-    return {
-      projected: Math.round(proj * 10) / 10,
-      line,
-      volatility: 42,
-      reasons: [
-        "SoT tied to role and game-state; low-score leagues add variance.",
-        "Set-piece involvement not fully modeled here.",
-      ],
-    };
-  }
+
 
   const projected = Math.max(0, base + paceAdj * (statType.includes("yards") ? 8 : 1.2));
   const line =

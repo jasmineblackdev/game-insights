@@ -23,8 +23,8 @@ export const MODEL_MARKET_DIVERGENCE_THRESHOLD_PP = 8;
 const PTS_PER_PCT: Record<League, number | null> = {
   nba: 2.3,
   nfl: 2.1,
-  mlb: null, // runline fixed at 1.5 — not a reliable conversion
-  soccer: 1.7,
+  mlb: null,    // runline fixed at 1.5 — not a reliable conversion
+  boxing: null, // boxing has no spread — only moneyline
 };
 
 /** Spread-implied home win % from point spread (negative spreadNum = home favored). */

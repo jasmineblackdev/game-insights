@@ -133,32 +133,10 @@ export function getLiveContext(game: GamePrediction): LiveContext | null {
       : { badge: `${periodLabel} CLOSE`, tip: `${scoreStr} — tight late game. Walk-off variance is real.`, accuracy: "rising" };
   }
 
-  if (game.league === "soccer") {
-    const minute = periodNum; // Soccer periodNum is treated as match minute when available
-    if (isHalftime) {
-      return {
-        badge: "HALF",
-        tip: `${scoreStr} — halftime. Tactical substitutions and shape adjustments are the key 2nd-half swing factor.`,
-        accuracy: "peak",
-      };
-    }
-    if (minute <= 30) {
-      return {
-        badge: `${periodLabel} EARLY`,
-        tip: `${scoreStr} — early match. Red card or early goal shifts win probability significantly.`,
-        accuracy: "rising",
-      };
-    }
-    if (minute <= 60) {
-      return {
-        badge: `${periodLabel} MID`,
-        tip: `${scoreStr} — substitution window active. Tactical changes and fitness drops become visible.`,
-        accuracy: "peak",
-      };
-    }
-    return margin >= 2
-      ? { badge: `${periodLabel} LOCKED`, tip: `${leader} +${margin} with <30 min left — result near certain.`, accuracy: "high" }
-      : { badge: `${periodLabel} LATE`, tip: `${scoreStr} — late pressure. Set pieces and individual quality determine outcome.`, accuracy: "rising" };
+  if (game.league === "boxing") {
+    return margin >= 1
+      ? { badge: `RD ${periodNum} AHEAD`, tip: `${scoreStr} — ${leader} up on cards. Late stoppage still possible.`, accuracy: "rising" }
+      : { badge: `RD ${periodNum}`, tip: `${scoreStr} — judges scoring round by round.`, accuracy: "rising" };
   }
 
   return { badge: "LIVE", tip: `${scoreStr} — game in progress.`, accuracy: "rising" };
@@ -456,54 +434,29 @@ export function getBetWindow(game: GamePrediction): BetWindow | null {
     };
   }
 
-  // ── Soccer ────────────────────────────────────────────────────────────────
-  if (game.league === "soccer") {
-    const minute = periodNum;
-    if (isHalftime) {
-      return {
-        phase: "open",
-        label: "BET WINDOW OPEN · HALF",
-        tip: "Halftime: substitution plans and 2nd-half shape are the most reliable predictor. Optimal window.",
-        timing: "Act before 2nd-half kickoff",
-      };
-    }
-    if (minute < 15) {
+  // ── Boxing ──────────────────────────���─────────────────────────────────────
+  if (game.league === "boxing") {
+    if (periodNum <= 3) {
       return {
         phase: "wait",
-        label: "WAIT · KICKOFF",
-        tip: "Opening phase — too early to read shape or intent. Wait 15 minutes for the pattern to emerge.",
-        timing: "Opens at ~15'",
+        label: "WAIT · EARLY ROUNDS",
+        tip: "Too early — fighters gauging each other. Wait until round 4+ to see pace and style.",
+        timing: "Opens at ~round 4",
       };
     }
-    if (minute <= 45) {
+    if (margin >= 1) {
       return {
         phase: "open",
         label: "BET WINDOW OPEN",
-        tip: "Opening shape, press intensity, and set-piece threat are visible. Best pre-halftime live window.",
-        timing: "Act before halftime",
-      };
-    }
-    if (minute <= 65) {
-      return {
-        phase: "open",
-        label: "BET WINDOW OPEN",
-        tip: "Substitution window active — tactical changes and fitness drops are shifting the live odds.",
-        timing: "Act before 70'",
-      };
-    }
-    if (margin >= 2) {
-      return {
-        phase: "closed",
-        label: "WINDOW CLOSED",
-        tip: `${leader} +${margin} after 65' — two-goal lead conversion rate ~94%. No value.`,
-        timing: "No value",
+        tip: "Fighter ahead on points — look for method of victory shift if they're pressuring.",
+        timing: "Act now",
       };
     }
     return {
       phase: "closing",
-      label: "WINDOW CLOSING",
-      tip: "Late pressure in a close match. Odds move fast — act now or the line snaps shut.",
-      timing: "Last chance",
+      label: "CLOSE FIGHT",
+      tip: "Even on cards — late stoppage or close decision. High variance, narrow value.",
+      timing: "Closing fast",
     };
   }
 
@@ -519,7 +472,7 @@ export function getUpcomingBetTip(game: GamePrediction): string | null {
   if (game.league === "nba") return "Best live window: after Q1 buzzer or at halftime";
   if (game.league === "nfl") return "Best live window: after Q1 or at halftime";
   if (game.league === "mlb") return "Best live window: innings 4–5 (F5 window)";
-  if (game.league === "soccer") return "Best live window: 15'–45' or at halftime";
+  if (game.league === "boxing") return "Best live window: rounds 4–8 once pace and stamina are visible";
   return null;
 }
 

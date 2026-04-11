@@ -164,21 +164,11 @@ export async function fetchOddsBundlesForLeague(
     return map;
   }
 
-  if (league === "soccer") {
-    const byKey = new Map<string, GamePrediction[]>();
+  if (league === "boxing") {
+    const events = await fetchJsonForSport("boxing");
     for (const p of predictions) {
-      const slug = p._meta?.soccerLeagueSlug ?? "eng.1";
-      const key = ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug] ?? "soccer_epl";
-      const arr = byKey.get(key) ?? [];
-      arr.push(p);
-      byKey.set(key, arr);
-    }
-    for (const [sportKey, preds] of byKey) {
-      const events = await fetchJsonForSport(sportKey);
-      for (const p of preds) {
-        const ev = matchEvent(p, events);
-        map.set(p.id, bundleForPred(p, ev));
-      }
+      const ev = matchEvent(p, events);
+      map.set(p.id, bundleForPred(p, ev));
     }
     return map;
   }

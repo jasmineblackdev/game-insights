@@ -449,7 +449,7 @@ function applyNbaNflMlb(
 export async function applyAdvancedIntelligenceToGames(predictions: GamePrediction[]): Promise<GamePrediction[]> {
   if (!predictions.length) return predictions;
 
-  const byLeague: Record<League, GamePrediction[]> = { nba: [], nfl: [], mlb: [], soccer: [] };
+  const byLeague: Record<League, GamePrediction[]> = { nba: [], nfl: [], mlb: [], boxing: [] };
   for (const g of predictions) {
     byLeague[g.league].push(g);
   }
@@ -458,7 +458,7 @@ export async function applyAdvancedIntelligenceToGames(predictions: GamePredicti
   const matchupMaps: Partial<Record<League, Map<string, Record<string, unknown>>>> = {};
   const fatigueMaps: Partial<Record<League, Map<string, Record<string, unknown>>>> = {};
 
-  for (const league of ["nba", "nfl", "mlb", "soccer"] as League[]) {
+  for (const league of ["nba", "nfl", "mlb"] as League[]) {
     const list = byLeague[league];
     if (!list.length) continue;
     const season = Math.max(...list.map(seasonFromGame));

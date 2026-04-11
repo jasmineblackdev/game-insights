@@ -890,7 +890,7 @@ async function poolMapPredictions(
 }
 
 export async function enrichGamePredictions(predictions: GamePrediction[], league: League): Promise<GamePrediction[]> {
-  if (league !== "nba" && league !== "nfl" && league !== "mlb" && league !== "soccer") return predictions;
+  if (league !== "nba" && league !== "nfl" && league !== "mlb") return predictions;
   const lg = league;
 
   const teamIds: string[] = [];
