@@ -197,24 +197,32 @@ export interface MmaFighterProfile {
   weightClassMoves?: number;
 }
 
-/** Structured output from the MMA prediction model. */
+/** Structured output from the MMA prediction model (v2, 10-factor). */
 export interface MmaModelOutput {
-  strikingEdge: string;
-  grapplingEdge: string;
-  cardioEdge: string;
-  durabilityEdge: string;
-  physicalEdge: string;
-  opponentQualityEdge: string;
-  activityEdge: string;
-  marketEdge: string;
+  // Factor edge descriptions (one per model factor)
+  styleMatchupEdge: string;       // style matrix result
+  opponentQualityEdge: string;    // schedule strength
+  strikingEfficiencyEdge: string; // slpm, sapm, accuracy, defense
+  grapplingEdge: string;          // takedown accuracy/defense, control time, subs
+  cardioEdge: string;             // late-round output, pace decline
+  durabilityEdge: string;         // KO penalty, knockdowns, absorbed strikes
+  physicalEdge: string;           // reach + height advantage
+  activityEdge: string;           // layoff + short-notice
+  ageCurveEdge: string;           // age relative to prime window
+  marketEdge: string;             // line movement signal
+  // Method of victory
   methodProbabilities: {
     ko_tko: number;
     submission: number;
     decision: number;
   };
+  /** Model-estimated fight length (avg rounds). */
   overUnderRoundsPivot?: number;
+  /** Goes-the-distance probability (0.0–1.0). */
+  goesDistanceProb: number;
   riskFlag: string | null;
   _debug: {
+    styleScore: number;
     strikingScore: number;
     grapplingScore: number;
     cardioScore: number;
@@ -222,6 +230,7 @@ export interface MmaModelOutput {
     physicalScore: number;
     opponentQualityScore: number;
     activityScore: number;
+    ageCurveScore: number;
     marketScore: number;
     combinedDelta: number;
   };

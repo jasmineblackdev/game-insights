@@ -145,15 +145,16 @@ async function fetchMmaModelWeights(): Promise<MmaFactorWeights> {
     if (error || !data) return DEFAULT_MMA_WEIGHTS;
     if ((data.sample_size ?? 0) < 50) return DEFAULT_MMA_WEIGHTS;
     return {
-      opponentQuality:   data.w_opponent_quality  ?? DEFAULT_MMA_WEIGHTS.opponentQuality,
-      styleMatchup:      data.w_style_matchup      ?? DEFAULT_MMA_WEIGHTS.styleMatchup,
-      cardioAndPace:     data.w_cardio_pace        ?? DEFAULT_MMA_WEIGHTS.cardioAndPace,
-      grapplingControl:  data.w_grappling_control  ?? DEFAULT_MMA_WEIGHTS.grapplingControl,
-      durability:        data.w_durability         ?? DEFAULT_MMA_WEIGHTS.durability,
-      physical:          data.w_physical           ?? DEFAULT_MMA_WEIGHTS.physical,
-      activityLayoff:    data.w_activity_layoff    ?? DEFAULT_MMA_WEIGHTS.activityLayoff,
-      defenseEfficiency: data.w_defense_efficiency ?? DEFAULT_MMA_WEIGHTS.defenseEfficiency,
-      marketMovement:    data.w_market_movement    ?? DEFAULT_MMA_WEIGHTS.marketMovement,
+      styleMatchup:       data.w_style_matchup       ?? DEFAULT_MMA_WEIGHTS.styleMatchup,
+      opponentQuality:    data.w_opponent_quality    ?? DEFAULT_MMA_WEIGHTS.opponentQuality,
+      strikingEfficiency: data.w_striking_efficiency ?? DEFAULT_MMA_WEIGHTS.strikingEfficiency,
+      grapplingControl:   data.w_grappling_control   ?? DEFAULT_MMA_WEIGHTS.grapplingControl,
+      cardioAndPace:      data.w_cardio_pace         ?? DEFAULT_MMA_WEIGHTS.cardioAndPace,
+      durability:         data.w_durability          ?? DEFAULT_MMA_WEIGHTS.durability,
+      physical:           data.w_physical            ?? DEFAULT_MMA_WEIGHTS.physical,
+      activityLayoff:     data.w_activity_layoff     ?? DEFAULT_MMA_WEIGHTS.activityLayoff,
+      ageCurve:           data.w_age_curve           ?? DEFAULT_MMA_WEIGHTS.ageCurve,
+      marketMovement:     data.w_market_movement     ?? DEFAULT_MMA_WEIGHTS.marketMovement,
       learned: true,
       sampleSize: data.sample_size,
     };
@@ -191,7 +192,7 @@ function buildMmaPrediction(
   }
 
   const modeledIntel = applyMmaModel(intel, weights, marketCtx);
-  const winProb = mmaWinProbability(home, away, weights, marketCtx);
+  const winProb = mmaWinProbability(home, away, weights, intel.scheduledRounds, marketCtx);
   const confidence = mmaConfidence(home, away, winProb);
 
   const topReasons = modeledIntel.modelNotes.slice(0, 3);
@@ -256,11 +257,13 @@ function buildMmaPrediction(
   const homeImplied = oddsLine?.homeMoneyline != null ? americanToImplied(oddsLine.homeMoneyline) : 0.5;
   const modelProb = winProb.home / 100;
   const edge = modelProb - homeImplied;
+  const styleStability = (home.styleTag != null ? 50 : 0) + (away.styleTag != null ? 50 : 0);
   const parlayFit = mmaParlayFitScore({
     confidence,
     edge,
     volatilityScore,
     dataCompleteness,
+    styleStability,
     marketConfirmed: (marketCtx?.homeCurrentImplied ?? 0) > (marketCtx?.homeOpenImplied ?? 0)
       ? modelProb > 0.5
       : modelProb < 0.5,

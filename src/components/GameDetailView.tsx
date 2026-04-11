@@ -626,14 +626,16 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   {[
+                    { label: "Style Matchup", text: game.mma.modelOutput.styleMatchupEdge },
                     { label: "Opp Quality", text: game.mma.modelOutput.opponentQualityEdge },
-                    { label: "Style Matchup", text: game.mma.modelOutput.strikingEdge },
+                    { label: "Striking", text: game.mma.modelOutput.strikingEfficiencyEdge },
                     { label: "Grappling", text: game.mma.modelOutput.grapplingEdge },
                     { label: "Cardio/Pace", text: game.mma.modelOutput.cardioEdge },
                     { label: "Durability", text: game.mma.modelOutput.durabilityEdge },
                     { label: "Physical", text: game.mma.modelOutput.physicalEdge },
                     { label: "Activity", text: game.mma.modelOutput.activityEdge },
-                    { label: "Defense", text: game.mma.modelOutput.marketEdge },
+                    { label: "Age Curve", text: game.mma.modelOutput.ageCurveEdge },
+                    { label: "Market", text: game.mma.modelOutput.marketEdge },
                   ].map(({ label, text }) => (
                     <div key={label} className="rounded bg-muted/30 px-2 py-1.5">
                       <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5">{label.toUpperCase()}</p>
@@ -643,14 +645,17 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                 </div>
                 <div className="rounded-lg bg-muted/25 border border-border p-3 text-xs space-y-1 text-secondary-foreground">
                   <p className="font-semibold text-foreground text-[10px] tracking-wider mb-1">METHOD OF VICTORY</p>
-                  <div className="flex gap-4">
+                  <div className="flex gap-4 flex-wrap">
                     <span>KO/TKO: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.ko_tko * 100)}%</strong></span>
                     <span>Sub: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.submission * 100)}%</strong></span>
                     <span>Decision: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.decision * 100)}%</strong></span>
                   </div>
-                  {game.mma.modelOutput.overUnderRoundsPivot != null && (
-                    <p>Model avg rounds: ~<strong>{game.mma.modelOutput.overUnderRoundsPivot}</strong> of {game.mma.scheduledRounds} scheduled</p>
-                  )}
+                  <div className="flex gap-4 flex-wrap pt-1">
+                    <span>Goes distance: <strong>{Math.round(game.mma.modelOutput.goesDistanceProb * 100)}%</strong></span>
+                    {game.mma.modelOutput.overUnderRoundsPivot != null && (
+                      <span>Model avg rounds: <strong>~{game.mma.modelOutput.overUnderRoundsPivot}</strong> of {game.mma.scheduledRounds}</span>
+                    )}
+                  </div>
                 </div>
                 {game.mma.modelOutput.riskFlag && (
                   <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
