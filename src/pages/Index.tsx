@@ -9,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { ClipboardList, Sparkles, TrendingUp, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -21,10 +21,9 @@ import { fetchMmaPredictions } from "@/lib/mmaFetch";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 
-type ViewMode = "games" | "props" | "draft" | "college_futures" | "parlay_edge";
+type ViewMode = "games" | "props" | "draft" | "parlay_edge";
 
 function DataSourceStatus() {
   const health = useQuery({
@@ -400,10 +399,6 @@ const Index = () => {
                       {leagueLabel(league)}{" "}
                       <span className="text-gradient-primary">Draft Edge</span>
                     </>
-                  ) : viewMode === "college_futures" ? (
-                    <>
-                      College <span className="text-gradient-primary">Futures</span>
-                    </>
                   ) : viewMode === "props" ? (
                     <>Player <span className="text-gradient-primary">Props</span></>
                   ) : (
@@ -438,12 +433,6 @@ const Index = () => {
                           scouting blurbs.
                         </>
                       ) : null}
-                    </>
-                  ) : viewMode === "college_futures" ? (
-                    <>
-                      Championship futures from the Odds API — GameLens devigs the board, projects title probability with
-                      sport-specific factors (pitching depth, guards, playoff path, etc.), and surfaces edge vs fair price.
-                      Separate from daily game cards.
                     </>
                   ) : viewMode === "props" ? (
                     <>Player prop edges across NBA, NFL, and MLB — filter by sport and stat type.</>
@@ -482,19 +471,6 @@ const Index = () => {
                         <span className="text-primary font-semibold">
                           {draftPicks.filter((p) => p.grade.startsWith("A")).length} of {draftPicks.length}
                         </span>
-                      </div>
-                    </>
-                  ) : viewMode === "college_futures" ? (
-                    <>
-                      <div className="flex items-center gap-2 text-xs">
-                        <Trophy className="w-3.5 h-3.5 text-primary" />
-                        <span className="text-muted-foreground">Markets:</span>
-                        <span className="text-foreground font-semibold">Champion (V1)</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-xs">
-                        <TrendingUp className="w-3.5 h-3.5 text-confidence-high" />
-                        <span className="text-muted-foreground">Sports:</span>
-                        <span className="text-confidence-high font-semibold">CFB · CBB · CWS</span>
                       </div>
                     </>
                   ) : (
@@ -567,19 +543,6 @@ const Index = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleViewModeChange("college_futures")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "college_futures"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <Trophy className="w-3 h-3 shrink-0" />
-                      College futures
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => handleViewModeChange("parlay_edge")}
                       className={cn(
                         "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
@@ -617,8 +580,6 @@ const Index = () => {
               {/* Content */}
               {viewMode === "parlay_edge" ? (
                 <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} />
-              ) : viewMode === "college_futures" ? (
-                <CollegeFuturesSection />
               ) : viewMode === "props" ? (
                 <PlayerEdgeSection />
               ) : viewMode === "draft" ? (
