@@ -5,6 +5,7 @@ import {
   type PlayerEdgeStatFilter,
 } from "@/data/playerEdgeMock";
 import { fetchLivePlayerEdgePredictions } from "@/lib/espnPlayerStats";
+import { fetchCombatPlayerEdgePredictions } from "@/lib/combatPlayerEdge";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
 export type PlayerEdgeAccuracyRollup = {
@@ -30,14 +31,11 @@ function ensureGameSort(items: PlayerEdgePrediction[]): PlayerEdgePrediction[] {
 }
 
 function resolvePlayerEdgeDataUrl(): string | null {
+  // Only use the player-edge Edge function if a CUSTOM URL is explicitly set.
+  // The Supabase `player-edge` function is not deployed, so we always fall
+  // through to the ESPN + combat live fetch path.
   const custom = (import.meta.env.VITE_PLAYER_EDGE_API_URL as string | undefined)?.trim();
-  if (custom) return custom;
-  const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
-  const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
-  if (url && key) {
-    return `${url.replace(/\/$/, "")}/functions/v1/player-edge`;
-  }
-  return null;
+  return custom || null;
 }
 
 function shouldAttachSupabaseAnonKey(targetUrl: string): boolean {
@@ -122,18 +120,22 @@ export async function fetchPlayerEdgePredictions(
     }
   }
 
-  // No custom endpoint — fetch live player stats directly from ESPN
+  // No custom endpoint — fetch live player stats from ESPN + combat sports
   try {
-    const espnItems = await fetchLivePlayerEdgePredictions();
+    const [espnItems, combatItems] = await Promise.all([
+      fetchLivePlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
+      fetchCombatPlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
+    ]);
+    const all = [...espnItems, ...combatItems];
     // Filter by sport/stat if requested
-    const filtered = espnItems.filter((p) => {
+    const filtered = all.filter((p) => {
       if (sport !== "all" && p.sport !== sport) return false;
       if (stat !== "all" && p.stat_type !== stat) return false;
       return true;
     });
     return { items: ensureGameSort(filtered), source: "api" };
   } catch (e) {
-    console.warn("[GameLens] ESPN player stats unavailable:", e);
+    console.warn("[GameLens] Player stats unavailable:", e);
     return { items: [], source: "api" };
   }
 }

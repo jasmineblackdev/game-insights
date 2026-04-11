@@ -137,7 +137,7 @@ export interface PlayerPropInput {
   game_id: string;
   player_id: string;
   player_name: string;
-  sport: "NBA" | "NFL" | "MLB" | "Boxing";
+  sport: "NBA" | "NFL" | "MLB" | "Boxing" | "MMA";
   team: string;
   opponent: string;
   game_time: string;
@@ -156,6 +156,7 @@ function sportToLeague(s: PlayerPropInput["sport"]): League {
   if (s === "NBA") return "nba";
   if (s === "NFL") return "nfl";
   if (s === "MLB") return "mlb";
+  if (s === "MMA") return "mma";
   return "boxing";
 }
 

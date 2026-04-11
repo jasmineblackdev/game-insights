@@ -1,15 +1,13 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Star } from "lucide-react";
+import { Star, Clock, Copy, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useEdgeCardOptional } from "@/context/EdgeCardContext";
 import {
   fetchPlayerEdgePredictions,
   isPlayerEdgeLiveConfigured,
-  isSupabasePlayerEdgeConfigured,
 } from "@/lib/playerEdgeApi";
 import { usePlayerEdgeFavorites } from "@/hooks/usePlayerEdgeFavorites";
 import {
@@ -17,37 +15,69 @@ import {
   type PlayerEdgeSportFilter,
   type PlayerEdgeStatFilter,
   type PlayerRiskTier,
+  computePlayerEdgeScore,
   filterPlayerEdgePredictions,
   sortPlayerEdgePredictions,
   statFilterLabel,
 } from "@/data/playerEdgeMock";
-import type { PlayerPropInput } from "@/lib/edgeCardScoring";
 
-const SPORT_FILTERS: PlayerEdgeSportFilter[] = ["all", "NBA", "NFL", "MLB", "Soccer"];
+// ── Sport / Stat filters (Soccer removed, Boxing + MMA added) ─────────────────
+
+const SPORT_FILTERS: PlayerEdgeSportFilter[] = ["all", "NBA", "NFL", "MLB", "Boxing", "MMA"];
 
 const STAT_FILTERS: PlayerEdgeStatFilter[] = [
   "all",
-  "points",
-  "rebounds",
-  "assists",
-  "passing_yards",
-  "rushing_yards",
-  "receiving_yards",
-  "strikeouts",
-  "hits",
-  "total_bases",
-  "shots",
-  "shots_on_target",
+  "points", "rebounds", "assists",
+  "passing_yards", "rushing_yards", "receiving_yards",
+  "strikeouts", "hits", "total_bases",
+  "fight_winner", "ko_tko", "total_rounds",
 ];
 
-function toPropInput(p: PlayerEdgePrediction): PlayerPropInput {
-  const { game_sort: _gs, ...rest } = p;
-  return rest;
+// ── Confidence / risk colour helpers ─────────────────────────────────────────
+
+function confColor(p: PlayerEdgePrediction): string {
+  if (p.confidence === "HIGH" && p.consistency_label === "stable")
+    return "border-l-emerald-500/70 bg-emerald-500/5";          // green
+  if (p.confidence === "HIGH")
+    return "border-l-emerald-500/50 bg-emerald-500/5";
+  if (p.risk_tier === "high_upside" || p.risk_tier === "longshot")
+    return "border-l-amber-500/60 bg-amber-500/5";              // orange
+  if (p.confidence === "LOW" || p.consistency_label === "volatile")
+    return "border-l-red-500/50 bg-red-500/5";                  // red
+  return "border-l-primary/30 bg-primary/5";                    // blue (balanced)
 }
 
-function statTitle(statType: string): string {
-  const f = STAT_FILTERS.find((x) => x === statType);
-  return f && f !== "all" ? statFilterLabel(f) : statType.replace(/_/g, " ");
+function confBadgeClass(p: PlayerEdgePrediction): string {
+  if (p.confidence === "HIGH") return "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400";
+  if (p.confidence === "MED") return "bg-amber-500/15 text-amber-700 dark:text-amber-400";
+  return "bg-muted text-muted-foreground";
+}
+
+function riskBadgeClass(t: PlayerRiskTier): string {
+  const m: Record<PlayerRiskTier, string> = {
+    safe: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    balanced: "bg-primary/10 text-primary",
+    high_upside: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    longshot: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  };
+  return m[t];
+}
+
+function riskLabel(t: PlayerRiskTier): string {
+  return { safe: "Safe", balanced: "Balanced", high_upside: "High upside", longshot: "Longshot" }[t];
+}
+
+// ── Bet label (DK-style headline for the card) ────────────────────────────────
+
+function betHeadline(p: PlayerEdgePrediction): string {
+  const stat = statFilterLabel(p.stat_type as PlayerEdgeStatFilter) || p.stat_type.replace(/_/g, " ");
+  if (p.stat_type === "fight_winner") return "To Win";
+  if (p.stat_type === "ko_tko")       return "Win by KO/TKO";
+  if (p.stat_type === "decision")     return "Win by Decision";
+  if (p.stat_type === "goes_distance") return "Goes Distance";
+  if (p.stat_type === "total_rounds")
+    return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} Rounds`;
+  return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} ${stat}`;
 }
 
 function initials(name: string): string {
@@ -56,65 +86,74 @@ function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
 }
 
-const RISK_TIER_BADGE: Record<PlayerRiskTier, string> = {
-  safe: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  balanced: "bg-primary/10 text-primary",
-  high_upside: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  longshot: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
-};
-
-function riskTierClass(t: PlayerRiskTier): string {
-  return RISK_TIER_BADGE[t];
+function isCombat(sport: string): boolean {
+  return sport === "Boxing" || sport === "MMA";
 }
 
-function riskTierLabel(t: PlayerRiskTier): string {
-  const labels: Record<PlayerRiskTier, string> = {
-    safe: "Safe",
-    balanced: "Balanced",
-    high_upside: "High upside",
-    longshot: "Longshot",
-  };
-  return labels[t];
+// ── Timing badge ─────────────────────────────────────────────────────────────
+
+function TimingBadge({ note }: { note: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+      <Clock className="w-2.5 h-2.5" />
+      {note}
+    </span>
+  );
 }
+
+// ── Individual card ───────────────────────────────────────────────────────────
 
 function PlayerEdgeCard({
   pred,
+  rank,
   favorited,
   onToggleFavorite,
   favoritesUi,
 }: {
   pred: PlayerEdgePrediction;
+  rank?: number;
   favorited: boolean;
   onToggleFavorite: () => void;
   favoritesUi: boolean;
 }) {
-  const edge = useEdgeCardOptional();
-  const added = edge?.isPlayerPropOnSlip(pred.id) ?? false;
-  const full = edge?.slipFull && !added;
+  const score = computePlayerEdgeScore(pred);
+  const headline = betHeadline(pred);
+  const isCombatSport = isCombat(pred.sport);
+  const dirClass = pred.prediction_direction === "MORE"
+    ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+    : "bg-red-500/15 text-red-600 dark:text-red-400";
 
-  const confClass =
-    pred.confidence === "HIGH"
-      ? "text-confidence-high bg-confidence-high/15"
-      : pred.confidence === "MED"
-        ? "text-amber-600 dark:text-amber-400 bg-amber-500/15"
-        : "text-muted-foreground bg-muted";
-
-  const dirClass =
-    pred.prediction_direction === "MORE"
-      ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-      : "bg-red-500/15 text-red-600 dark:text-red-400";
+  // Copy pick text to clipboard
+  const copyPick = () => {
+    const text = `${pred.player_name} — ${headline} · ${pred.sport} · Edge ${pred.prediction_direction === "MORE" ? "+" : "−"}${Math.abs(pred.edge).toFixed(1)} · Conf ${pred.confidence}`;
+    navigator.clipboard?.writeText(text).then(
+      () => toast.success("Pick copied to clipboard"),
+      () => toast.message("Copy failed")
+    );
+  };
 
   return (
-    <div className="card-shine bg-card rounded-lg border border-border p-4 flex flex-col gap-3 h-full">
+    <div
+      className={cn(
+        "card-shine rounded-lg border border-border border-l-4 p-4 flex flex-col gap-3 h-full",
+        confColor(pred)
+      )}
+    >
+      {/* ── Header row ─────────────────────────────────── */}
       <div className="flex items-start gap-3">
-        <div
-          className="w-11 h-11 rounded-full bg-primary/10 border border-border flex items-center justify-center shrink-0 text-xs font-bold text-primary"
-          aria-hidden
-        >
-          {initials(pred.player_name)}
+        <div className="relative shrink-0">
+          <div className="w-11 h-11 rounded-full bg-primary/10 border border-border flex items-center justify-center text-xs font-bold text-primary">
+            {initials(pred.player_name)}
+          </div>
+          {rank != null && rank <= 10 && (
+            <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-primary text-[9px] font-black text-primary-foreground flex items-center justify-center shadow">
+              {rank}
+            </span>
+          )}
         </div>
+
         <div className="min-w-0 flex-1 relative pr-8">
-          {favoritesUi ? (
+          {favoritesUi && (
             <button
               type="button"
               onClick={onToggleFavorite}
@@ -128,107 +167,108 @@ function PlayerEdgeCard({
             >
               <Star className={cn("w-4 h-4", favorited && "fill-current")} />
             </button>
-          ) : null}
+          )}
           <div className="flex flex-wrap items-center gap-1.5 gap-y-1">
             <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
               {pred.sport}
             </span>
-            <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
+            <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confBadgeClass(pred))}>
               {pred.confidence}
             </span>
-            {pred.risk_tier ? (
-              <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", riskTierClass(pred.risk_tier))}>
-                {riskTierLabel(pred.risk_tier)}
+            {pred.risk_tier && (
+              <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", riskBadgeClass(pred.risk_tier))}>
+                {riskLabel(pred.risk_tier)}
               </span>
-            ) : null}
+            )}
           </div>
           <p className="font-display font-bold text-sm text-foreground mt-1 truncate">{pred.player_name}</p>
           <p className="text-xs text-muted-foreground">
-            {pred.team} vs {pred.opponent} · {pred.game_time}
+            {isCombatSport ? `vs ${pred.opponent}` : `${pred.team} vs ${pred.opponent}`}
+            {pred.game_time ? ` · ${pred.game_time}` : ""}
           </p>
-          {pred.trend_note ? (
+          {pred.trend_note && (
             <p className="text-[11px] text-primary font-medium mt-0.5">{pred.trend_note}</p>
-          ) : null}
+          )}
         </div>
       </div>
 
-      <div className="space-y-2 text-xs border-t border-border pt-3">
-        <p className="font-semibold text-foreground">{statTitle(pred.stat_type)}</p>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-muted-foreground">
-          <span>Line</span>
-          <span className="text-foreground font-medium tabular-nums text-right">{pred.line_value}</span>
-          <span>Projection</span>
-          <span className="text-foreground font-medium tabular-nums text-right">{pred.projected_value}</span>
-        </div>
-        {pred.confidence_score_0_100 != null ? (
-          <p className="text-[11px] text-muted-foreground">
-            Prediction confidence:{" "}
-            <span className="text-foreground font-bold tabular-nums">{pred.confidence_score_0_100}</span>
+      {/* ── Bet headline (DK-style big recommendation) ── */}
+      <div className="bg-muted/40 rounded-md px-3 py-2.5 text-center">
+        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
+          {isCombatSport ? "Fight Prop" : "Bet Recommendation"}
+        </p>
+        <p className="font-display font-bold text-lg text-foreground leading-tight">{headline}</p>
+        {pred.confidence_score_0_100 != null && (
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            AI score{" "}
+            <span className="font-bold text-foreground">{Math.round(score)}</span>
             <span className="text-muted-foreground">/100</span>
           </p>
-        ) : null}
-        {pred.consistency_label ? (
-          <p className="text-[11px]">
-            <span className="text-muted-foreground">Consistency · </span>
-            <span
-              className={cn(
-                "font-semibold capitalize",
-                pred.consistency_label === "stable" && "text-confidence-high",
-                pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
-                pred.consistency_label === "volatile" && "text-risk"
-              )}
-            >
-              {pred.consistency_label === "stable"
-                ? "Stable"
-                : pred.consistency_label === "medium"
-                  ? "Medium"
-                  : "Volatile"}
-            </span>
+        )}
+      </div>
+
+      {/* ── Stats grid ───────────────────────────────────── */}
+      <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+        <div>
+          <p className="text-muted-foreground">Projection</p>
+          <p className="font-bold text-foreground tabular-nums">
+            {isCombatSport && pred.stat_type === "fight_winner"
+              ? `${pred.projected_value}%`
+              : pred.projected_value}
           </p>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-2 pt-1">
-          <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", dirClass)}>
-            {pred.prediction_direction}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            Edge:{" "}
-            <span className="text-foreground font-semibold tabular-nums">
-              {pred.prediction_direction === "MORE" ? "+" : "−"}
-              {Math.abs(pred.edge).toFixed(1)}
-            </span>
-          </span>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Edge</p>
+          <p className={cn("font-bold tabular-nums", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
+            {pred.prediction_direction === "MORE" ? "+" : "−"}{Math.abs(pred.edge).toFixed(1)}
+            {isCombatSport && pred.stat_type === "fight_winner" ? "%" : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-muted-foreground">Consistency</p>
+          <p className={cn(
+            "font-bold capitalize",
+            pred.consistency_label === "stable" && "text-emerald-600 dark:text-emerald-400",
+            pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
+            pred.consistency_label === "volatile" && "text-red-500"
+          )}>
+            {pred.consistency_label ?? "—"}
+          </p>
         </div>
       </div>
 
+      {/* ── Timing badge ─────────────────────────────────── */}
+      {pred.timing_note && (
+        <div>
+          <TimingBadge note={pred.timing_note} />
+        </div>
+      )}
+
+      {/* ── Why this bet ─────────────────────────────────── */}
       <div className="space-y-1.5 text-[11px] flex-1">
-        <p className="text-confidence-high font-semibold">Because</p>
+        <p className="text-emerald-600 dark:text-emerald-400 font-semibold">Why bet this</p>
         <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
-          {(pred.explanations?.length ? pred.explanations : [pred.reason_1, pred.reason_2]).map((line, i) => (
-            <li key={i}>{line}</li>
-          ))}
+          {(pred.explanations?.length
+            ? pred.explanations
+            : [pred.reason_1, pred.reason_2].filter(Boolean)
+          ).map((line, i) => <li key={i}>{line}</li>)}
         </ul>
-        <p className="text-risk pt-1">
+        <p className="text-red-500/80 pt-1">
           <span className="font-semibold">Risk · </span>
           {pred.risk_factor}
         </p>
       </div>
 
+      {/* ── Actions ──────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-border">
         <Button
           size="sm"
-          className="flex-1 font-semibold min-h-11 sm:min-h-9 touch-manipulation"
-          disabled={!edge || added || full}
-          onClick={() => {
-            if (!edge) {
-              toast.message("Edge Card unavailable");
-              return;
-            }
-            const r = edge.addPlayerProp(toPropInput(pred));
-            if (r.ok) toast.success("Added player prop to Edge Card");
-            else toast.message(r.message ?? "Could not add");
-          }}
+          variant="outline"
+          className="flex-1 font-semibold min-h-11 sm:min-h-9 touch-manipulation gap-1.5"
+          onClick={copyPick}
         >
-          {added ? "On Edge Card" : "Add to Edge Card"}
+          <Copy className="w-3.5 h-3.5" />
+          Copy Pick
         </Button>
         <Button variant="outline" size="sm" className="flex-1 min-h-11 sm:min-h-9 touch-manipulation" asChild>
           <Link to={`/player-edge/${pred.id}`}>View Details</Link>
@@ -238,126 +278,342 @@ function PlayerEdgeCard({
   );
 }
 
+// ── Section header component ──────────────────────────────────────────────────
+
+function SectionHeading({ title, count, subtitle }: { title: string; count?: number; subtitle?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 mb-3">
+      <h3 className="font-display font-bold text-base text-foreground">{title}</h3>
+      {count != null && (
+        <span className="text-xs font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full tabular-nums">
+          {count}
+        </span>
+      )}
+      {subtitle && <span className="text-xs text-muted-foreground hidden sm:inline">{subtitle}</span>}
+    </div>
+  );
+}
+
+// ── Sport section (best N props per sport) ────────────────────────────────────
+
+function SportSection({
+  label, sport, all, favs, fav, rankOffset,
+}: {
+  label: string;
+  sport: PlayerEdgeSportFilter;
+  all: PlayerEdgePrediction[];
+  favs: ReturnType<typeof import("@/hooks/usePlayerEdgeFavorites").usePlayerEdgeFavorites>;
+  fav: ReturnType<typeof import("@/hooks/usePlayerEdgeFavorites").usePlayerEdgeFavorites>;
+  rankOffset: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const items = useMemo(() => {
+    const filtered = all.filter((p) => p.sport === sport);
+    return sortPlayerEdgePredictions(filtered);
+  }, [all, sport]);
+
+  if (items.length === 0) return null;
+  const visible = expanded ? items : items.slice(0, 3);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <SectionHeading title={label} count={items.length} />
+        {items.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="text-xs text-primary flex items-center gap-1 hover:opacity-80"
+          >
+            {expanded ? <><ChevronUp className="w-3 h-3" /> Less</> : <><ChevronDown className="w-3 h-3" /> +{items.length - 3} more</>}
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {visible.map((pred, i) => (
+          <PlayerEdgeCard
+            key={pred.id}
+            pred={pred}
+            rank={rankOffset + i + 1}
+            favorited={favs.showFavoritesUi && favs.isFav(pred)}
+            onToggleFavorite={() => fav.toggleFavorite(pred)}
+            favoritesUi={favs.showFavoritesUi}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Main section ──────────────────────────────────────────────────────────────
+
 export function PlayerEdgeSection() {
   const [sport, setSport] = useState<PlayerEdgeSportFilter>("all");
   const [stat, setStat] = useState<PlayerEdgeStatFilter>("all");
-  const fav = usePlayerEdgeFavorites();
+  const [showAllTop, setShowAllTop] = useState(false);
+  const favs = usePlayerEdgeFavorites();
 
   const { data, isPending } = useQuery({
-    queryKey: ["player-edge", sport, stat],
-    queryFn: () => fetchPlayerEdgePredictions(sport, stat),
-    staleTime: 2 * 60 * 1000,
+    queryKey: ["player-edge-v2"],
+    queryFn: () => fetchPlayerEdgePredictions("all", "all"),
+    staleTime: 3 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
   });
 
-  const rows = useMemo(() => {
-    const list = data?.items ?? [];
-    const f = filterPlayerEdgePredictions(list, sport, stat);
-    return sortPlayerEdgePredictions(f);
-  }, [data, sport, stat]);
+  const allItems = useMemo(() => sortPlayerEdgePredictions(data?.items ?? []), [data]);
 
-  const accuracy = data?.accuracy;
-  const graded = accuracy ? accuracy.wins + accuracy.losses : 0;
-  const hitRate =
-    graded > 0 ? Math.round((accuracy!.wins / graded) * 100) : null;
+  // Filtered view (when user picks a sport/stat)
+  const filtered = useMemo(
+    () => filterPlayerEdgePredictions(allItems, sport, stat),
+    [allItems, sport, stat]
+  );
+
+  // Section groupings
+  const topProps  = useMemo(() => allItems.slice(0, showAllTop ? 12 : 6), [allItems, showAllTop]);
+  const highConf  = useMemo(() => allItems.filter((p) => p.confidence === "HIGH" && p.consistency_label === "stable"), [allItems]);
+  const highUp    = useMemo(() => allItems.filter((p) => p.risk_tier === "high_upside" || p.risk_tier === "longshot"), [allItems]);
+  const volatile  = useMemo(() => allItems.filter((p) => p.consistency_label === "volatile"), [allItems]);
+
+  const isFiltering = sport !== "all" || stat !== "all";
 
   return (
-    <section className="mt-12 pt-10 border-t border-border space-y-6" aria-labelledby="player-edge-heading">
+    <section className="mt-12 pt-10 border-t border-border space-y-8" aria-labelledby="player-edge-heading">
+      {/* ── Page header ───────────────────────────────── */}
       <div className="space-y-2">
         <h2 id="player-edge-heading" className="font-display font-bold text-xl sm:text-2xl md:text-3xl text-foreground">
-          Player Edge
+          Player Edge <span className="text-primary text-base font-semibold ml-1">AI</span>
         </h2>
         <p className="text-sm text-muted-foreground max-w-2xl">
-          Live player projections built from today's ESPN matchups — real players, real season averages, real opponents.
+          Daily AI prop scanner — NBA, NFL, MLB, Boxing, and UFC/MMA fights ranked by model edge, confidence, and matchup advantage.
         </p>
         {isPlayerEdgeLiveConfigured() && (
-          <p className="text-[10px] text-muted-foreground max-w-2xl">
-            {isSupabasePlayerEdgeConfigured()
-              ? "Enhanced props: Supabase Edge `player-edge` active."
-              : "Enhanced props: custom endpoint (VITE_PLAYER_EDGE_API_URL) active."}
-          </p>
+          <p className="text-[10px] text-primary/70">Enhanced props: custom endpoint active.</p>
         )}
-        {accuracy && accuracy.total > 0 && hitRate !== null ? (
-          <div
-            className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground max-w-xl leading-relaxed"
-            role="status"
-          >
-            <span className="font-semibold text-foreground block sm:inline">Props accuracy (last 7 days)</span>
-            <span className="hidden sm:inline mx-2 text-border">·</span>
-            <span className="block sm:inline mt-1 sm:mt-0">
-              {accuracy.wins}W {accuracy.losses}L
-              {accuracy.pushes > 0 ? ` ${accuracy.pushes}P` : ""}
-              <span className="mx-2 text-border">·</span>
-              <span className="tabular-nums text-foreground font-medium">{hitRate}%</span>
-              <span className="text-muted-foreground"> hit rate</span>
-              <span className="text-[10px] ml-1 opacity-80">(excl. pushes)</span>
-            </span>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>{allItems.length} props scanned</span>
+          <span className="text-border">·</span>
+          <span>{highConf.length} high confidence</span>
+          <span className="text-border">·</span>
+          <span>{highUp.length} high upside</span>
+        </div>
+      </div>
+
+      {/* ── Filters ────────────────────────────────────── */}
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">SPORT</p>
+          <div className="flex flex-wrap gap-2 sm:gap-1.5">
+            {SPORT_FILTERS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setSport(s)}
+                className={cn(
+                  "min-h-10 px-3 py-2 sm:min-h-0 sm:py-1 rounded-full text-xs font-semibold border transition-colors touch-manipulation",
+                  sport === s
+                    ? "bg-card text-foreground border-primary/40 shadow-sm"
+                    : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
+                )}
+              >
+                {s === "all" ? "All Sports" : s}
+              </button>
+            ))}
           </div>
-        ) : null}
-      </div>
+        </div>
 
-      <div className="space-y-3">
-        <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">SPORT</p>
-        <div className="flex flex-wrap gap-2 sm:gap-1.5">
-          {SPORT_FILTERS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => setSport(s)}
-              className={cn(
-                "min-h-10 px-3 py-2 sm:min-h-0 sm:py-1 rounded-full text-xs font-semibold border transition-colors touch-manipulation",
-                sport === s
-                  ? "bg-card text-foreground border-primary/40 shadow-sm"
-                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
-              )}
-            >
-              {s === "all" ? "All Sports" : s}
-            </button>
-          ))}
+        <div className="space-y-2">
+          <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">STAT / MARKET</p>
+          <div className="flex flex-wrap gap-2 sm:gap-1.5">
+            {STAT_FILTERS.map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setStat(st)}
+                className={cn(
+                  "min-h-10 px-2.5 py-2 sm:min-h-0 sm:py-1 rounded-full text-[11px] font-medium border transition-colors touch-manipulation",
+                  stat === st
+                    ? "bg-card text-foreground border-primary/40 shadow-sm"
+                    : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
+                )}
+              >
+                {statFilterLabel(st)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="space-y-3">
-        <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">STAT</p>
-        <div className="flex flex-wrap gap-2 sm:gap-1.5">
-          {STAT_FILTERS.map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStat(st)}
-              className={cn(
-                "min-h-10 px-2.5 py-2 sm:min-h-0 sm:py-1 rounded-full text-[11px] font-medium border transition-colors touch-manipulation",
-                stat === st
-                  ? "bg-card text-foreground border-primary/40 shadow-sm"
-                  : "border-transparent bg-muted/60 text-muted-foreground hover:text-foreground active:bg-muted"
-              )}
-            >
-              {statFilterLabel(st)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {isPending ? (
+      {/* ── Loading skeleton ────────────────────────────── */}
+      {isPending && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="h-72 rounded-lg border border-border bg-muted/30 animate-pulse" />
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-80 rounded-lg border border-border bg-muted/30 animate-pulse" />
           ))}
         </div>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8 text-center rounded-lg border border-border bg-card/40">
-          No player props match these filters.
-        </p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {rows.map((pred) => (
-            <PlayerEdgeCard
-              key={pred.id}
-              pred={pred}
-              favorited={fav.showFavoritesUi && fav.isFav(pred)}
-              onToggleFavorite={() => fav.toggleFavorite(pred)}
-              favoritesUi={fav.showFavoritesUi}
+      )}
+
+      {/* ── Filtered view (when user has selected sport/stat) ── */}
+      {!isPending && isFiltering && (
+        filtered.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center rounded-lg border border-border bg-card/40">
+            No props match these filters. Try "All Sports" or a different stat type.
+          </p>
+        ) : (
+          <div>
+            <SectionHeading
+              title={`${sport === "all" ? "All Sports" : sport} · ${stat === "all" ? "All Stats" : statFilterLabel(stat)}`}
+              count={filtered.length}
             />
-          ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((pred, i) => (
+                <PlayerEdgeCard
+                  key={pred.id}
+                  pred={pred}
+                  rank={i + 1}
+                  favorited={favs.showFavoritesUi && favs.isFav(pred)}
+                  onToggleFavorite={() => favs.toggleFavorite(pred)}
+                  favoritesUi={favs.showFavoritesUi}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      )}
+
+      {/* ── Full section layout (no filter active) ─────── */}
+      {!isPending && !isFiltering && allItems.length === 0 && (
+        <p className="text-sm text-muted-foreground py-8 text-center rounded-lg border border-border bg-card/40">
+          Scanning today's slate… Props load from ESPN and The Odds API. Check back once today's games are posted.
+        </p>
+      )}
+
+      {!isPending && !isFiltering && allItems.length > 0 && (
+        <div className="space-y-10">
+
+          {/* 1. Top AI Props Today */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <SectionHeading
+                title="Top AI Props Today"
+                count={allItems.length}
+                subtitle="Ranked by composite edge score"
+              />
+              {allItems.length > 6 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTop((v) => !v)}
+                  className="text-xs text-primary flex items-center gap-1 hover:opacity-80"
+                >
+                  {showAllTop ? <><ChevronUp className="w-3 h-3" /> Fewer</> : <><ChevronDown className="w-3 h-3" /> +{allItems.length - 6} more</>}
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {topProps.map((pred, i) => (
+                <PlayerEdgeCard
+                  key={pred.id}
+                  pred={pred}
+                  rank={i + 1}
+                  favorited={favs.showFavoritesUi && favs.isFav(pred)}
+                  onToggleFavorite={() => favs.toggleFavorite(pred)}
+                  favoritesUi={favs.showFavoritesUi}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* 2. Best by Sport */}
+          <div className="space-y-8">
+            <h3 className="font-display font-bold text-base text-foreground border-b border-border pb-2">
+              Best by Sport
+            </h3>
+            {(["NBA", "NFL", "MLB", "Boxing", "MMA"] as const).map((s) => {
+              const count = allItems.filter((p) => p.sport === s).length;
+              if (count === 0) return null;
+              const labels: Record<string, string> = {
+                NBA: "🏀 NBA", NFL: "🏈 NFL", MLB: "⚾ MLB",
+                Boxing: "🥊 Boxing", MMA: "🥋 UFC / MMA",
+              };
+              return (
+                <SportSection
+                  key={s}
+                  label={labels[s]}
+                  sport={s}
+                  all={allItems}
+                  favs={favs}
+                  fav={favs}
+                  rankOffset={0}
+                />
+              );
+            })}
+          </div>
+
+          {/* 3. High Confidence Props */}
+          {highConf.length > 0 && (
+            <div>
+              <div className="flex items-baseline gap-2 mb-1">
+                <SectionHeading title="🟢 High Confidence Props" count={highConf.length} />
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">High edge · stable role · low volatility</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {highConf.slice(0, 6).map((pred, i) => (
+                  <PlayerEdgeCard
+                    key={pred.id}
+                    pred={pred}
+                    rank={i + 1}
+                    favorited={favs.showFavoritesUi && favs.isFav(pred)}
+                    onToggleFavorite={() => favs.toggleFavorite(pred)}
+                    favoritesUi={favs.showFavoritesUi}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 4. High Upside Props */}
+          {highUp.length > 0 && (
+            <div>
+              <div className="flex items-baseline gap-2 mb-1">
+                <SectionHeading title="🟠 High Upside Props" count={highUp.length} />
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">Higher payout potential · accept more variance</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {highUp.slice(0, 6).map((pred, i) => (
+                  <PlayerEdgeCard
+                    key={pred.id}
+                    pred={pred}
+                    rank={i + 1}
+                    favorited={favs.showFavoritesUi && favs.isFav(pred)}
+                    onToggleFavorite={() => favs.toggleFavorite(pred)}
+                    favoritesUi={favs.showFavoritesUi}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 5. Props to Avoid (volatile) */}
+          {volatile.length > 0 && (
+            <details className="group">
+              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground select-none">
+                <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
+                🔴 Props to Avoid ({volatile.length} volatile)
+              </summary>
+              <p className="text-xs text-muted-foreground mt-2 mb-4">High variance — game script changes or role instability could sink these</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-3">
+                {volatile.slice(0, 3).map((pred, i) => (
+                  <PlayerEdgeCard
+                    key={pred.id}
+                    pred={pred}
+                    favorited={favs.showFavoritesUi && favs.isFav(pred)}
+                    onToggleFavorite={() => favs.toggleFavorite(pred)}
+                    favoritesUi={favs.showFavoritesUi}
+                  />
+                ))}
+              </div>
+            </details>
+          )}
         </div>
       )}
     </section>

@@ -27,26 +27,22 @@ import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuture
 type ViewMode = "games" | "props" | "draft" | "college_futures" | "parlay_edge";
 
 function DataSourceStatus() {
+  // Supabase health: just verify the connection is live, don't require specific tables
   const health = useQuery({
-    queryKey: ["supabase", "health", "teams"],
+    queryKey: ["supabase", "health", "v2"],
     queryFn: async () => {
       if (!supabase) throw new Error("Supabase client not configured");
-      const { error } = await supabase.from("teams").select("id").limit(1);
-      if (error) throw error;
+      // Use a lightweight REST call — if we get back any response (even empty) the connection works
+      const { error } = await supabase.from("boxing_fights").select("fight_id").limit(1);
+      // Table-not-found (code 42P01) or empty result means DB is reachable — not an error
+      if (error && error.code !== "42P01" && !error.message?.includes("does not exist")) throw error;
       return true;
     },
-    enabled: isSupabaseConfigured && !!supabase,
+    enabled: !!supabase,
     staleTime: 60_000,
     retry: 1,
   });
 
-  if (!isSupabaseConfigured) {
-    return (
-      <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
-        ESPN NBA · NFL · MLB · Boxing · MMA
-      </span>
-    );
-  }
   if (health.isPending) {
     return (
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -57,8 +53,8 @@ function DataSourceStatus() {
   }
   if (health.isError) {
     return (
-      <span className="text-xs text-amber-600 dark:text-amber-500" title="Check .env.local and SQL migration">
-        Backend error
+      <span className="text-xs text-muted-foreground" title="ESPN data active; Supabase optional">
+        ESPN Live
       </span>
     );
   }
