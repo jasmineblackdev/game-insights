@@ -139,6 +139,29 @@ export function getLiveContext(game: GamePrediction): LiveContext | null {
       : { badge: `RD ${periodNum}`, tip: `${scoreStr} — judges scoring round by round.`, accuracy: "rising" };
   }
 
+  if (game.league === "mma") {
+    if (periodNum === 1) {
+      return {
+        badge: "R1 WATCH",
+        tip: `${scoreStr} — Round 1 in progress. Striking and grappling patterns not yet readable.`,
+        accuracy: "rising",
+      };
+    }
+    if (periodNum === 2) {
+      return {
+        badge: "R2 SIGNAL",
+        tip: `${scoreStr} — Round 1 complete. Pace, grappling control, and cardio now visible.`,
+        accuracy: "peak",
+      };
+    }
+    if (periodNum >= 3) {
+      return margin >= 1
+        ? { badge: `R${periodNum} AHEAD`, tip: `${leader} ahead on cards — late stoppage or decision trending.`, accuracy: "high" }
+        : { badge: `R${periodNum} LIVE`, tip: `${scoreStr} — even fight. High variance, watch for momentum shift.`, accuracy: "rising" };
+    }
+    return { badge: `R${periodNum} LIVE`, tip: `${scoreStr} — MMA in progress.`, accuracy: "rising" };
+  }
+
   return { badge: "LIVE", tip: `${scoreStr} — game in progress.`, accuracy: "rising" };
 }
 
@@ -434,7 +457,49 @@ export function getBetWindow(game: GamePrediction): BetWindow | null {
     };
   }
 
-  // ── Boxing ──────────────────────────���─────────────────────────────────────
+  // ── MMA ─────────────────────────────────────────────────────────────────────
+  if (game.league === "mma") {
+    if (periodNum <= 1) {
+      return {
+        phase: "wait",
+        label: "WAIT · R1 LIVE",
+        tip: "Round 1 in progress — striking and grappling patterns aren't readable yet. Wait until R2.",
+        timing: "Window opens after R1 buzzer",
+      };
+    }
+    if (periodNum === 2) {
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN · R2",
+        tip: "R1 complete. Pace, cardio, and grappling control are now visible. Best pre-championship-round value.",
+        timing: "Act before R3",
+      };
+    }
+    if (periodNum >= 3 && periodNum <= 4) {
+      if (margin >= 2) {
+        return {
+          phase: "closing",
+          label: "WINDOW CLOSING",
+          tip: `${leader} ahead on cards — finish probability increases each round. Live value narrowing.`,
+          timing: "Limited value remaining",
+        };
+      }
+      return {
+        phase: "open",
+        label: "BET WINDOW OPEN",
+        tip: "Championship rounds approaching — cardio dropoff and momentum swings still affect odds.",
+        timing: "Act now or skip",
+      };
+    }
+    return {
+      phase: "closed",
+      label: "WINDOW CLOSED",
+      tip: "Late rounds — line has fully corrected. No meaningful edge available.",
+      timing: "No value",
+    };
+  }
+
+  // ── Boxing ──────────────────────────────────────────────────────────────────
   if (game.league === "boxing") {
     if (periodNum <= 3) {
       return {
@@ -473,6 +538,7 @@ export function getUpcomingBetTip(game: GamePrediction): string | null {
   if (game.league === "nfl") return "Best live window: after Q1 or at halftime";
   if (game.league === "mlb") return "Best live window: innings 4–5 (F5 window)";
   if (game.league === "boxing") return "Best live window: rounds 4–8 once pace and stamina are visible";
+  if (game.league === "mma") return "Best live window: after Round 1 — striking/grappling pattern locked in";
   return null;
 }
 

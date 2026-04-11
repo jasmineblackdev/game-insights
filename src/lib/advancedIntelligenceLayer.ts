@@ -449,7 +449,7 @@ function applyNbaNflMlb(
 export async function applyAdvancedIntelligenceToGames(predictions: GamePrediction[]): Promise<GamePrediction[]> {
   if (!predictions.length) return predictions;
 
-  const byLeague: Record<League, GamePrediction[]> = { nba: [], nfl: [], mlb: [], boxing: [] };
+  const byLeague: Record<League, GamePrediction[]> = { nba: [], nfl: [], mlb: [], boxing: [], mma: [] };
   for (const g of predictions) {
     byLeague[g.league].push(g);
   }

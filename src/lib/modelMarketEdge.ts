@@ -25,6 +25,7 @@ const PTS_PER_PCT: Record<League, number | null> = {
   nfl: 2.1,
   mlb: null,    // runline fixed at 1.5 — not a reliable conversion
   boxing: null, // boxing has no spread — only moneyline
+  mma: null,    // MMA has no spread — only moneyline
 };
 
 /** Spread-implied home win % from point spread (negative spreadNum = home favored). */

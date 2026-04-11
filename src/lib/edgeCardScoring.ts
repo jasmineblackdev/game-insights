@@ -410,7 +410,7 @@ export function getFavoredSide(game: GamePrediction): EdgeSide {
  * MLB/Soccer have more variance → caps lower.
  */
 function confidenceStability(conf: ConfidenceLevel, league?: string): number {
-  const isHighVariance = league === "mlb" || league === "boxing";
+  const isHighVariance = league === "mlb" || league === "boxing" || league === "mma";
   if (conf === "high") return isHighVariance ? 10 : 14;
   if (conf === "medium") return isHighVariance ? 5 : 7;
   return 2;
@@ -459,11 +459,7 @@ function marketVolatility(game: GamePrediction, side: EdgeSide): number {
     if (game.threeWay.draw >= 15) v += 4;
   }
 
-  if (game.soccer?.congestion) {
-    const { homeLast7, awayLast7 } = game.soccer.congestion;
-    const d = Math.abs(homeLast7 - awayLast7);
-    if (d >= 2) v += 5;
-  }
+
 
   const qv = game._meta?.quality?.volatility?.volatility_label;
   if (qv === "high") v += 14;
@@ -601,7 +597,7 @@ export function rankCandidatesForHub(games: GamePrediction[], filters: EdgeHubFi
   return out.sort((a, b) => b.pickScore - a.pickScore);
 }
 
-const LEAGUE_ORDER: League[] = ["nba", "nfl", "mlb", "boxing"];
+const LEAGUE_ORDER: League[] = ["nba", "nfl", "mlb", "boxing", "mma"];
 
 export function groupCandidatesByLeague(candidates: EdgeCandidate[]): Record<League, EdgeCandidate[]> {
   const acc: Record<League, EdgeCandidate[]> = {
@@ -609,6 +605,7 @@ export function groupCandidatesByLeague(candidates: EdgeCandidate[]): Record<Lea
     nfl: [],
     mlb: [],
     boxing: [],
+    mma: [],
   };
   for (const c of candidates) {
     acc[c.game.league].push(c);

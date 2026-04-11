@@ -20,7 +20,13 @@
       "Bash(git:*)",
       "Bash(echo \"EXIT:$?\")",
       "Bash(echo \"DONE:$?\")",
-      "Bash(echo \"RESULT:$?\")"
+      "Bash(echo \"RESULT:$?\")",
+      "Bash(npx vite:*)",
+      "Bash(node_modules/.bin/esbuild src/components/GameDetailView.tsx --bundle=false --loader=tsx)",
+      "Bash(node_modules/.bin/esbuild src/components/GameDetailView.tsx --bundle=false --loader:.tsx=tsx)",
+      "Bash(node_modules/.bin/esbuild:*)",
+      "Bash(echo \"esbuild EXIT:$?\" npx tsc --noEmit)",
+      "Bash(echo \"tsc EXIT:$?\")"
     ]
   }
 }

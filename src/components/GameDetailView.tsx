@@ -561,12 +561,14 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   {[
-                    { label: "Reach", text: game.boxing.modelOutput.reachEdge },
-                    { label: "Age", text: game.boxing.modelOutput.ageEdge },
-                    { label: "Stance", text: game.boxing.modelOutput.stanceEdge },
-                    { label: "Activity", text: game.boxing.modelOutput.activityEdge },
-                    { label: "Style", text: game.boxing.modelOutput.styleEdge },
                     { label: "Opp Quality", text: game.boxing.modelOutput.opponentQualityEdge },
+                    { label: "Style", text: game.boxing.modelOutput.styleEdge },
+                    { label: "Recent Form", text: game.boxing.modelOutput.recentFormEdge },
+                    { label: "Reach/Height", text: game.boxing.modelOutput.reachEdge },
+                    { label: "Activity", text: game.boxing.modelOutput.activityEdge },
+                    { label: "Age Curve", text: game.boxing.modelOutput.ageEdge },
+                    { label: "Defense", text: game.boxing.modelOutput.defenseEdge },
+                    { label: "Stance", text: game.boxing.modelOutput.stanceEdge },
                   ].map(({ label, text }) => (
                     <div key={label} className="rounded bg-muted/30 px-2 py-1.5">
                       <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5">{label.toUpperCase()}</p>
@@ -601,6 +603,70 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
             )}
             {game.boxing.venue && (
               <p className="text-xs text-muted-foreground mt-3">Venue: {game.boxing.venue}</p>
+            )}
+          </div>
+        )}
+
+        {/* MMA-specific model layer */}
+        {game.mma && (
+          <div className="card-shine bg-card rounded-lg border border-border p-4 sm:p-5 lg:col-span-2">
+            <h3 className="font-display font-bold text-sm text-foreground flex items-center gap-2 mb-3">
+              <Info className="w-4 h-4 text-primary" />
+              MMA Model · {game.mma.weightClass}
+              {game.mma.isChampionshipBout && (
+                <span className="ml-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                  {game.mma.titleDescription ?? "CHAMPIONSHIP"}
+                </span>
+              )}
+              {game.mma.promotion && (
+                <span className="ml-auto text-[10px] font-semibold text-muted-foreground">{game.mma.promotion}</span>
+              )}
+            </h3>
+            {game.mma.modelOutput && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    { label: "Opp Quality", text: game.mma.modelOutput.opponentQualityEdge },
+                    { label: "Style Matchup", text: game.mma.modelOutput.strikingEdge },
+                    { label: "Grappling", text: game.mma.modelOutput.grapplingEdge },
+                    { label: "Cardio/Pace", text: game.mma.modelOutput.cardioEdge },
+                    { label: "Durability", text: game.mma.modelOutput.durabilityEdge },
+                    { label: "Physical", text: game.mma.modelOutput.physicalEdge },
+                    { label: "Activity", text: game.mma.modelOutput.activityEdge },
+                    { label: "Defense", text: game.mma.modelOutput.marketEdge },
+                  ].map(({ label, text }) => (
+                    <div key={label} className="rounded bg-muted/30 px-2 py-1.5">
+                      <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-0.5">{label.toUpperCase()}</p>
+                      <p className="text-secondary-foreground leading-tight">{text}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg bg-muted/25 border border-border p-3 text-xs space-y-1 text-secondary-foreground">
+                  <p className="font-semibold text-foreground text-[10px] tracking-wider mb-1">METHOD OF VICTORY</p>
+                  <div className="flex gap-4">
+                    <span>KO/TKO: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.ko_tko * 100)}%</strong></span>
+                    <span>Sub: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.submission * 100)}%</strong></span>
+                    <span>Decision: <strong>{Math.round(game.mma.modelOutput.methodProbabilities.decision * 100)}%</strong></span>
+                  </div>
+                  {game.mma.modelOutput.overUnderRoundsPivot != null && (
+                    <p>Model avg rounds: ~<strong>{game.mma.modelOutput.overUnderRoundsPivot}</strong> of {game.mma.scheduledRounds} scheduled</p>
+                  )}
+                </div>
+                {game.mma.modelOutput.riskFlag && (
+                  <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/25 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    <span>{game.mma.modelOutput.riskFlag}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {!game.mma.modelOutput && game.mma.modelNotes.length > 0 && (
+              <ul className="space-y-2 text-sm text-secondary-foreground list-disc list-inside">
+                {game.mma.modelNotes.map((note, i) => <li key={i}>{note}</li>)}
+              </ul>
+            )}
+            {game.mma.venue && (
+              <p className="text-xs text-muted-foreground mt-3">Venue: {game.mma.venue}</p>
             )}
           </div>
         )}

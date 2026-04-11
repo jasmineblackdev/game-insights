@@ -18,6 +18,7 @@ import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchBoxingPredictions } from "@/lib/boxingFetch";
+import { fetchMmaPredictions } from "@/lib/mmaFetch";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
@@ -42,7 +43,7 @@ function DataSourceStatus() {
   if (!isSupabaseConfigured) {
     return (
       <span className="text-xs text-muted-foreground" title="Scores & lines load from ESPN; add Supabase for your own backend">
-        ESPN NBA · NFL · MLB · Boxing
+        ESPN NBA · NFL · MLB · Boxing · MMA
       </span>
     );
   }
@@ -80,7 +81,7 @@ function LeaguePicker({
 }) {
   return (
     <div className={cn("inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5 shrink-0", className)}>
-      {(["nba", "nfl", "mlb", "boxing"] as League[]).map((l) => (
+      {(["nba", "nfl", "mlb", "boxing", "mma"] as League[]).map((l) => (
         <button
           key={l}
           type="button"
@@ -195,6 +196,14 @@ const Index = () => {
     refetchIntervalInBackground: false,
   });
 
+  const mmaQuery = useQuery({
+    queryKey: ["mma-predictions"],
+    queryFn: fetchMmaPredictions,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
+  });
+
   const mlbListPending = mlbBaseQuery.isPending || (mlbBaseQuery.isSuccess && mlbModeledQuery.isPending);
   const activeQuery =
     league === "nba"
@@ -207,7 +216,9 @@ const Index = () => {
               isError: mlbBaseQuery.isError || mlbModeledQuery.isError,
               error: mlbBaseQuery.error ?? mlbModeledQuery.error,
             }
-          : boxingQuery;
+          : league === "mma"
+            ? mmaQuery
+            : boxingQuery;
   const leagueGames =
     league === "nba"
       ? (nbaQuery.data ?? [])
@@ -215,7 +226,9 @@ const Index = () => {
         ? (nflQuery.data ?? [])
         : league === "mlb"
           ? (mlbModeledQuery.data ?? [])
-          : (boxingQuery.data ?? []);
+          : league === "mma"
+            ? (mmaQuery.data ?? [])
+            : (boxingQuery.data ?? []);
 
   const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
 

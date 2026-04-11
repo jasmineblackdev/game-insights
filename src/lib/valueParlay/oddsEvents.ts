@@ -149,6 +149,8 @@ export function oddsSportKeyForPrediction(pred: GamePrediction): string {
   }
   if (pred.league === "nba") return "basketball_nba";
   if (pred.league === "nfl") return "americanfootball_nfl";
+  if (pred.league === "mma") return "mma_mixed_martial_arts";
+  if (pred.league === "boxing") return "boxing";
   return "baseball_mlb";
 }
 
@@ -254,7 +256,11 @@ export async function fetchOddsBundlesForLeague(
       ? "basketball_nba"
       : league === "nfl"
         ? "americanfootball_nfl"
-        : "baseball_mlb";
+        : league === "mma"
+          ? "mma_mixed_martial_arts"
+          : league === "boxing"
+            ? "boxing"
+            : "baseball_mlb";
   const events = await fetchJsonForSport(sportKey);
   for (const p of predictions) {
     const ev = matchEvent(p, events);

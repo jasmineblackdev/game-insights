@@ -22,6 +22,7 @@ export type PredictionPhase =
   | "live_q1"     // NBA / NFL: after Q1 complete
   | "live_f5"     // MLB: after 5 innings complete
   | "live_15min"  // Soccer: 15'–30' pattern read
+  | "live_r1"     // MMA: after Round 1 complete
   | "final";
 
 export type TriggerType =
@@ -154,6 +155,9 @@ export function isLiveTriggerMet(game: GamePrediction): boolean {
       return periodNum >= 2 && !isHalftime && diff <= 8;
     case "mlb":
       return periodNum >= 5;
+    case "mma":
+      // After Round 1 is complete — striking/grappling pattern visible
+      return periodNum >= 2;
     default:
       return false;
   }
@@ -217,6 +221,7 @@ export function buildLiveVersion(game: GamePrediction): PredictionVersion | null
 
   const phase: PredictionPhase =
     game.league === "mlb" ? "live_f5"
+    : game.league === "mma" ? "live_r1"
     : "live_q1";
 
   const triggerType: TriggerType =
@@ -343,7 +348,9 @@ export function phaseLabel(phase: PredictionPhase): string {
     case "live_q1":   return "Live Edge · Q1 Signal";
     case "live_f5":   return "Live Edge · F5 Signal";
     case "live_15min":return "Live Edge · 15′ Signal";
+    case "live_r1":   return "Live Edge · R1 Signal";
     case "final":     return "Final Result";
+    default:          return "Edge";
   }
 }
 

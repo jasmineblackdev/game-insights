@@ -1,7 +1,7 @@
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
-export type League = "nba" | "nfl" | "mlb" | "boxing";
+export type League = "nba" | "nfl" | "mlb" | "boxing" | "mma";
 export type GameDate = "today" | "tomorrow" | "week";
 
 /** "partial" = one pitcher confirmed, the other still unknown. */
@@ -102,6 +102,19 @@ export interface BoxingFighterProfile {
   styleTag?: string;
   /** Chin durability score 0-10 (knockdowns taken / fights) */
   chinScore?: number;
+  // ── v2 factors (used by 9-factor model) ──────────────────────────────────
+  /** Total professional rounds fought. */
+  roundsFought?: number;
+  /** Fraction of rounds won per CompuBox/judge scoring (0.0–1.0). */
+  roundsWonPct?: number;
+  /** Defensive slip/block rate — punches evaded / total thrown at fighter (0.0–1.0). */
+  strikesDefensePct?: number;
+  /** Wins in the last 5 fights (for recent-form score). */
+  recentWins?: number;
+  /** Number of recent fights the recentWins window covers (typically 5). */
+  recentFights?: number;
+  /** Weight classes moved in career — 0 = stable, ≥2 = high-variance. */
+  weightClassMoves?: number;
 }
 
 /** Structured output from the boxing prediction model. */
@@ -112,6 +125,8 @@ export interface BoxingModelOutput {
   activityEdge: string;
   styleEdge: string;
   opponentQualityEdge: string;
+  recentFormEdge: string;
+  defenseEdge: string;
   koPctNote: string;
   methodProbabilities: {
     ko_tko: number;
@@ -129,6 +144,103 @@ export interface BoxingModelOutput {
     opponentQuality: number;
     combinedDelta: number;
   };
+}
+
+// ── MMA / UFC types ───────────────────────────────────────────────────────────
+
+/** MMA fighter profile — populated from Supabase mma_fighters. */
+export interface MmaFighterProfile {
+  fighterId: string;
+  name: string;
+  record: string;               // e.g. "22-5-0 (1 NC)"
+  wins: number;
+  losses: number;
+  draws: number;
+  noContests: number;
+  koTkoWins: number;
+  subWins: number;
+  decisionWins: number;
+  weightClass: string;
+  reach?: number;               // inches
+  height?: number;              // inches
+  stance?: "orthodox" | "southpaw" | "switch";
+  age?: number;
+  lastFightDate?: string;
+  opponentQualityScore?: number; // 0-100
+  koTkoPct?: number;             // % of wins by KO/TKO
+  subPct?: number;               // % of wins by submission
+  decisionPct?: number;
+  /** Style: striker | grappler | wrestler | submission_specialist | well_rounded | pressure_fighter */
+  styleTag?: string;
+  // Striking stats (per 15 min)
+  sigStrikesLandedPerMin?: number;
+  sigStrikesAbsorbedPerMin?: number;
+  strikeAccuracy?: number;       // 0.0–1.0
+  strikeDefense?: number;        // 0.0–1.0
+  // Grappling stats (per 15 min)
+  avgTakedownsPer15?: number;
+  takedownAccuracy?: number;     // 0.0–1.0
+  takedownDefense?: number;      // 0.0–1.0
+  avgSubAttemptsPer15?: number;
+  controlTimePer15?: number;     // seconds per 15 min of fight time
+  // Durability
+  knockdownsReceived?: number;   // total career knockdowns received
+  koPenalty?: number;            // 0-10: 0=iron chin, 10=severely KO-tested
+  // Cardio/pace
+  cardioRating?: number;         // 0-10: late-round output decline
+  // Activity
+  recentWins?: number;           // wins in last 5
+  recentFights?: number;
+  /** True when given less than 10 days' notice. */
+  shortNotice?: boolean;
+  /** Weight classes moved in career. */
+  weightClassMoves?: number;
+}
+
+/** Structured output from the MMA prediction model. */
+export interface MmaModelOutput {
+  strikingEdge: string;
+  grapplingEdge: string;
+  cardioEdge: string;
+  durabilityEdge: string;
+  physicalEdge: string;
+  opponentQualityEdge: string;
+  activityEdge: string;
+  marketEdge: string;
+  methodProbabilities: {
+    ko_tko: number;
+    submission: number;
+    decision: number;
+  };
+  overUnderRoundsPivot?: number;
+  riskFlag: string | null;
+  _debug: {
+    strikingScore: number;
+    grapplingScore: number;
+    cardioScore: number;
+    durabilityScore: number;
+    physicalScore: number;
+    opponentQualityScore: number;
+    activityScore: number;
+    marketScore: number;
+    combinedDelta: number;
+  };
+}
+
+/** MMA-specific intel for a fight — parallel to BoxingIntel. */
+export interface MmaIntel {
+  homeFighter: MmaFighterProfile;
+  awayFighter: MmaFighterProfile;
+  weightClass: string;
+  scheduledRounds: number;      // 3 (regular) or 5 (main event / title)
+  venue?: string;
+  isMainEvent?: boolean;
+  isChampionshipBout?: boolean;
+  titleDescription?: string;
+  promotion?: string;           // "UFC", "Bellator", "PFL", etc.
+  modelNotes: string[];
+  modelOutput?: MmaModelOutput;
+  oddsSource?: string;
 }
 
 /** Boxing-specific intel for a fight — parallel to MlbIntel. */
@@ -418,6 +530,7 @@ export interface GamePrediction {
   enrichmentNotes?: string[];
   mlb?: MlbIntel;
   boxing?: BoxingIntel;
+  mma?: MmaIntel;
   /** ESPN / client-only sort key */
   _meta?: {
     easternYmd: string;

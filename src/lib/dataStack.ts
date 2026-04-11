@@ -70,6 +70,7 @@ export const SPORT_SPECIFIC_DB_ENTITIES: Record<League, readonly string[]> = {
   nfl: ["depth_charts", "qb_metrics", "advanced_team_metrics (shared)"],
   mlb: ["probable_pitchers", "bullpen_usage", "team_splits", "advanced_team_metrics (shared)"],
   boxing: ["boxing_fighters", "boxing_fights", "boxing_fight_results", "boxing_odds", "boxing_predictions", "boxing_prediction_versions", "boxing_learning_history"],
+  mma: ["mma_fighters", "mma_fights", "mma_fight_results", "mma_odds_snapshots", "mma_odds_latest", "mma_predictions", "mma_prediction_versions", "mma_learning_history"],
 };
 
 /** Cross-sport advanced layer (Supabase) — populated by ETL; optional at runtime. */

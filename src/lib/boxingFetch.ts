@@ -70,7 +70,7 @@ async function fetchBoxingModelWeights(): Promise<BoxingFactorWeights> {
     const { data, error } = await supabase
       .from("boxing_learning_history")
       .select("*")
-      .eq("model_version", "1.0")
+      .eq("model_version", "2.0")
       .order("computed_at", { ascending: false })
       .limit(1)
       .single();
@@ -81,14 +81,15 @@ async function fetchBoxingModelWeights(): Promise<BoxingFactorWeights> {
     if ((data.sample_size ?? 0) < MIN_SAMPLE) return DEFAULT_BOXING_WEIGHTS;
 
     return {
-      reach: data.w_reach ?? DEFAULT_BOXING_WEIGHTS.reach,
-      age: data.w_age ?? DEFAULT_BOXING_WEIGHTS.age,
-      stance: data.w_stance ?? DEFAULT_BOXING_WEIGHTS.stance,
-      inactivity: data.w_inactivity ?? DEFAULT_BOXING_WEIGHTS.inactivity,
       opponentQuality: data.w_opponent_quality ?? DEFAULT_BOXING_WEIGHTS.opponentQuality,
-      style: data.w_style ?? DEFAULT_BOXING_WEIGHTS.style,
-      koPct: data.w_ko_pct ?? DEFAULT_BOXING_WEIGHTS.koPct,
-      chin: data.w_chin ?? DEFAULT_BOXING_WEIGHTS.chin,
+      styleMatchup: data.w_style_matchup ?? DEFAULT_BOXING_WEIGHTS.styleMatchup,
+      recentForm: data.w_recent_form ?? DEFAULT_BOXING_WEIGHTS.recentForm,
+      koPowerVsDurability: data.w_ko_power_durability ?? DEFAULT_BOXING_WEIGHTS.koPowerVsDurability,
+      reachHeight: data.w_reach_height ?? DEFAULT_BOXING_WEIGHTS.reachHeight,
+      activityInactivity: data.w_activity_inactivity ?? DEFAULT_BOXING_WEIGHTS.activityInactivity,
+      ageCurve: data.w_age_curve ?? DEFAULT_BOXING_WEIGHTS.ageCurve,
+      defenseEfficiency: data.w_defense_efficiency ?? DEFAULT_BOXING_WEIGHTS.defenseEfficiency,
+      marketMovement: data.w_market_movement ?? DEFAULT_BOXING_WEIGHTS.marketMovement,
       learned: true,
       sampleSize: data.sample_size,
     };

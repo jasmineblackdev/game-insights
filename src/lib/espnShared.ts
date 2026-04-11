@@ -119,6 +119,7 @@ const HOME_BOOST: Record<League, number> = {
   nfl: 0.055,
   mlb: 0.03,
   boxing: 0, // boxing has no home/away venue advantage
+  mma: 0,    // MMA: no home/away venue advantage
 };
 
 export function winProbFromRecords(
