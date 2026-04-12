@@ -22,6 +22,10 @@ import {
   useRecommendedVsExcluded,
   useRoiBySport,
   useRoiByRiskBand,
+  useTimingBySport,
+  useRecommendedVsExcludedBySport,
+  useRoiByMarketType,
+  useResolutionCompleteness,
 } from "@/hooks/useAnalyticsDashboard";
 import type {
   TimingBucketRow,
@@ -31,6 +35,10 @@ import type {
   RecommendedVsExcludedRow,
   RoiBySportRow,
   RoiByRiskBandRow,
+  TimingBySportRow,
+  RecommendedVsExcludedBySportRow,
+  RoiByMarketTypeRow,
+  ResolutionCompletenessRow,
 } from "@/hooks/useAnalyticsDashboard";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -422,19 +430,219 @@ function RoiByRiskBandPanel({ rows, loading }: { rows: RoiByRiskBandRow[]; loadi
   );
 }
 
+// ── Timing by sport panel ─────────────────────────────────────────────────────
+
+function TimingBySportPanel({ rows, loading }: { rows: TimingBySportRow[]; loading: boolean }) {
+  if (loading) return <LoadingRows />;
+  const resolved = rows.filter((r) => r.resolved_count > 0);
+  if (!resolved.length) return <NoDataNote label="timing by sport" />;
+
+  // Group rows by sport for rendering
+  const sports = [...new Set(resolved.map((r) => r.sport))];
+
+  return (
+    <div className="space-y-4">
+      {sports.map((sport) => {
+        const sportRows = resolved.filter((r) => r.sport === sport);
+        return (
+          <div key={sport}>
+            <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1">{sport}</p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[10px] tabular-nums">
+                <tbody>
+                  {sportRows.map((r) => (
+                    <tr key={r.timing_bucket} className="border-b border-border/40 last:border-0">
+                      <td className="py-1 pr-3">
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+                          r.timing_bucket === "now"     && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                          r.timing_bucket === "wait"    && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                          r.timing_bucket === "monitor" && "bg-muted/40 text-muted-foreground",
+                        )}>
+                          {r.timing_bucket}
+                        </span>
+                      </td>
+                      <td className="py-1 pr-3 text-right text-muted-foreground">{r.resolved_count} resolved</td>
+                      <td className={cn("py-1 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
+                        {fmt(r.hit_rate_pct)} hit
+                      </td>
+                      <td className={cn("py-1 text-right font-semibold", roiColor(r.roi_pct))}>
+                        {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)} ROI
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Recommended vs excluded by sport panel ────────────────────────────────────
+
+function RecVsExclBySportPanel({
+  rows,
+  loading,
+}: {
+  rows: RecommendedVsExcludedBySportRow[];
+  loading: boolean;
+}) {
+  if (loading) return <LoadingRows />;
+  const resolved = rows.filter((r) => r.resolved_count > 0);
+  if (!resolved.length) return <NoDataNote label="filter quality by sport" />;
+
+  const sports = [...new Set(resolved.map((r) => r.sport))];
+
+  return (
+    <div className="space-y-3">
+      {sports.map((sport) => {
+        const rec  = resolved.find((r) => r.sport === sport && r.is_recommended);
+        const excl = resolved.find((r) => r.sport === sport && !r.is_recommended);
+        const delta =
+          rec?.hit_rate_pct != null && excl?.hit_rate_pct != null
+            ? rec.hit_rate_pct - excl.hit_rate_pct
+            : null;
+
+        return (
+          <div key={sport} className="space-y-1">
+            <div className="flex items-center gap-2">
+              <p className="text-[9px] font-bold tracking-wider text-muted-foreground">{sport}</p>
+              {delta != null && (
+                <span className={cn(
+                  "text-[9px] px-1.5 py-0.5 rounded font-semibold",
+                  delta >= 5  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : delta >= 0 ? "bg-muted/40 text-muted-foreground"
+                  : "bg-rose-500/10 text-rose-500"
+                )}>
+                  {delta >= 0 ? "+" : ""}{delta.toFixed(1)}pp
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              {[rec, excl].map((r) =>
+                r ? (
+                  <div key={String(r.is_recommended)} className="flex items-center justify-between bg-muted/20 rounded px-2 py-1">
+                    <span className={cn(
+                      "font-semibold",
+                      r.is_recommended ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                    )}>
+                      {r.is_recommended ? "Rec" : "Excl"}
+                    </span>
+                    <span className={cn("font-semibold tabular-nums", pctColor(r.hit_rate_pct))}>
+                      {fmt(r.hit_rate_pct)}
+                    </span>
+                    <span className={cn("font-semibold tabular-nums", roiColor(r.roi_pct))}>
+                      {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                    </span>
+                  </div>
+                ) : null
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── ROI by market type panel ──────────────────────────────────────────────────
+
+function RoiByMarketTypePanel({ rows, loading }: { rows: RoiByMarketTypeRow[]; loading: boolean }) {
+  if (loading) return <LoadingRows />;
+  if (!rows.length) return <NoDataNote label="market type ROI" />;
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[10px] tabular-nums">
+        <thead>
+          <tr className="text-muted-foreground text-left border-b border-border">
+            <th className="py-1 pr-2 font-semibold">Sport</th>
+            <th className="py-1 pr-3 font-semibold">Market</th>
+            <th className="py-1 pr-3 font-semibold text-right">Resolved</th>
+            <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
+            <th className="py-1 font-semibold text-right">ROI%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.sport}-${r.stat_type}`} className="border-b border-border/40 last:border-0">
+              <td className="py-1.5 pr-2 text-muted-foreground font-semibold">{r.sport}</td>
+              <td className="py-1.5 pr-3 text-foreground font-medium">{r.stat_type.replace(/_/g, " ")}</td>
+              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_count}</td>
+              <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
+                {fmt(r.hit_rate_pct)}
+              </td>
+              <td className={cn("py-1.5 text-right font-semibold", roiColor(r.roi_pct))}>
+                {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Resolution completeness panel ─────────────────────────────────────────────
+
+function ResolutionPanel({ rows, loading }: { rows: ResolutionCompletenessRow[]; loading: boolean }) {
+  if (loading) return <LoadingRows />;
+  if (!rows.length) return <NoDataNote label="resolution completeness" />;
+
+  return (
+    <div className="space-y-1.5">
+      {rows.map((r) => {
+        const stale = r.stale_pending > 0;
+        return (
+          <div key={r.sport} className="flex items-center gap-2">
+            <span className="text-[9px] font-bold text-muted-foreground uppercase w-12 shrink-0">{r.sport}</span>
+            <div className="flex-1 bg-muted/30 rounded-full h-1.5">
+              <div
+                className={cn("h-1.5 rounded-full", r.resolution_pct >= 80 ? "bg-emerald-500/70" : r.resolution_pct >= 50 ? "bg-primary/60" : "bg-amber-400")}
+                style={{ width: `${Math.min(100, r.resolution_pct)}%` }}
+              />
+            </div>
+            <span className={cn(
+              "text-[10px] tabular-nums font-semibold shrink-0 w-20 text-right",
+              r.resolution_pct >= 80 ? "text-emerald-600 dark:text-emerald-400"
+              : r.resolution_pct >= 50 ? "text-foreground"
+              : "text-amber-600 dark:text-amber-400"
+            )}>
+              {r.resolution_pct}% ({r.resolved_count}/{r.total_surfaced})
+            </span>
+            {stale && (
+              <span className="text-[9px] text-amber-500 shrink-0 flex items-center gap-0.5">
+                <AlertTriangle className="w-2.5 h-2.5" />
+                {r.stale_pending} stale
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 export function PerformanceDashboard() {
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState<7 | 30>(30);
 
-  const timingQ    = useTimingPerformance(days);
-  const exclQ      = useExclusionFrequency(days);
-  const stabilityQ = useStabilityVsOutcome(days);
-  const safeQ      = useSafePoolDepth(days);
-  const recVsExclQ = useRecommendedVsExcluded(days);
-  const roiSportQ  = useRoiBySport(days);
-  const roiRiskQ   = useRoiByRiskBand(days);
+  const timingQ          = useTimingPerformance(days);
+  const exclQ            = useExclusionFrequency(days);
+  const stabilityQ       = useStabilityVsOutcome(days);
+  const safeQ            = useSafePoolDepth(days);
+  const recVsExclQ       = useRecommendedVsExcluded(days);
+  const roiSportQ        = useRoiBySport(days);
+  const roiRiskQ         = useRoiByRiskBand(days);
+  const timingBySportQ   = useTimingBySport(days);
+  const recVsExclSportQ  = useRecommendedVsExcludedBySport(days);
+  const roiMarketQ       = useRoiByMarketType(days);
+  const resolutionQ      = useResolutionCompleteness(days);
 
   return (
     <div className="rounded-lg border border-border bg-card/40">
@@ -518,6 +726,30 @@ export function PerformanceDashboard() {
           <section className="space-y-2">
             <SectionHeader title="SAFE MODE POOL DEPTH BY SPORT" />
             <SafePoolPanel rows={safeQ.data ?? []} loading={safeQ.isLoading} />
+          </section>
+
+          {/* 9. Timing by sport */}
+          <section className="space-y-2">
+            <SectionHeader title="TIMING PERFORMANCE BY SPORT" />
+            <TimingBySportPanel rows={timingBySportQ.data ?? []} loading={timingBySportQ.isLoading} />
+          </section>
+
+          {/* 10. Filter quality by sport */}
+          <section className="space-y-2">
+            <SectionHeader title="FILTER QUALITY BY SPORT (RECOMMENDED VS EXCLUDED)" />
+            <RecVsExclBySportPanel rows={recVsExclSportQ.data ?? []} loading={recVsExclSportQ.isLoading} />
+          </section>
+
+          {/* 11. ROI by market type */}
+          <section className="space-y-2">
+            <SectionHeader title="ROI BY MARKET TYPE (TOP BY ROI)" />
+            <RoiByMarketTypePanel rows={roiMarketQ.data ?? []} loading={roiMarketQ.isLoading} />
+          </section>
+
+          {/* 12. Resolution completeness */}
+          <section className="space-y-2">
+            <SectionHeader title="RESOLUTION COMPLETENESS BY SPORT" />
+            <ResolutionPanel rows={resolutionQ.data ?? []} loading={resolutionQ.isLoading} />
           </section>
         </div>
       )}

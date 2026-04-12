@@ -79,6 +79,48 @@ export interface RoiByRiskBandRow {
   avg_edge:        number;
 }
 
+export interface TimingBySportRow {
+  sport:            string;
+  timing_bucket:    string;
+  total_predictions: number;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+}
+
+export interface RecommendedVsExcludedBySportRow {
+  sport:           string;
+  is_recommended:  boolean;
+  total_matched:   number;
+  resolved_count:  number;
+  win_count:       number;
+  hit_rate_pct:    number | null;
+  roi_pct:         number | null;
+  avg_edge:        number;
+}
+
+export interface RoiByMarketTypeRow {
+  sport:            string;
+  stat_type:        string;
+  total_predictions: number;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+}
+
+export interface ResolutionCompletenessRow {
+  sport:            string;
+  total_surfaced:   number;
+  resolved_count:   number;
+  pending_count:    number;
+  resolution_pct:   number;
+  stale_pending:    number;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -151,6 +193,42 @@ export function useRoiByRiskBand(days = 30) {
   return useQuery({
     queryKey: ["analytics-roi-by-risk-band", days],
     queryFn:  () => rpc<RoiByRiskBandRow>("analytics_roi_by_risk_band", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useTimingBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-timing-by-sport", days],
+    queryFn:  () => rpc<TimingBySportRow>("analytics_timing_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useRecommendedVsExcludedBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-rec-vs-excl-by-sport", days],
+    queryFn:  () => rpc<RecommendedVsExcludedBySportRow>("analytics_recommended_vs_excluded_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useRoiByMarketType(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-roi-by-market-type", days],
+    queryFn:  () => rpc<RoiByMarketTypeRow>("analytics_roi_by_market_type", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useResolutionCompleteness(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-resolution-completeness", days],
+    queryFn:  () => rpc<ResolutionCompletenessRow>("analytics_resolution_completeness", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });
