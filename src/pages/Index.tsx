@@ -26,6 +26,8 @@ import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/odds
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { OddsDebugBadge } from "@/components/OddsDebugBadge";
+import { useValueParlay } from "@/context/ValueParlayContext";
+import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 
 type ViewMode = "home" | "best_picks" | "player_props" | "parlay_builder" | "live" | "draft" | "college_futures";
 
@@ -256,8 +258,17 @@ function HomePropCard({
   );
 }
 
-const PARLAY_TIERS = [
+const PARLAY_TIERS: {
+  mode: ParlayBuildMode;
+  label: string;
+  legs: string;
+  desc: string;
+  hitProb: string;
+  color: string;
+  badge: string;
+}[] = [
   {
+    mode: "safe",
     label: "Safe Parlay",
     legs: "3–4 legs",
     desc: "High-confidence, low-correlation picks. Best for consistent returns.",
@@ -266,6 +277,7 @@ const PARLAY_TIERS = [
     badge: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   },
   {
+    mode: "balanced",
     label: "Balanced Parlay",
     legs: "4–6 legs",
     desc: "Mix of safe and high-upside legs. Strong edge-to-risk ratio.",
@@ -274,6 +286,7 @@ const PARLAY_TIERS = [
     badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   },
   {
+    mode: "aggressive",
     label: "Aggressive Parlay",
     legs: "6–8 legs",
     desc: "High-upside combinations with bigger payout potential.",
@@ -281,7 +294,7 @@ const PARLAY_TIERS = [
     color: "border-violet-500/40 bg-violet-500/5",
     badge: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
   },
-] as const;
+];
 
 function HomeDashboard({
   topGames,
@@ -290,6 +303,7 @@ function HomeDashboard({
   league,
   onSelectGame,
   onNavigate,
+  onNavigateToParlay,
 }: {
   topGames: GamePrediction[];
   topProps: PlayerEdgePrediction[];
@@ -297,6 +311,7 @@ function HomeDashboard({
   league: League;
   onSelectGame: (g: GamePrediction) => void;
   onNavigate: (m: ViewMode) => void;
+  onNavigateToParlay: (mode: ParlayBuildMode) => void;
 }) {
   return (
     <div className="space-y-10">
@@ -382,7 +397,7 @@ function HomeDashboard({
           </div>
           <button
             type="button"
-            onClick={() => onNavigate("parlay_builder")}
+            onClick={() => onNavigateToParlay("balanced")}
             className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
           >
             Open builder →
@@ -393,7 +408,7 @@ function HomeDashboard({
             <button
               key={tier.label}
               type="button"
-              onClick={() => onNavigate("parlay_builder")}
+              onClick={() => onNavigateToParlay(tier.mode)}
               className={cn(
                 "text-left rounded-lg border p-4 flex flex-col gap-2 hover:brightness-110 transition-all",
                 tier.color
@@ -421,6 +436,7 @@ const Index = () => {
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
   const [viewMode, setViewMode] = useState<ViewMode>("home");
   const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
+  const { setParlayMode } = useValueParlay();
 
   // Phase 1: ESPN-only — shows cards in ~200ms
   const nbaFastQuery = useQuery({
@@ -563,7 +579,7 @@ const Index = () => {
   const allGamesKey = useMemo(() => allGames.map((g) => g.id).sort().join(","), [allGames]);
   const [oddsMapAll, setOddsMapAll] = useState<Map<string, GameOddsBundle>>(() => new Map());
   useEffect(() => {
-    if (viewMode !== "parlay_edge" || !allGames.length) return;
+    if (viewMode !== "parlay_builder" || !allGames.length) return;
     let cancelled = false;
     fetchAllOddsBundles(allGames).then((m) => {
       if (!cancelled) setOddsMapAll(m);
@@ -661,6 +677,12 @@ const Index = () => {
 
   const handleViewModeChange = (m: ViewMode) => {
     setViewMode(m);
+    setSelectedGame(null);
+  };
+
+  const handleNavigateToParlay = (mode: ParlayBuildMode) => {
+    setParlayMode(mode);
+    setViewMode("parlay_builder");
     setSelectedGame(null);
   };
 
@@ -906,6 +928,7 @@ const Index = () => {
                   league={league}
                   onSelectGame={setSelectedGame}
                   onNavigate={handleViewModeChange}
+                  onNavigateToParlay={handleNavigateToParlay}
                 />
               ) : viewMode === "parlay_builder" ? (
                 <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
