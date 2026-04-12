@@ -14,12 +14,14 @@ import {
   useTimingEdgeQuality,
   useStabilityEdgeQuality,
   useCalibrationImpact,
+  useCalibrationImpactBySport,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
   type TimingEdgeQualityRow,
   type StabilityEdgeQualityRow,
   type CalibrationImpactRow,
+  type CalibrationImpactBySportRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -723,8 +725,146 @@ const CAL_BUCKET_COLOR: Record<string, string> = {
   no_data:   "text-muted-foreground/40",
 };
 
+// ── Calibration impact by sport sub-section ───────────────────────────────────
+
+const COMBAT_SPORTS = new Set(["BOXING", "MMA", "UFC"]);
+
+/**
+ * Transposed table: rows = sports, columns = Boosted | Neutral | Penalized | No-data%
+ *
+ * Key questions answered at a glance:
+ *   - Where is the signal mature? (low no_data_pct, high resolved counts)
+ *   - Where is the direction right? (boosted > neutral, penalized < neutral)
+ *   - Combat sports — are they mostly no-data as expected?
+ */
+function CalibrationImpactBySportSection({
+  rows,
+  loading,
+}: {
+  rows: CalibrationImpactBySportRow[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-1.5 pt-3 border-t border-border/50">
+        <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">BY SPORT</p>
+        <LoadingRow />
+      </div>
+    );
+  }
+  if (!rows.length) return null;
+
+  // Group by sport
+  const sports = [...new Set(rows.map((r) => r.sport))].sort();
+
+  function sportBucket(sport: string, bucket: string): CalibrationImpactBySportRow | undefined {
+    return rows.find((r) => r.sport === sport && r.adj_bucket === bucket);
+  }
+
+  function hitCell(row: CalibrationImpactBySportRow | undefined) {
+    if (!row) return <td className="text-right py-1.5 pr-2 text-muted-foreground/25">—</td>;
+    const { hit_rate_pct, resolved_count } = row;
+    if (resolved_count < 5) {
+      return (
+        <td className="text-right py-1.5 pr-2 text-muted-foreground/40">
+          —<span className="text-[8px] ml-0.5">/{resolved_count}</span>
+        </td>
+      );
+    }
+    return (
+      <td className={cn("text-right py-1.5 pr-2 font-semibold", hitColor(hit_rate_pct))}>
+        {pct(hit_rate_pct)}
+        <span className="ml-0.5 text-[8px] text-muted-foreground/50">/{resolved_count}</span>
+      </td>
+    );
+  }
+
+  return (
+    <div className="space-y-2 pt-3 border-t border-border/50">
+      <div className="flex items-center gap-2">
+        <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">BY SPORT</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px] tabular-nums">
+          <thead>
+            <tr className="text-muted-foreground/60 border-b border-border/40">
+              <th className="text-left py-1 pr-3 font-medium">Sport</th>
+              <th className="text-right py-1 pr-2 font-medium text-emerald-600/70">Boosted</th>
+              <th className="text-right py-1 pr-2 font-medium">Neutral</th>
+              <th className="text-right py-1 pr-2 font-medium text-rose-500/70">Penalized</th>
+              <th className="text-right py-1 font-medium text-muted-foreground/50">No-data</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sports.map((sport) => {
+              const boostedRow   = sportBucket(sport, "boosted");
+              const neutralRow   = sportBucket(sport, "neutral");
+              const penalizedRow = sportBucket(sport, "penalized");
+              const noDataRow    = sportBucket(sport, "no_data");
+
+              // no_data_pct is the same on every row for a sport
+              const noDataPct = (boostedRow ?? neutralRow ?? penalizedRow ?? noDataRow)?.no_data_pct ?? null;
+              const isCombat  = COMBAT_SPORTS.has(sport);
+
+              // Direction check: boosted > neutral > penalized?
+              const boostedHit   = boostedRow?.hit_rate_pct   ?? null;
+              const neutralHit   = neutralRow?.hit_rate_pct   ?? null;
+              const penalizedHit = penalizedRow?.hit_rate_pct ?? null;
+              const bResolved    = (boostedRow?.resolved_count   ?? 0) >= 5;
+              const nResolved    = (neutralRow?.resolved_count   ?? 0) >= 5;
+              const pResolved    = (penalizedRow?.resolved_count ?? 0) >= 5;
+
+              let dirIcon: React.ReactNode = null;
+              if (bResolved && nResolved && pResolved && boostedHit !== null && neutralHit !== null && penalizedHit !== null) {
+                if (boostedHit > neutralHit && neutralHit > penalizedHit)
+                  dirIcon = <span className="text-emerald-500 ml-1" title="Signal validated">✓</span>;
+                else if (boostedHit > neutralHit)
+                  dirIcon = <span className="text-yellow-500 ml-1" title="Partial signal">→</span>;
+                else
+                  dirIcon = <span className="text-rose-500 ml-1" title="Signal not confirmed">⚠</span>;
+              }
+
+              return (
+                <tr key={sport} className="border-b border-border/30 last:border-0">
+                  <td className={cn("py-1.5 pr-3 font-semibold", isCombat ? "text-muted-foreground/60" : "text-foreground")}>
+                    {sport}
+                    {dirIcon}
+                    {isCombat && noDataPct !== null && noDataPct > 0.7 && (
+                      <span className="ml-1 text-[8px] text-muted-foreground/40" title="Combat sport: low calibration coverage expected">
+                        ~{Math.round(noDataPct * 100)}% no-data
+                      </span>
+                    )}
+                  </td>
+                  {hitCell(boostedRow)}
+                  {hitCell(neutralRow)}
+                  {hitCell(penalizedRow)}
+                  <td className="text-right py-1.5 text-muted-foreground/50">
+                    {noDataPct !== null ? (
+                      <span className={noDataPct > 0.6 ? "text-amber-500/70" : "text-muted-foreground/40"}>
+                        {Math.round(noDataPct * 100)}%
+                        {noDataRow && (
+                          <span className="ml-0.5 text-[8px]">/{noDataRow.leg_count}</span>
+                        )}
+                      </span>
+                    ) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[9px] text-muted-foreground/40">
+        Hit%/n shown when ≥5 resolved. ✓ = boosted&gt;neutral&gt;penalized · → = partial · ⚠ = not confirmed
+        · No-data% amber when &gt;60%
+      </p>
+    </div>
+  );
+}
+
 function CalibrationImpactPanel({ days }: { days: number }) {
-  const { data = [], isLoading } = useCalibrationImpact(days);
+  const { data = [], isLoading }          = useCalibrationImpact(days);
+  const { data: bySport = [], isLoading: sportLoading } = useCalibrationImpactBySport(days);
 
   const totalLegs = data.reduce((s, r) => s + r.leg_count, 0);
   const totalResolved = data.reduce((s, r) => s + r.resolved_count, 0);
@@ -870,6 +1010,9 @@ function CalibrationImpactPanel({ days }: { days: number }) {
           )}
         </div>
       )}
+
+      {/* By-sport breakdown — separate section, always shown when data exists */}
+      <CalibrationImpactBySportSection rows={bySport} loading={sportLoading} />
     </SectionCard>
   );
 }

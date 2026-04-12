@@ -218,6 +218,19 @@ export interface CalibrationImpactRow {
   avg_edge:       number;
 }
 
+export interface CalibrationImpactBySportRow {
+  sport:          string;
+  adj_bucket:     string;
+  leg_count:      number;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+  avg_adj:        number | null;
+  /** Fraction (0–1) of this sport's total legs with no calibration data. */
+  no_data_pct:    number;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -407,6 +420,15 @@ export function useCalibrationImpact(days = 30) {
   return useQuery({
     queryKey: ["analytics-calibration-impact", days],
     queryFn:  () => rpc<CalibrationImpactRow>("analytics_calibration_impact", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useCalibrationImpactBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-calibration-impact-by-sport", days],
+    queryFn:  () => rpc<CalibrationImpactBySportRow>("analytics_calibration_impact_by_sport", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });

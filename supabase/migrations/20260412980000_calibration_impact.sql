@@ -107,3 +107,97 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
       WHEN 'no_data'   THEN 4
     END;
 $$;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3. analytics_calibration_impact_by_sport
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- Same bucketing logic as analytics_calibration_impact but split by sport.
+-- Enables:
+--   - NBA / MLB / NFL bucket validation (larger samples, signal likely first)
+--   - Combat sports no-data share visibility (smaller samples, expected high)
+--
+-- Returns one row per (sport, adj_bucket).
+-- Buckets with zero legs for a sport are omitted (sparse output by design —
+-- the UI fills in missing buckets as "—" from the no_data_pct column).
+--
+-- no_data_pct: what fraction of this sport's total legs had no calibration data.
+-- Computed per-sport so each row carries context about signal maturity.
+
+CREATE OR REPLACE FUNCTION analytics_calibration_impact_by_sport(
+  lookback_days integer DEFAULT 30
+)
+RETURNS TABLE (
+  sport           text,
+  adj_bucket      text,
+  leg_count       bigint,
+  resolved_count  bigint,
+  win_count       bigint,
+  hit_rate_pct    numeric,
+  roi_pct         numeric,
+  avg_adj         numeric,
+  -- Fraction of all legs for this sport that are in no_data bucket (0–1).
+  -- Same value for every row of a sport; lets UI show maturity without a join.
+  no_data_pct     numeric
+)
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+  WITH legs AS (
+    SELECT
+      upper(l.sport)                                                  AS sport,
+      l.conf_cal_adj,
+      l.prediction_id,
+      l.parlay_id,
+      l.edge,
+      ph.outcome,
+      ph.edge_at_prediction,
+      ph.feature_snapshot->>'market_probability_proxy'               AS market_prob_proxy,
+      CASE
+        WHEN l.conf_cal_adj IS NULL THEN 'no_data'
+        WHEN l.conf_cal_adj >  0.02 THEN 'boosted'
+        WHEN l.conf_cal_adj < -0.02 THEN 'penalized'
+        ELSE                             'neutral'
+      END AS adj_bucket
+    FROM parlay_build_legs l
+    LEFT JOIN prediction_history ph
+           ON ph.prediction_id = l.prediction_id
+    WHERE l.created_at >= NOW() - (lookback_days || ' days')::interval
+  ),
+  sport_totals AS (
+    SELECT
+      sport,
+      COUNT(*)                                                        AS total_legs,
+      COUNT(*) FILTER (WHERE adj_bucket = 'no_data')                 AS no_data_legs
+    FROM legs
+    GROUP BY 1
+  )
+  SELECT
+    l.sport,
+    l.adj_bucket,
+    COUNT(*)                                                          AS leg_count,
+    COUNT(*) FILTER (WHERE outcome IS NOT NULL)                       AS resolved_count,
+    COUNT(*) FILTER (WHERE outcome = 'win')                           AS win_count,
+    ROUND(
+      COUNT(*) FILTER (WHERE outcome = 'win')::numeric
+      / NULLIF(COUNT(*) FILTER (WHERE outcome IS NOT NULL), 0) * 100
+    , 1)                                                              AS hit_rate_pct,
+    ROUND(
+      SUM(CASE
+        WHEN outcome = 'win'  THEN (1.0 / NULLIF(market_prob_proxy::numeric, 0)) - 1
+        WHEN outcome = 'loss' THEN -1.0
+        ELSE 0
+      END) / NULLIF(COUNT(*) FILTER (WHERE outcome IS NOT NULL), 0) * 100
+    , 1)                                                              AS roi_pct,
+    ROUND(AVG(l.conf_cal_adj)::numeric, 4)                           AS avg_adj,
+    ROUND(st.no_data_legs::numeric / NULLIF(st.total_legs, 0), 3)    AS no_data_pct
+  FROM legs l
+  JOIN sport_totals st USING (sport)
+  GROUP BY l.sport, l.adj_bucket, st.no_data_legs, st.total_legs
+  ORDER BY
+    l.sport,
+    CASE l.adj_bucket
+      WHEN 'boosted'   THEN 1
+      WHEN 'neutral'   THEN 2
+      WHEN 'penalized' THEN 3
+      WHEN 'no_data'   THEN 4
+    END;
+$$;
