@@ -8,6 +8,9 @@
  *   3. AI Parlays Tomorrow      — Safe / Balanced / Aggressive using parlayOptimizer
  *                                 with slight sport-diversification boost
  *
+ * Supported sports: NBA · NFL · MLB · Boxing · MMA/UFC
+ * Excluded: soccer, NHL, tennis, golf, esports, unknown.
+ *
  * Pregame-specific adjustments:
  *   - timingUrgency="wait" excluded (pregame context)
  *   - stability_score weighted at 0.20 (vs 0.10 for today) — role certainty matters more
@@ -30,6 +33,22 @@ import {
   type EarlyValueImpactBySportRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { cn } from "@/lib/utils";
+
+// ── Supported sports ─────────────────────────────────────────────────────────
+//
+// Only sports with stable models are scanned by the Tomorrow tab.
+// Excluded: soccer, NHL, tennis, golf, esports, and any unknown sport.
+// Combat sports (boxing, mma/ufc) are included but receive lower ML influence
+// until enough resolved outcomes accumulate.
+
+const TOMORROW_ALLOWED_SPORTS = new Set([
+  "nba",
+  "nfl",
+  "mlb",
+  "boxing",
+  "mma",
+  "ufc",
+]);
 
 // ── Early value boost map ─────────────────────────────────────────────────────
 
@@ -288,8 +307,17 @@ export function TomorrowTab({
   );
 
   // ── Tomorrow games ───────────────────────────────────────────────────────────
+  // Only include sports with mature, stable models. Unsupported sports (soccer,
+  // NHL, tennis, golf, esports) are excluded to keep ROI trends, calibration,
+  // timing buckets, and ML alpha adjustments on a consistent baseline.
   const tomorrowGames = useMemo(
-    () => allGames.filter((g) => g.gameDate === "tomorrow" && g.status === "upcoming"),
+    () =>
+      allGames.filter(
+        (g) =>
+          g.gameDate === "tomorrow" &&
+          g.status === "upcoming" &&
+          TOMORROW_ALLOWED_SPORTS.has(String(g.sport).toLowerCase())
+      ),
     [allGames]
   );
 
@@ -299,13 +327,15 @@ export function TomorrowTab({
   );
 
   // ── Tomorrow props ───────────────────────────────────────────────────────────
-  // Filter: tomorrow games only + exclude "wait" timing (pregame context).
+  // Filter: supported sports + tomorrow game IDs + exclude "wait" timing.
+  // Sport filter is explicit (not just via game ID) to guard against orphaned props.
   // Sort: pregame score with optional per-sport validated early-value boost.
   const tomorrowProps = useMemo(
     () =>
       allProps
         .filter(
           (p) =>
+            TOMORROW_ALLOWED_SPORTS.has(String(p.sport).toLowerCase()) &&
             tomorrowGameIds.has(p.game_id) &&
             p.timing_urgency !== "wait"
         )
