@@ -17,6 +17,7 @@ import {
   riskBandLabel,
 } from "@/lib/valueParlay/riskScore";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import { getConfidenceAdjustment } from "@/lib/ml/confidenceCalibrationMap";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
@@ -587,7 +588,8 @@ export function buildEnrichedPropCandidates(
       timingUrgency,
       timingScore,
       stabilityScore:      pred.ml_debug?.stability_score ?? 0.5,
-      modelVariant:        pred.ml_active ? "ml_blended" : "rules",
+      modelVariant:                 pred.ml_active ? "ml_blended" : "rules",
+      confidenceCalibrationAdjustment: getConfidenceAdjustment(pred.sport, pred.stat_type),
       correlationGroupId:  `ml-prop-${pred.game_id}-${pred.stat_type}`,
       valueScore:          vsCore,
       valueGrade:          valueGrade(vsCore),

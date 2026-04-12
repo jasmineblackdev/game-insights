@@ -46,6 +46,8 @@ import type {
   ConfidenceCalibrationBySportRow,
   ConfidenceCalibrationByMarketRow,
 } from "@/hooks/useAnalyticsDashboard";
+import { getAllCalibrationEntries, verdictTrendToAdjustment } from "@/lib/ml/confidenceCalibrationMap";
+import type { CalibrationEntry } from "@/lib/ml/confidenceCalibrationMap";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -937,6 +939,7 @@ function ConfCalibrationPanel({
   overall30 = [],
   marketData7 = [],
   marketData30 = [],
+  calMap = {},
 }: {
   overall: ConfidenceCalibrationRow[];
   bySport: ConfidenceCalibrationBySportRow[];
@@ -949,6 +952,7 @@ function ConfCalibrationPanel({
   overall30?: ConfidenceCalibrationRow[];
   marketData7?: ConfidenceCalibrationByMarketRow[];
   marketData30?: ConfidenceCalibrationByMarketRow[];
+  calMap?: Record<string, CalibrationEntry>;
 }) {
   // Calibration verdict: HIGH hit% > MED hit% > LOW hit%?
   const resolvedOverall = overall.filter((r) => (r.resolved_count ?? 0) >= MIN_NOISY);
@@ -1112,6 +1116,7 @@ function ConfCalibrationPanel({
           confBadge={confBadge}
           data7={marketData7}
           data30={marketData30}
+          calMap={calMap}
         />
       )}
     </div>
@@ -1136,6 +1141,7 @@ function ConfCalibrationByMarketSection({
   confBadge,
   data7 = [],
   data30 = [],
+  calMap = {},
 }: {
   rows: ConfidenceCalibrationByMarketRow[];
   loading: boolean;
@@ -1143,6 +1149,7 @@ function ConfCalibrationByMarketSection({
   confBadge: (conf: string) => React.ReactNode;
   data7?: ConfidenceCalibrationByMarketRow[];
   data30?: ConfidenceCalibrationByMarketRow[];
+  calMap?: Record<string, CalibrationEntry>;
 }) {
   const resolved   = rows.filter((r) => r.resolved_count > 0);
   const totalN     = resolved.reduce((s, r) => s + r.resolved_count, 0);
@@ -1246,7 +1253,8 @@ function ConfCalibrationByMarketSection({
                         <th className="text-right py-1 pr-2 font-medium">MED</th>
                         <th className="text-right py-1 pr-3 font-medium">LOW</th>
                         <th className="text-center py-1 pr-2 font-medium">Cal.</th>
-                        {showTrend && <th className="text-center py-1 font-medium">Trend</th>}
+                        {showTrend && <th className="text-center py-1 pr-2 font-medium">Trend</th>}
+                        <th className="text-center py-1 font-medium" title="Confidence calibration adjustment applied to leg scoring">Adj</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1281,6 +1289,18 @@ function ConfCalibrationByMarketSection({
                           );
                         }
 
+                        // Calibration adjustment from localStorage map
+                        const calKey = `${sport.toUpperCase()}:${market.toLowerCase()}`;
+                        const calEntry = calMap[calKey];
+                        const adj = calEntry?.adjustment ?? null;
+
+                        function adjColor(v: number | null): string {
+                          if (v === null) return "text-muted-foreground/30";
+                          if (v > 0.02)  return "text-emerald-500";
+                          if (v < -0.02) return "text-rose-500";
+                          return "text-muted-foreground/60";
+                        }
+
                         return (
                           <tr key={market} className="border-b border-border/30 last:border-0">
                             <td className="py-1.5 pr-3 font-medium text-foreground">
@@ -1294,7 +1314,7 @@ function ConfCalibrationByMarketSection({
                               <span title={verdict}>{VERDICT_LABEL[verdict]}</span>
                             </td>
                             {showTrend && (
-                              <td className="text-center py-1.5">
+                              <td className="text-center py-1.5 pr-2">
                                 <div className="flex flex-col items-center gap-0.5">
                                   <TrendBadge dir={highDir} />
                                   {gapDir && gapDir !== highDir && (
@@ -1308,6 +1328,9 @@ function ConfCalibrationByMarketSection({
                                 </div>
                               </td>
                             )}
+                            <td className={cn("text-center py-1.5 text-[10px] font-semibold tabular-nums", adjColor(adj))}>
+                              {adj === null ? "—" : (adj >= 0 ? "+" : "") + adj.toFixed(2)}
+                            </td>
                           </tr>
                         );
                       })}
@@ -1319,7 +1342,8 @@ function ConfCalibrationByMarketSection({
           })}
           <p className="text-[9px] text-muted-foreground/50">
             Cal: ✓ calibrated (HIGH&gt;MED&gt;LOW) · → partial · ⚠ inverted · ? insufficient
-            {showTrend && " · Trend: HIGH hit rate 7d vs 30d · gap↑ = H-L gap widening (better discrimination)"}
+            {showTrend && " · Trend: HIGH hit rate 7d vs 30d · gap↑ = H-L gap widening"}
+            {" · Adj: confidence offset applied to leg scoring (±0.08 max)"}
           </p>
         </div>
       )}
@@ -1332,6 +1356,13 @@ function ConfCalibrationByMarketSection({
 export function PerformanceDashboard() {
   const [open, setOpen] = useState(false);
   const [days, setDays] = useState<7 | 30>(30);
+
+  // Read calibration adjustment map from localStorage (set by feedbackLoop).
+  // Use a memo-on-open so it refreshes each time the panel is expanded.
+  const calMap = useMemo(
+    () => (open ? getAllCalibrationEntries() : {}),
+    [open]
+  );
 
   const timingQ          = useTimingPerformance(days);
   const exclQ            = useExclusionFrequency(days);
@@ -1543,6 +1574,7 @@ export function PerformanceDashboard() {
               overall30={confidenceCalibQ30.data ?? []}
               marketData7={confCalibByMarketQ7.data ?? []}
               marketData30={confCalibByMarketQ30.data ?? []}
+              calMap={calMap}
             />
           </section>
         </div>

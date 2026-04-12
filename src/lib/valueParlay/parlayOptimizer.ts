@@ -114,6 +114,12 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   const timing01    = c.timingScore ?? 0.55;
   const stability01 = c.stabilityScore ?? 0.5;
 
+  // Calibration adjustment: additive offset to conf01 derived from historical
+  // calibration data for this sport × market. Clamped to ±0.08.
+  const rawCalAdj  = c.confidenceCalibrationAdjustment ?? 0;
+  const calAdj     = Math.min(0.08, Math.max(-0.08, rawCalAdj));
+  const confAdjusted = Math.min(1, Math.max(0, conf01 + calAdj));
+
   const sportKey  = (c.sport ?? "").toUpperCase();
   const rawSportW = (weights.sportWeights ?? {})[sportKey] ?? 1.0;
   const sportAdj  = Math.min(0.08, Math.max(-0.08, rawSportW - 1.0));
@@ -123,13 +129,13 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   const marketAdj  = Math.min(0.08, Math.max(-0.08, rawMarketW - 1.0));
 
   return (
-    edge01      * 0.32 +
-    hitProb01   * 0.22 +
-    conf01      * 0.18 +
-    timing01    * 0.12 +
-    stability01 * 0.08 +
-    marketAdj   * 0.05 +
-    sportAdj    * 0.03
+    edge01         * 0.32 +
+    hitProb01      * 0.22 +
+    confAdjusted   * 0.18 +
+    timing01       * 0.12 +
+    stability01    * 0.08 +
+    marketAdj      * 0.05 +
+    sportAdj       * 0.03
   );
 }
 

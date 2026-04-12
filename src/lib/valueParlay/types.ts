@@ -71,6 +71,13 @@ export interface ValueBetCandidate {
    * Used in parlay_build_legs and analytics_model_contribution tracking.
    */
   modelVariant?: "rules" | "ml_blended" | "ml_full";
+  /**
+   * Additive confidence adjustment derived from analytics_confidence_calibration_by_market.
+   * Applied in computeLegScore as: (conf01 + confidenceCalibrationAdjustment) * 0.18
+   * Clamped to ±0.08. Positive = confidence labels reliably predictive for this market.
+   * Negative = confidence labels unreliable or inverted. Undefined = no data (neutral).
+   */
+  confidenceCalibrationAdjustment?: number;
   sportsbookKey?: string;
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;

@@ -19,6 +19,12 @@ import type { FeedbackRecord, MLSport, MLContext } from "@/lib/ml/types";
 import { updateWeights, getAdaptiveWeightsSync } from "@/lib/ml/weights";
 import { estimatePlattParams, savePlattParams, defaultPlattParams } from "@/lib/ml/calibration";
 import { clampAlpha, getAlphaRange } from "@/lib/ml/alphaConfig";
+import {
+  setCalibrationEntries,
+  verdictTrendToAdjustment,
+  type CalibrationVerdict,
+  type CalibrationTrend,
+} from "@/lib/ml/confidenceCalibrationMap";
 import { supabase } from "@/lib/supabase";
 
 // ── Alpha adjustment log (localStorage) ──────────────────────────────────────
@@ -176,6 +182,9 @@ async function recalibrateWeights(
   }
 
   await updateWeights(sport, "prop_projection", context, updatedWeights, sampleSize);
+
+  // Fire-and-forget confidence calibration map update after weight recalibration
+  maybeAdjustConfidenceFromCalibration().catch(() => {});
 }
 
 // ── Platt parameter recalibration ────────────────────────────────────────────
@@ -310,6 +319,139 @@ export async function maybeAdjustAlphaFromContribution(sport: string): Promise<v
       current.weights ?? {},
       current.sample_size ?? 0,
     );
+  } catch {
+    // Non-critical — silently skip
+  }
+}
+
+// ── Confidence calibration map update ────────────────────────────────────────
+
+/**
+ * Interface for calibration RPC rows needed for verdict/trend computation.
+ * Mirrors ConfidenceCalibrationByMarketRow from useAnalyticsDashboard.
+ */
+interface CalibrationMarketRow {
+  sport:             string;
+  stat_type:         string;
+  confidence:        string;
+  resolved_count:    number;
+  win_count:         number;
+  hit_rate_pct:      number | null;
+}
+
+function computeVerdict(
+  highRate: number | null,
+  medRate:  number | null,
+  lowRate:  number | null,
+  minResolved: number,
+): CalibrationVerdict {
+  if (highRate === null && medRate === null && lowRate === null) return "insufficient";
+  if (highRate !== null && medRate !== null && lowRate !== null) {
+    if (highRate > medRate && medRate > lowRate) return "calibrated";
+    if (highRate > medRate) return "partial";
+    return "inverted";
+  }
+  if (highRate !== null && medRate !== null) {
+    return highRate > medRate ? "partial" : "inverted";
+  }
+  return "insufficient";
+}
+
+function computeTrend(
+  rate7:  number | null,
+  rate30: number | null,
+  gap7:   number | null, // HIGH - LOW gap at 7d
+  gap30:  number | null, // HIGH - LOW gap at 30d
+): CalibrationTrend {
+  const RATE_THRESHOLD = 2;
+  const GAP_THRESHOLD  = 1;
+
+  const rateDiff = rate7 !== null && rate30 !== null ? rate7 - rate30 : null;
+  const gapDiff  = gap7  !== null && gap30  !== null ? gap7  - gap30  : null;
+
+  if (rateDiff !== null && rateDiff > RATE_THRESHOLD)  return "up";
+  if (rateDiff !== null && rateDiff < -RATE_THRESHOLD) return "down";
+  // Rate is flat — check H-L gap as tie-breaker
+  if (gapDiff !== null && gapDiff > GAP_THRESHOLD)  return "up";
+  if (gapDiff !== null && gapDiff < -GAP_THRESHOLD) return "down";
+  return "flat";
+}
+
+/**
+ * Reads 7d + 30d confidence calibration data from Supabase, computes
+ * per-market verdict + trend, then writes adjusted values to localStorage.
+ *
+ * Called: after each batch recalibration cycle (every 25 resolved outcomes).
+ * Fire-and-forget — never throws.
+ */
+export async function maybeAdjustConfidenceFromCalibration(): Promise<void> {
+  if (!supabase) return;
+  try {
+    const MIN_RESOLVED = 5;
+
+    const [res7, res30] = await Promise.all([
+      supabase.rpc("analytics_confidence_calibration_by_market", {
+        lookback_days: 7,
+        min_resolved: MIN_RESOLVED,
+      }),
+      supabase.rpc("analytics_confidence_calibration_by_market", {
+        lookback_days: 30,
+        min_resolved: MIN_RESOLVED,
+      }),
+    ]);
+
+    if (res30.error || !res30.data) return;
+
+    const rows30 = res30.data as CalibrationMarketRow[];
+    const rows7  = (res7.data  ?? []) as CalibrationMarketRow[];
+
+    // Group rows by "SPORT:stat_type"
+    type MarketKey = string;
+    type ConfMap   = Record<string, number | null>; // confidence → hit_rate_pct
+
+    function groupByMarket(rows: CalibrationMarketRow[]): Map<MarketKey, ConfMap> {
+      const m = new Map<MarketKey, ConfMap>();
+      for (const r of rows) {
+        const k = `${r.sport.toUpperCase()}:${r.stat_type.toLowerCase()}`;
+        if (!m.has(k)) m.set(k, {});
+        m.get(k)![r.confidence] = r.hit_rate_pct;
+      }
+      return m;
+    }
+
+    const map30 = groupByMarket(rows30);
+    const map7  = groupByMarket(rows7);
+
+    const now = new Date().toISOString();
+    const updates: Parameters<typeof setCalibrationEntries>[0] = [];
+
+    for (const [key, conf30] of map30) {
+      const [sport, statType] = key.split(":");
+      const conf7 = map7.get(key) ?? {};
+
+      const highRate30 = conf30["HIGH"] ?? null;
+      const medRate30  = conf30["MED"]  ?? null;
+      const lowRate30  = conf30["LOW"]  ?? null;
+
+      const highRate7  = conf7["HIGH"]  ?? null;
+      const lowRate7   = conf7["LOW"]   ?? null;
+
+      // Verdict from 30d (more stable baseline)
+      const verdict = computeVerdict(highRate30, medRate30, lowRate30, MIN_RESOLVED);
+
+      // Trend: HIGH hit rate 7d vs 30d + H-L gap trend
+      const gap7  = highRate7  !== null && lowRate7   !== null ? highRate7  - lowRate7  : null;
+      const gap30 = highRate30 !== null && lowRate30  !== null ? highRate30 - lowRate30 : null;
+      const trend = computeTrend(highRate7, highRate30, gap7, gap30);
+
+      const adjustment = verdictTrendToAdjustment(verdict, trend as CalibrationTrend);
+
+      updates.push({ sport, statType, adjustment, verdict, trend, updatedAt: now });
+    }
+
+    if (updates.length > 0) {
+      setCalibrationEntries(updates);
+    }
   } catch {
     // Non-critical — silently skip
   }
