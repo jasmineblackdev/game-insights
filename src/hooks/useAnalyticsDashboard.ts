@@ -204,6 +204,20 @@ export interface StabilityEdgeQualityRow {
   roi_pct:          number | null;
 }
 
+export interface CalibrationImpactRow {
+  /** "boosted" | "neutral" | "penalized" | "no_data" */
+  adj_bucket:     string;
+  leg_count:      number;
+  parlay_count:   number;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+  /** Average conf_cal_adj within the bucket (null for no_data bucket). */
+  avg_adj:        number | null;
+  avg_edge:       number;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -384,6 +398,15 @@ export function useStabilityEdgeQuality(days = 30, minResolved = 5) {
   return useQuery({
     queryKey: ["analytics-stability-edge-quality", days, minResolved],
     queryFn:  () => rpc<StabilityEdgeQualityRow>("analytics_stability_edge_quality", { lookback_days: days, min_resolved: minResolved }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useCalibrationImpact(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-calibration-impact", days],
+    queryFn:  () => rpc<CalibrationImpactRow>("analytics_calibration_impact", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });

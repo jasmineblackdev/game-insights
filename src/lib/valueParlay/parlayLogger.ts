@@ -102,21 +102,24 @@ export async function logParlayBuild(
 
     // Insert parlay_build_legs rows
     const legRows = legs.map((l) => ({
-      parlay_id:           parlayId,
-      prediction_id:       l.id,
-      sport:               String(l.sport).toLowerCase(),
-      market_type:         l.marketType,
-      selection:           l.selectionLabel,
-      odds:                l.americanOdds,
-      edge:                Math.round(l.edge * 10000) / 10000,
-      ml_hit_probability:  Math.round(l.modelProbability * 10000) / 10000,
-      confidence:          l.confidence,
-      timing_urgency:      l.timingUrgency ?? "monitor",
-      timing_score:        Math.round((l.timingScore ?? 0.55) * 10000) / 10000,
-      stability_score:     Math.round((l.stabilityScore ?? 0.5) * 10000) / 10000,
-      volatility_score:    l.volatilityScore,
+      parlay_id:            parlayId,
+      prediction_id:        l.id,
+      sport:                String(l.sport).toLowerCase(),
+      market_type:          l.marketType,
+      selection:            l.selectionLabel,
+      odds:                 l.americanOdds,
+      edge:                 Math.round(l.edge * 10000) / 10000,
+      ml_hit_probability:   Math.round(l.modelProbability * 10000) / 10000,
+      confidence:           l.confidence,
+      timing_urgency:       l.timingUrgency ?? "monitor",
+      timing_score:         Math.round((l.timingScore ?? 0.55) * 10000) / 10000,
+      stability_score:      Math.round((l.stabilityScore ?? 0.5) * 10000) / 10000,
+      volatility_score:     l.volatilityScore,
       correlation_group_id: l.correlationGroupId,
-      model_variant:       l.modelVariant ?? "rules",
+      model_variant:        l.modelVariant ?? "rules",
+      conf_cal_adj:         l.confidenceCalibrationAdjustment != null
+                              ? Math.round(l.confidenceCalibrationAdjustment * 10000) / 10000
+                              : null,
     }));
 
     await supabase.from("parlay_build_legs").insert(legRows);

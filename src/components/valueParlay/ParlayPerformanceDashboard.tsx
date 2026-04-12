@@ -13,11 +13,13 @@ import {
   useEdgeBucketPerformance,
   useTimingEdgeQuality,
   useStabilityEdgeQuality,
+  useCalibrationImpact,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
   type TimingEdgeQualityRow,
   type StabilityEdgeQualityRow,
+  type CalibrationImpactRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -705,6 +707,173 @@ function AlphaStatusPanel() {
   );
 }
 
+// ── Panel 7: Calibration impact ───────────────────────────────────────────────
+
+const CAL_BUCKET_LABEL: Record<string, string> = {
+  boosted:   "Boosted  (+0.02)",
+  neutral:   "Neutral  (±0.02)",
+  penalized: "Penalized (−0.02)",
+  no_data:   "No data  (null)",
+};
+
+const CAL_BUCKET_COLOR: Record<string, string> = {
+  boosted:   "text-emerald-500",
+  neutral:   "text-muted-foreground",
+  penalized: "text-rose-500",
+  no_data:   "text-muted-foreground/40",
+};
+
+function CalibrationImpactPanel({ days }: { days: number }) {
+  const { data = [], isLoading } = useCalibrationImpact(days);
+
+  const totalLegs = data.reduce((s, r) => s + r.leg_count, 0);
+  const totalResolved = data.reduce((s, r) => s + r.resolved_count, 0);
+
+  // Signal validity: boosted hit > neutral hit AND penalized hit < neutral hit?
+  const boosted   = data.find((r) => r.adj_bucket === "boosted");
+  const neutral   = data.find((r) => r.adj_bucket === "neutral");
+  const penalized = data.find((r) => r.adj_bucket === "penalized");
+
+  const signalValid =
+    boosted?.hit_rate_pct != null &&
+    neutral?.hit_rate_pct != null &&
+    penalized?.hit_rate_pct != null &&
+    boosted.hit_rate_pct > neutral.hit_rate_pct &&
+    penalized.hit_rate_pct < neutral.hit_rate_pct;
+
+  const signalPartial =
+    !signalValid &&
+    boosted?.hit_rate_pct != null &&
+    neutral?.hit_rate_pct != null &&
+    boosted.hit_rate_pct > neutral.hit_rate_pct;
+
+  function validationNote() {
+    if (totalResolved < 10) return null;
+    if (signalValid)   return <span className="text-emerald-500 font-semibold">✓ signal validated</span>;
+    if (signalPartial) return <span className="text-yellow-500 font-semibold">→ partial signal</span>;
+    return <span className="text-rose-500 font-semibold">⚠ signal not confirmed</span>;
+  }
+
+  return (
+    <SectionCard
+      title="Calibration adjustment impact"
+      subtitle="Are boosted legs winning more than neutral or penalized legs?"
+      sampleSize={totalResolved > 0 ? totalResolved : undefined}
+    >
+      {isLoading ? (
+        <div className="space-y-2"><LoadingRow /><LoadingRow /><LoadingRow /></div>
+      ) : !data.length ? (
+        <EmptyState label="No parlay build legs logged yet" />
+      ) : (
+        <div className="space-y-3">
+          {/* Validation verdict */}
+          {totalResolved >= 10 && (
+            <div className="text-[10px] flex items-center gap-1.5">
+              {validationNote()}
+              <span className="text-muted-foreground/50">
+                ({totalResolved} resolved legs across {totalLegs} built)
+              </span>
+            </div>
+          )}
+
+          {/* Bucket table */}
+          <table className="w-full text-[10px] tabular-nums">
+            <thead>
+              <tr className="text-muted-foreground/60 border-b border-border/40">
+                <th className="text-left py-1 pr-3 font-medium">Bucket</th>
+                <th className="text-right py-1 pr-2 font-medium">Legs</th>
+                <th className="text-right py-1 pr-2 font-medium">Parlays</th>
+                <th className="text-right py-1 pr-2 font-medium">Hit%</th>
+                <th className="text-right py-1 font-medium">ROI%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((r) => {
+                const legPct = totalLegs > 0 ? (r.leg_count / totalLegs * 100).toFixed(0) : "—";
+                return (
+                  <tr key={r.adj_bucket} className="border-b border-border/30 last:border-0">
+                    <td className={cn("py-1.5 pr-3 font-medium", CAL_BUCKET_COLOR[r.adj_bucket])}>
+                      {CAL_BUCKET_LABEL[r.adj_bucket] ?? r.adj_bucket}
+                    </td>
+                    <td className="text-right py-1.5 pr-2">
+                      <span className="font-semibold">{r.leg_count}</span>
+                      <span className="ml-0.5 text-[8px] text-muted-foreground/50">
+                        {legPct}%
+                      </span>
+                    </td>
+                    <td className="text-right py-1.5 pr-2 text-muted-foreground">
+                      {r.parlay_count}
+                    </td>
+                    <td className="text-right py-1.5 pr-2">
+                      {r.resolved_count < 5 ? (
+                        <span className="text-muted-foreground/40">
+                          —<span className="text-[8px] ml-0.5">/{r.resolved_count}</span>
+                        </span>
+                      ) : (
+                        <span className={hitColor(r.hit_rate_pct)}>
+                          {pct(r.hit_rate_pct)}
+                          <span className="ml-0.5 text-[8px] text-muted-foreground/50">
+                            /{r.resolved_count}
+                          </span>
+                        </span>
+                      )}
+                    </td>
+                    <td className={cn("text-right py-1.5 font-semibold", roiColor(r.roi_pct))}>
+                      {r.resolved_count < 5 ? "—" : pct(r.roi_pct)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {/* Distribution bar */}
+          {totalLegs > 0 && (
+            <div className="space-y-1">
+              <p className="text-[9px] text-muted-foreground/50 font-medium tracking-wider">
+                LEG DISTRIBUTION
+              </p>
+              <div className="flex h-2 rounded-full overflow-hidden gap-px">
+                {(["boosted", "neutral", "penalized", "no_data"] as const).map((bucket) => {
+                  const row = data.find((r) => r.adj_bucket === bucket);
+                  const w = row ? (row.leg_count / totalLegs * 100) : 0;
+                  if (w < 1) return null;
+                  const bg =
+                    bucket === "boosted"   ? "bg-emerald-500/60" :
+                    bucket === "penalized" ? "bg-rose-500/60" :
+                    bucket === "no_data"   ? "bg-muted/40" :
+                                             "bg-muted-foreground/30";
+                  return (
+                    <div
+                      key={bucket}
+                      className={cn("transition-all", bg)}
+                      style={{ width: `${w}%` }}
+                      title={`${CAL_BUCKET_LABEL[bucket]}: ${row?.leg_count} legs (${w.toFixed(0)}%)`}
+                    />
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                {data.map((r) => (
+                  <span key={r.adj_bucket} className={cn("text-[8px]", CAL_BUCKET_COLOR[r.adj_bucket])}>
+                    {r.adj_bucket}: {(r.leg_count / totalLegs * 100).toFixed(0)}%
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {totalResolved < 10 && (
+            <p className="text-[9px] text-muted-foreground/50">
+              Needs ≥10 resolved legs to validate signal. Currently {totalResolved} resolved.
+            </p>
+          )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ── Panel 8: How it works ─────────────────────────────────────────────────────
 
 function HowItWorksPanel() {
@@ -736,9 +905,17 @@ function HowItWorksPanel() {
           tighter bounds (0.03–0.18/0.20) to prevent noise overfit from small sample windows.
           The feedback loop adjusts alpha ±0.02 when contribution analytics cross the 2pp threshold.
         </div>
+        <div>
+          <span className="font-semibold text-foreground">Calibration impact</span> — validates whether
+          the confidence calibration adjustment is actually helping. Legs are bucketed into{" "}
+          <code className="text-emerald-500">boosted</code> (&gt;+0.02),{" "}
+          <code className="text-muted-foreground">neutral</code> (±0.02), and{" "}
+          <code className="text-rose-500">penalized</code> (&lt;−0.02). Signal is validated when boosted
+          hit rate &gt; neutral &gt; penalized. Needs ≥10 resolved per bucket to be meaningful.
+        </div>
         <div className="pt-1 text-[10px] text-muted-foreground/60">
           All data is read-only. Parlay builds are logged automatically on auto-build.
-          parlay_results populate once leg outcomes resolve in prediction_history.
+          Calibration adjustments refresh every 25 resolved outcomes per sport.
         </div>
       </div>
     </SectionCard>
@@ -795,6 +972,9 @@ export function ParlayPerformanceDashboard() {
         <TimingEdgePanel days={days} />
         <StabilityEdgePanel days={days} />
       </div>
+
+      {/* Calibration impact — full width, separate from cross-tab grid */}
+      <CalibrationImpactPanel days={days} />
 
       {/* Full-width how-it-works */}
       <HowItWorksPanel />
