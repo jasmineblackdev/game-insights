@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Copy, RefreshCw, Shuffle, Trash2, Wallet, Wrench, Zap } from "lucide-react";
 import type { League } from "@/data/mockGames";
@@ -12,6 +12,7 @@ import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
+import { useRoiBySport, useRoiByMarketType } from "@/hooks/useAnalyticsDashboard";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (3–5 legs)",
@@ -39,6 +40,7 @@ export function ParlayBuilderSection({
   const {
     parlayMode,
     setParlayMode,
+    setAnalyticsWeights,
     builderLegs,
     removeValueLeg,
     clearValueBuilder,
@@ -51,6 +53,31 @@ export function ParlayBuilderSection({
   } = useValueParlay();
 
   const [tripleOpen, setTripleOpen] = useState(false);
+
+  // ── Analytics weights from Supabase RPCs ──────────────────────────────────
+  // 30-day window gives a stable baseline; won't overpower live edge/confidence.
+  const { data: roiSportData } = useRoiBySport(30);
+  const { data: roiMarketData } = useRoiByMarketType(30);
+
+  useEffect(() => {
+    if (!roiSportData?.length && !roiMarketData?.length) return;
+    const MIN_N = 5; // require at least 5 resolved to trust the weight
+    const sportWeights: Record<string, number> = {};
+    for (const row of roiSportData ?? []) {
+      if (row.resolved_count >= MIN_N && row.roi_pct != null) {
+        // roi_pct=12.5 maps to max boost (+0.08); roi_pct=-12.5 → max penalty (-0.08)
+        sportWeights[row.sport.toUpperCase()] = 1.0 + Math.min(0.08, Math.max(-0.08, row.roi_pct / 125));
+      }
+    }
+    const marketWeights: Record<string, number> = {};
+    for (const row of roiMarketData ?? []) {
+      if (row.resolved_count >= MIN_N && row.roi_pct != null) {
+        const key = `${row.sport.toUpperCase()}:${row.stat_type.toLowerCase()}`;
+        marketWeights[key] = 1.0 + Math.min(0.08, Math.max(-0.08, row.roi_pct / 125));
+      }
+    }
+    setAnalyticsWeights({ sportWeights, marketWeights });
+  }, [roiSportData, roiMarketData, setAnalyticsWeights]);
 
   // Pull enriched props from the shared React Query cache (populated by PlayerEdgeSection).
   // staleTime matches PlayerEdgeSection so no extra network call is made.

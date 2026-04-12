@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
-import { optimizeForMode, optimizeSmartParlays } from "@/lib/valueParlay/parlayOptimizer";
+import { optimizeForMode, optimizeSmartParlays, type AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
 import {
   parlayAmericanOdds,
   parlayHitProbability,
@@ -17,6 +17,8 @@ import {
 interface ValueParlayContextValue {
   parlayMode: ParlayBuildMode;
   setParlayMode: (m: ParlayBuildMode) => void;
+  analyticsWeights: AnalyticsWeights;
+  setAnalyticsWeights: (w: AnalyticsWeights) => void;
   builderLegs: ValueBetCandidate[];
   setBuilderLegs: (legs: ValueBetCandidate[]) => void;
   addValueLeg: (c: ValueBetCandidate) => { ok: boolean; message?: string };
@@ -83,6 +85,7 @@ function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
 export function ValueParlayProvider({ children }: { children: ReactNode }) {
   const [parlayMode, setParlayMode] = useState<ParlayBuildMode>("balanced");
   const [builderLegs, setBuilderLegs] = useState<ValueBetCandidate[]>([]);
+  const [analyticsWeights, setAnalyticsWeights] = useState<AnalyticsWeights>({});
 
   const addValueLeg = useCallback((c: ValueBetCandidate): { ok: boolean; message?: string } => {
     if (builderLegs.some((x) => x.id === c.id)) {
@@ -111,39 +114,39 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
 
   const autoBuildFromCandidates = useCallback(
     (candidates: ValueBetCandidate[]) => {
-      const r = optimizeForMode(candidates, parlayMode);
+      const r = optimizeForMode(candidates, parlayMode, analyticsWeights);
       setBuilderLegs(r.legs);
     },
-    [parlayMode]
+    [parlayMode, analyticsWeights]
   );
 
   const rebalance = useCallback(
     (candidates: ValueBetCandidate[]) => {
-      const t = optimizeSmartParlays(candidates, parlayMode);
+      const t = optimizeSmartParlays(candidates, parlayMode, analyticsWeights);
       setBuilderLegs(t.bestValue.legs);
     },
-    [parlayMode]
+    [parlayMode, analyticsWeights]
   );
 
   const saferSwap = useCallback(
     (candidates: ValueBetCandidate[]) => {
-      const t = optimizeSmartParlays(candidates, parlayMode);
+      const t = optimizeSmartParlays(candidates, parlayMode, analyticsWeights);
       setBuilderLegs(t.safer.legs);
     },
-    [parlayMode]
+    [parlayMode, analyticsWeights]
   );
 
   const higherPayoutSwap = useCallback(
     (candidates: ValueBetCandidate[]) => {
-      const t = optimizeSmartParlays(candidates, parlayMode);
+      const t = optimizeSmartParlays(candidates, parlayMode, analyticsWeights);
       setBuilderLegs(t.higherPayout.legs);
     },
-    [parlayMode]
+    [parlayMode, analyticsWeights]
   );
 
   const triplePreview = useCallback((candidates: ValueBetCandidate[]) => {
-    return optimizeSmartParlays(candidates, parlayMode);
-  }, [parlayMode]);
+    return optimizeSmartParlays(candidates, parlayMode, analyticsWeights);
+  }, [parlayMode, analyticsWeights]);
 
   const builderMetrics = useMemo(() => scoreBuilder(builderLegs), [builderLegs]);
 
@@ -156,6 +159,8 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
     () => ({
       parlayMode,
       setParlayMode,
+      analyticsWeights,
+      setAnalyticsWeights,
       builderLegs,
       setBuilderLegs,
       addValueLeg,
@@ -172,6 +177,7 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
     }),
     [
       parlayMode,
+      analyticsWeights,
       builderLegs,
       addValueLeg,
       removeValueLeg,

@@ -57,6 +57,12 @@ export interface ValueBetCandidate {
    * Present when isRecommended=false; undefined when recommended.
    */
   exclusionReason?: string;
+  /**
+   * ML stability score (0–1). Higher = more consistent historical performance.
+   * Source: ml_debug.stability_score for enriched props; undefined for game-level candidates.
+   * Used as a leg quality signal in the ML-aware parlay scorer.
+   */
+  stabilityScore?: number;
   sportsbookKey?: string;
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;
