@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import {
   bestPropValues,
   buildAllValueCandidates,
+  buildEnrichedPropCandidates,
   lineMovementAlerts,
   safestConfirmed,
   topRecommended,
@@ -16,6 +17,8 @@ import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { formatMatchupWithAbbrevs } from "@/lib/valueParlay/teamAbbrevNormalize";
 import type { ParlayBuildMode, ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useValueParlay } from "@/context/ValueParlayContext";
+import { useQuery } from "@tanstack/react-query";
+import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 
 type PickKind = "all" | "team" | "props";
 type LeagueFilter = "all" | League;
@@ -165,7 +168,22 @@ export function BestValuePicksSection({
   const [riskPreset, setRiskPreset] = useState<RiskPreset>("all");
   const [expandId, setExpandId] = useState<string | null>(null);
 
-  const candidates = useMemo(() => buildAllValueCandidates(games, oddsMap), [games, oddsMap]);
+  const { data: propData } = useQuery({
+    queryKey: ["player-edge-v2"],
+    queryFn: () => fetchPlayerEdgePredictions("all", "all"),
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const candidates = useMemo(() => {
+    const gameCandidates = buildAllValueCandidates(games, oddsMap);
+    const enrichedPropCandidates = buildEnrichedPropCandidates(propData?.items ?? []);
+    const seenCorrGroups = new Set(gameCandidates.map((c) => c.correlationGroupId));
+    const uniqueEnriched = enrichedPropCandidates.filter(
+      (c) => !seenCorrGroups.has(c.correlationGroupId)
+    );
+    return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
+  }, [games, oddsMap, propData]);
 
   const filtered = useMemo(() => {
     let list = candidates;

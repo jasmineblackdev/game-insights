@@ -1,4 +1,4 @@
-import type { GamePrediction } from "@/data/mockGames";
+import type { GamePrediction, League } from "@/data/mockGames";
 import { evaluateMoneylineForParlay } from "@/lib/bettingIntelligence";
 import {
   computePickFlags,
@@ -18,6 +18,7 @@ import {
 } from "@/lib/valueParlay/riskScore";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
+import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -420,4 +421,157 @@ export function bestPropValues(candidates: ValueBetCandidate[], n = 5): ValueBet
   return candidates
     .filter((c) => c.pickType === "player_prop" && c.isRecommended)
     .slice(0, n);
+}
+
+// ── ML-enriched prop candidates ───────────────────────────────────────────────
+
+const SPORT_TO_LEAGUE: Record<string, League> = {
+  NBA: "nba", NFL: "nfl", MLB: "mlb", Boxing: "boxing", MMA: "mma",
+};
+
+/**
+ * Convert ML-enriched PlayerEdgePrediction[] → ValueBetCandidate[].
+ *
+ * These come from the ESPN/combat pipeline (not game-level predictions) and
+ * carry ML signals: timing_urgency, volatility_flag, ml_hit_probability.
+ *
+ * ML signals are encoded into existing ValueBetCandidate fields so the
+ * parlay optimizer and all existing filters benefit without any structural change:
+ *   - timing_urgency "wait"  → volatilityScore +25, isRecommended=false
+ *   - timing_urgency "now"   → volatilityScore −8 (helps safe parlay selection)
+ *   - volatility_flag true   → volatilityScore +15
+ *
+ * For safe parlay mode, the existing filter `vol < 66` naturally excludes
+ * "wait" + volatile props whose combined volatilityScore exceeds the threshold.
+ */
+export function buildEnrichedPropCandidates(
+  enrichedProps: PlayerEdgePrediction[],
+): ValueBetCandidate[] {
+  const out: ValueBetCandidate[] = [];
+
+  for (const pred of enrichedProps) {
+    const sport = SPORT_TO_LEAGUE[pred.sport];
+    if (!sport) continue;
+
+    // Map confidence tier
+    const conf: import("@/data/mockGames").ConfidenceLevel =
+      pred.confidence === "HIGH" ? "high"
+      : pred.confidence === "MED"  ? "medium"
+      : "low";
+
+    // Market probability proxy: best-guess of what the book implies
+    const marketProb =
+      pred.confidence === "HIGH" ? 0.595
+      : pred.confidence === "MED" ? 0.538
+      : 0.512;
+
+    // Model probability: prefer ML hit probability, else derive from edge
+    const maxEdge = pred.sport === "NFL" ? 30 : pred.sport === "MLB" ? 2 : 8;
+    const edgeDerived = 0.50 + Math.min(Math.abs(pred.edge) / maxEdge * 0.40, 0.40);
+    const modelP = Math.max(0.05, Math.min(0.95,
+      pred.ml_hit_probability ?? edgeDerived
+    ));
+
+    const edge = modelP - marketProb;
+
+    // Synthesize American odds from market probability (adds standard vig)
+    const vigged = Math.min(0.93, Math.max(0.07, marketProb * 1.047));
+    const americanOdds = americanFromImpliedProb(vigged);
+
+    // ── Volatility encoding — ML signals written into volatilityScore ──────
+    const consistencyBase =
+      pred.consistency_label === "volatile" ? 62
+      : pred.consistency_label === "medium"  ? 40
+      : 24;
+
+    const timingAdj =
+      pred.timing_urgency === "wait"    ? +25
+      : pred.timing_urgency === "now"   ? -8
+      : 0; // "monitor" or undefined
+
+    const volatilityAdj = pred.volatility_flag ? +15 : 0;
+
+    const volatilityScore = Math.max(0, Math.min(100,
+      consistencyBase + timingAdj + volatilityAdj
+    ));
+
+    // ── Uncertainty from confidence + injury ──────────────────────────────
+    const uncertaintyScore = Math.min(100,
+      confidenceToUncertaintyBase(conf) + (pred.has_injury_flag ? 15 : 0)
+    );
+
+    const vsCore = computeValueScore({
+      edge,
+      confidence: conf,
+      impliedProbability: marketProb,
+      modelProbability: modelP,
+      volatilityScore,
+      uncertaintyScore,
+      lineMovementDeltaPp: pred.line_delta ?? null,
+    });
+
+    const risk = compositeRiskScore({
+      volatilityScore,
+      uncertaintyScore,
+      correlationScore: 20,
+      injuryRiskScore:          pred.has_injury_flag ? 35 : 10,
+      lineupConfirmationRisk:   18,
+      oddsExtremityRisk:        oddsExtremityRisk({ americanOdds, modelProbability: modelP, edge }),
+      marketDisagreementRisk:   18,
+    });
+
+    // "wait" props are never recommended regardless of edge
+    const isRecommended =
+      edge >= 0.04 &&
+      edge > 0 &&
+      conf !== "low" &&
+      pred.timing_urgency !== "wait" &&
+      volatilityScore < 66;
+
+    // Build a human-readable timing note for riskNote
+    const timingNote = pred.best_time_to_bet
+      ? `${pred.best_time_to_bet}`
+      : pred.timing_urgency === "now" ? "Bet now" : "";
+    const volatileNote = pred.volatility_flag ? "ML: volatile" : "";
+    const riskNotes = [
+      pred.risk_factor,
+      timingNote,
+      volatileNote,
+      riskBandLabel(riskBand(risk)),
+    ].filter(Boolean).slice(0, 3).join(" · ");
+
+    const label = `${pred.player_name} ${pred.prediction_direction === "MORE" ? "Over" : "Under"} ${pred.line_value} ${pred.stat_type.replace(/_/g, " ")}`;
+
+    out.push({
+      id:                  `ml-prop-${pred.id}`,
+      sport,
+      gameId:              pred.game_id,
+      pickType:            "player_prop",
+      marketType:          "player_prop",
+      selectionLabel:      label,
+      playerId:            pred.player_id,
+      playerName:          pred.player_name,
+      statType:            pred.stat_type,
+      lineValue:           pred.line_value,
+      americanOdds,
+      impliedProbability:  marketProb,
+      modelProbability:    modelP,
+      edge,
+      edgeScore:           Math.round(edge * 1000) / 10,
+      confidence:          conf,
+      volatilityScore,
+      uncertaintyScore,
+      correlationGroupId:  `ml-prop-${pred.game_id}-${pred.stat_type}`,
+      valueScore:          vsCore,
+      valueGrade:          valueGrade(vsCore),
+      riskScore:           risk,
+      riskBand:            riskBand(risk),
+      riskNote:            riskNotes,
+      isRecommended,
+      matchupLabel:        `${pred.team} vs ${pred.opponent}`,
+      lineMovementDeltaPp: pred.line_delta ?? null,
+    });
+  }
+
+  return out;
 }

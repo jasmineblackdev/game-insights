@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import type { GamePrediction, League } from "@/data/mockGames";
 import { cn } from "@/lib/utils";
-import { buildAllValueCandidates } from "@/lib/valueParlay/buildCandidates";
+import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
+import { useQuery } from "@tanstack/react-query";
+import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode, ValueBetCandidate } from "@/lib/valueParlay/types";
 import {
@@ -599,11 +601,23 @@ export function ParlayEdgeSection({ allGames, oddsMap, currentLeague = "nba" }: 
   const [showWarnings,     setShowWarnings]     = useState(false);
   const [showInsightsAll,  setShowInsightsAll]  = useState(false);
 
-  const candidates = useMemo(
-    () => buildAllValueCandidates(allGames, oddsMap),
+  const { data: propData } = useQuery({
+    queryKey: ["player-edge-v2"],
+    queryFn: () => fetchPlayerEdgePredictions("all", "all"),
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const candidates = useMemo(() => {
+    const gameCandidates = buildAllValueCandidates(allGames, oddsMap);
+    const enrichedPropCandidates = buildEnrichedPropCandidates(propData?.items ?? []);
+    const seenCorrGroups = new Set(gameCandidates.map((c) => c.correlationGroupId));
+    const uniqueEnriched = enrichedPropCandidates.filter(
+      (c) => !seenCorrGroups.has(c.correlationGroupId)
+    );
+    return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allGames.map((g) => g.id).join(","), oddsMap.size]
-  );
+  }, [allGames.map((g) => g.id).join(","), oddsMap.size, propData]);
 
   const output: ParlayEdgeOutput = useMemo(
     () => generateParlayEdge(candidates, filterMode, filterMode !== "global" ? biasSport : undefined),

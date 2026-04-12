@@ -5,11 +5,13 @@ import type { League } from "@/data/mockGames";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { buildAllValueCandidates } from "@/lib/valueParlay/buildCandidates";
+import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
+import { useQuery } from "@tanstack/react-query";
+import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (3–5 legs)",
@@ -50,7 +52,27 @@ export function ParlayBuilderSection({
 
   const [tripleOpen, setTripleOpen] = useState(false);
 
-  const candidates = useMemo(() => buildAllValueCandidates(games, oddsMap), [games, oddsMap]);
+  // Pull enriched props from the shared React Query cache (populated by PlayerEdgeSection).
+  // staleTime matches PlayerEdgeSection so no extra network call is made.
+  const { data: propData } = useQuery({
+    queryKey: ["player-edge-v2"],
+    queryFn: () => fetchPlayerEdgePredictions("all", "all"),
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+
+  const candidates = useMemo(() => {
+    const gameCandidates = buildAllValueCandidates(games, oddsMap);
+    const enrichedPropCandidates = buildEnrichedPropCandidates(propData?.items ?? []);
+    // Merge: game-level candidates first (authoritative), then ML prop candidates.
+    // De-duplicate by correlation group so a prop doesn't appear twice when both
+    // the game pipeline and ESPN pipeline produce the same player/stat.
+    const seenCorrGroups = new Set(gameCandidates.map((c) => c.correlationGroupId));
+    const uniqueEnriched = enrichedPropCandidates.filter(
+      (c) => !seenCorrGroups.has(c.correlationGroupId)
+    );
+    return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
+  }, [games, oddsMap, propData]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
 
   const shareText = useMemo(
