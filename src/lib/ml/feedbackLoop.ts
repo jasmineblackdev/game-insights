@@ -217,3 +217,51 @@ export async function recordOutcomeBatch(records: FeedbackRecord[]): Promise<voi
     await recordOutcome(record);
   }
 }
+
+// ── picks_log → prediction_history bridge ────────────────────────────────────
+
+const _SPORT_TO_ML: Record<string, MLSport> = {
+  NBA: "nba", NFL: "nfl", MLB: "mlb", MMA: "mma", Boxing: "boxing",
+  nba: "nba", nfl: "nfl", mlb: "mlb", mma: "mma", boxing: "boxing",
+};
+
+/**
+ * Sync a resolved picks_log outcome into prediction_history.
+ *
+ * This is the critical bridge between the user-facing picks system and the
+ * ML analytics/feedback pipeline. Call this whenever a pick resolves —
+ * either manually (markPickOutcome) or via ESPN auto-resolve (resolveOutcomes).
+ *
+ * Behavior:
+ *  - No-ops if prediction_id doesn't exist in prediction_history (row may not have
+ *    been logged yet — that's OK, not all user picks come from the ML pipeline).
+ *  - Only updates if outcome is currently null (idempotent re-calls are safe).
+ *  - After update, triggers maybeRecalibrate for the sport so the feedback loop
+ *    runs automatically once enough outcomes accumulate.
+ */
+export async function syncPickResolution(
+  propId: string,
+  outcome: "win" | "loss" | "push",
+  actualValue: number | null,
+  sport: string,
+): Promise<void> {
+  if (!supabase) return;
+
+  const { error } = await supabase
+    .from("prediction_history")
+    .update({
+      outcome,
+      actual_value: actualValue ?? null,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("prediction_id", propId)
+    .is("outcome", null); // Idempotent: only update unresolved rows
+
+  if (error) return; // Silently skip — row may not exist for non-ML picks
+
+  const mlSport = _SPORT_TO_ML[sport];
+  if (mlSport) {
+    // Fire-and-forget recalibration — never blocks the caller
+    maybeRecalibrate(mlSport, "pregame").catch(() => {});
+  }
+}

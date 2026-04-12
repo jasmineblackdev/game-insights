@@ -47,6 +47,38 @@ export interface SafePoolDepthRow {
   safe_pct:         number;
 }
 
+export interface RecommendedVsExcludedRow {
+  is_recommended:  boolean;
+  total_matched:   number;
+  resolved_count:  number;
+  win_count:       number;
+  loss_count:      number;
+  hit_rate_pct:    number | null;
+  roi_pct:         number | null;
+  avg_edge:        number;
+}
+
+export interface RoiBySportRow {
+  sport:            string;
+  total_predictions: number;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+  avg_hit_prob:     number;
+}
+
+export interface RoiByRiskBandRow {
+  risk_band:       string;
+  total_matched:   number;
+  resolved_count:  number;
+  win_count:       number;
+  hit_rate_pct:    number | null;
+  roi_pct:         number | null;
+  avg_edge:        number;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -92,6 +124,33 @@ export function useSafePoolDepth(days = 30) {
   return useQuery({
     queryKey: ["analytics-safe-pool-depth", days],
     queryFn:  () => rpc<SafePoolDepthRow>("analytics_safe_pool_depth", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useRecommendedVsExcluded(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-recommended-vs-excluded", days],
+    queryFn:  () => rpc<RecommendedVsExcludedRow>("analytics_recommended_vs_excluded", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useRoiBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-roi-by-sport", days],
+    queryFn:  () => rpc<RoiBySportRow>("analytics_roi_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useRoiByRiskBand(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-roi-by-risk-band", days],
+    queryFn:  () => rpc<RoiByRiskBandRow>("analytics_roi_by_risk_band", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });

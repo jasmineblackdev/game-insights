@@ -5,6 +5,7 @@
 
 import { supabase } from "@/lib/supabase";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
+import { syncPickResolution } from "@/lib/ml/feedbackLoop";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,19 @@ export async function markPickOutcome(
     actual_value: actualValue ?? null,
     resolved_at: outcome != null ? new Date().toISOString() : null,
   }).eq("id", id);
+
+  // Bridge to ML feedback loop: resolve prediction_history row so analytics
+  // and recalibration have data to work with.
+  if (outcome && outcome !== "push") {
+    const { data: row } = await supabase
+      .from("picks_log")
+      .select("prop_id, sport")
+      .eq("id", id)
+      .single();
+    if (row) {
+      syncPickResolution(row.prop_id, outcome, actualValue ?? null, row.sport).catch(() => {});
+    }
+  }
 }
 
 // ── ESPN box score auto-resolver ──────────────────────────────────────────────
@@ -185,7 +199,7 @@ export async function resolveOutcomes(): Promise<number> {
   const cutoff = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   const { data: pending } = await supabase
     .from("picks_log")
-    .select("id, sport, game_id, player_name, line_value, direction, stat_type")
+    .select("id, prop_id, sport, game_id, player_name, line_value, direction, stat_type")
     .is("outcome", null)
     .lt("created_at", cutoff)
     .limit(30);
@@ -249,6 +263,12 @@ export async function resolveOutcomes(): Promise<number> {
           .from("picks_log")
           .update({ actual_value: statVal, outcome, resolved_at: new Date().toISOString() })
           .eq("id", pick.id);
+
+        // Bridge to ML feedback loop
+        if (outcome !== "push") {
+          syncPickResolution(pick.prop_id, outcome, statVal, sport).catch(() => {});
+        }
+
         resolved++;
       }
       _resolvedGames.add(gameId);
