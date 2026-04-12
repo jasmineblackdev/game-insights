@@ -935,6 +935,8 @@ function ConfCalibrationPanel({
   lowResolutionSports = new Set<string>(),
   overall7 = [],
   overall30 = [],
+  marketData7 = [],
+  marketData30 = [],
 }: {
   overall: ConfidenceCalibrationRow[];
   bySport: ConfidenceCalibrationBySportRow[];
@@ -945,6 +947,8 @@ function ConfCalibrationPanel({
   lowResolutionSports?: Set<string>;
   overall7?: ConfidenceCalibrationRow[];
   overall30?: ConfidenceCalibrationRow[];
+  marketData7?: ConfidenceCalibrationByMarketRow[];
+  marketData30?: ConfidenceCalibrationByMarketRow[];
 }) {
   // Calibration verdict: HIGH hit% > MED hit% > LOW hit%?
   const resolvedOverall = overall.filter((r) => (r.resolved_count ?? 0) >= MIN_NOISY);
@@ -1106,6 +1110,8 @@ function ConfCalibrationPanel({
           loading={byMarketLoading}
           lowResolutionSports={lowResolutionSports}
           confBadge={confBadge}
+          data7={marketData7}
+          data30={marketData30}
         />
       )}
     </div>
@@ -1128,14 +1134,41 @@ function ConfCalibrationByMarketSection({
   loading,
   lowResolutionSports,
   confBadge,
+  data7 = [],
+  data30 = [],
 }: {
   rows: ConfidenceCalibrationByMarketRow[];
   loading: boolean;
   lowResolutionSports: Set<string>;
   confBadge: (conf: string) => React.ReactNode;
+  data7?: ConfidenceCalibrationByMarketRow[];
+  data30?: ConfidenceCalibrationByMarketRow[];
 }) {
-  const resolved = rows.filter((r) => r.resolved_count > 0);
-  const totalN   = resolved.reduce((s, r) => s + r.resolved_count, 0);
+  const resolved   = rows.filter((r) => r.resolved_count > 0);
+  const totalN     = resolved.reduce((s, r) => s + r.resolved_count, 0);
+  const showTrend  = data7.length > 0 && data30.length > 0;
+
+  /** HIGH tier hit rate for a given sport+market window. */
+  function marketHighRate(
+    source: ConfidenceCalibrationByMarketRow[],
+    sport: string,
+    market: string,
+  ): number | null {
+    return source.find(
+      (r) => r.sport === sport && r.stat_type === market && r.confidence === "HIGH"
+    )?.hit_rate_pct ?? null;
+  }
+
+  /** H-L gap for a given sport+market window. */
+  function marketHLGap(
+    source: ConfidenceCalibrationByMarketRow[],
+    sport: string,
+    market: string,
+  ): number | null {
+    const high = source.find((r) => r.sport === sport && r.stat_type === market && r.confidence === "HIGH")?.hit_rate_pct;
+    const low  = source.find((r) => r.sport === sport && r.stat_type === market && r.confidence === "LOW")?.hit_rate_pct;
+    return high != null && low != null ? high - low : null;
+  }
 
   // Group by sport → stat_type
   const bySportMarket = resolved.reduce<Record<string, Record<string, ConfidenceCalibrationByMarketRow[]>>>(
@@ -1212,15 +1245,25 @@ function ConfCalibrationByMarketSection({
                         <th className="text-right py-1 pr-2 font-medium">HIGH</th>
                         <th className="text-right py-1 pr-2 font-medium">MED</th>
                         <th className="text-right py-1 pr-3 font-medium">LOW</th>
-                        <th className="text-center py-1 font-medium">Cal.</th>
+                        <th className="text-center py-1 pr-2 font-medium">Cal.</th>
+                        {showTrend && <th className="text-center py-1 font-medium">Trend</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {sortedMarkets.map((market) => {
                         const marketRows = markets[market]
                           .sort((a, b) => CONF_ORDER.indexOf(a.confidence) - CONF_ORDER.indexOf(b.confidence));
-                        const verdict = marketVerdict(marketRows);
+                        const verdict      = marketVerdict(marketRows);
                         const marketTotalN = marketRows.reduce((s, r) => s + r.resolved_count, 0);
+
+                        // Trend: is HIGH hit rate improving? (primary signal)
+                        // Secondary: is H-L gap widening? (calibration gap trend)
+                        const high7    = showTrend ? marketHighRate(data7,  sport, market) : null;
+                        const high30   = showTrend ? marketHighRate(data30, sport, market) : null;
+                        const gap7     = showTrend ? marketHLGap(data7,  sport, market) : null;
+                        const gap30    = showTrend ? marketHLGap(data30, sport, market) : null;
+                        const highDir  = trendDir(high7, high30, 2);
+                        const gapDir   = trendDir(gap7,  gap30,  1);
 
                         function cellFor(conf: string) {
                           const r = marketRows.find((x) => x.confidence === conf);
@@ -1247,9 +1290,24 @@ function ConfCalibrationByMarketSection({
                             {cellFor("HIGH")}
                             {cellFor("MED")}
                             {cellFor("LOW")}
-                            <td className={cn("text-center py-1.5 font-bold text-xs", VERDICT_COLOR[verdict])}>
+                            <td className={cn("text-center py-1.5 pr-2 font-bold text-xs", VERDICT_COLOR[verdict])}>
                               <span title={verdict}>{VERDICT_LABEL[verdict]}</span>
                             </td>
+                            {showTrend && (
+                              <td className="text-center py-1.5">
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <TrendBadge dir={highDir} />
+                                  {gapDir && gapDir !== highDir && (
+                                    <span
+                                      className="text-[8px] text-muted-foreground/50"
+                                      title={`H-L gap ${gapDir === "up" ? "widening" : gapDir === "down" ? "narrowing" : "flat"} (7d vs 30d)`}
+                                    >
+                                      gap{gapDir === "up" ? "↑" : gapDir === "down" ? "↓" : "→"}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}
@@ -1260,7 +1318,8 @@ function ConfCalibrationByMarketSection({
             );
           })}
           <p className="text-[9px] text-muted-foreground/50">
-            ✓ calibrated (HIGH&gt;MED&gt;LOW) · → partial (HIGH&gt;MED only) · ⚠ inverted · ? insufficient data
+            Cal: ✓ calibrated (HIGH&gt;MED&gt;LOW) · → partial · ⚠ inverted · ? insufficient
+            {showTrend && " · Trend: HIGH hit rate 7d vs 30d · gap↑ = H-L gap widening (better discrimination)"}
           </p>
         </div>
       )}
@@ -1299,8 +1358,10 @@ export function PerformanceDashboard() {
   const recVsExclSportQ30   = useRecommendedVsExcludedBySport(30);
   const timingBySportQ7     = useTimingBySport(7);
   const timingBySportQ30    = useTimingBySport(30);
-  const confidenceCalibQ7   = useConfidenceCalibration(7);
-  const confidenceCalibQ30  = useConfidenceCalibration(30);
+  const confidenceCalibQ7     = useConfidenceCalibration(7);
+  const confidenceCalibQ30    = useConfidenceCalibration(30);
+  const confCalibByMarketQ7   = useConfidenceCalibrationByMarket(7);
+  const confCalibByMarketQ30  = useConfidenceCalibrationByMarket(30);
 
   const trendLoading =
     roiSportQ7.isLoading || roiSportQ30.isLoading ||
@@ -1480,6 +1541,8 @@ export function PerformanceDashboard() {
               lowResolutionSports={lowResolutionSports}
               overall7={confidenceCalibQ7.data ?? []}
               overall30={confidenceCalibQ30.data ?? []}
+              marketData7={confCalibByMarketQ7.data ?? []}
+              marketData30={confCalibByMarketQ30.data ?? []}
             />
           </section>
         </div>
