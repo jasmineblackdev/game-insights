@@ -9,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { Calendar, ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -24,12 +24,13 @@ import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
+import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { OddsDebugBadge } from "@/components/OddsDebugBadge";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 
-type ViewMode = "home" | "best_picks" | "player_props" | "parlay_builder" | "live" | "draft" | "college_futures";
+type ViewMode = "home" | "best_picks" | "player_props" | "parlay_builder" | "live" | "draft" | "college_futures" | "tomorrow";
 
 function DataSourceStatus() {
   // Supabase health: just verify the connection is live, don't require specific tables
@@ -602,7 +603,8 @@ const Index = () => {
   const allGamesKey = useMemo(() => allGames.map((g) => g.id).sort().join(","), [allGames]);
   const [oddsMapAll, setOddsMapAll] = useState<Map<string, GameOddsBundle>>(() => new Map());
   useEffect(() => {
-    if (viewMode !== "parlay_builder" || !allGames.length) return;
+    if (viewMode !== "parlay_builder" && viewMode !== "tomorrow") return;
+    if (!allGames.length) return;
     let cancelled = false;
     fetchAllOddsBundles(allGames).then((m) => {
       if (!cancelled) setOddsMapAll(m);
@@ -669,7 +671,7 @@ const Index = () => {
     queryFn: () => fetchPlayerEdgePredictions("all", "all"),
     staleTime: 3 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
-    enabled: viewMode === "home",
+    enabled: viewMode === "home" || viewMode === "tomorrow",
   });
   const topHomeProps = useMemo<PlayerEdgePrediction[]>(
     () => sortPlayerEdgePredictions(homePropsQuery.data?.items ?? []).slice(0, 3),
@@ -899,6 +901,7 @@ const Index = () => {
                       [
                         { mode: "home",           icon: Home,        label: "Home" },
                         { mode: "best_picks",     icon: TrendingUp,  label: "Best Picks" },
+                        { mode: "tomorrow",       icon: Calendar,    label: "Tomorrow" },
                         { mode: "player_props",   icon: User,        label: "Player Props" },
                         { mode: "parlay_builder", icon: Sparkles,    label: "Parlay Builder" },
                         { mode: "live",           icon: Zap,         label: "Live" },
@@ -952,6 +955,13 @@ const Index = () => {
                   onSelectGame={setSelectedGame}
                   onNavigate={handleViewModeChange}
                   onNavigateToParlay={handleNavigateToParlay}
+                />
+              ) : viewMode === "tomorrow" ? (
+                <TomorrowTab
+                  allGames={allGames}
+                  allProps={homePropsQuery.data?.items ?? []}
+                  oddsMap={oddsMapAll}
+                  loading={activeQuery.isPending || homePropsQuery.isPending}
                 />
               ) : viewMode === "parlay_builder" ? (
                 <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />

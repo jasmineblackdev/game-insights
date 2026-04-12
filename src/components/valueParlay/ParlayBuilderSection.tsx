@@ -31,11 +31,18 @@ export function ParlayBuilderSection({
   oddsMap,
   gamesLoading,
   bookOddsLoading = false,
+  filterPropsByGameIds,
 }: {
   games: GamePrediction[];
   oddsMap: Map<string, GameOddsBundle>;
   gamesLoading: boolean;
   bookOddsLoading?: boolean;
+  /**
+   * When provided, only player-prop candidates whose game_id is in this set
+   * are included in the parlay pool. Used by the Tomorrow tab to restrict
+   * props to tomorrow's slate only.
+   */
+  filterPropsByGameIds?: Set<string>;
 }) {
   const {
     parlayMode,
@@ -90,7 +97,11 @@ export function ParlayBuilderSection({
 
   const candidates = useMemo(() => {
     const gameCandidates = buildAllValueCandidates(games, oddsMap);
-    const enrichedPropCandidates = buildEnrichedPropCandidates(propData?.items ?? []);
+    const rawProps = propData?.items ?? [];
+    const filteredProps = filterPropsByGameIds
+      ? rawProps.filter((p) => filterPropsByGameIds.has(p.game_id))
+      : rawProps;
+    const enrichedPropCandidates = buildEnrichedPropCandidates(filteredProps);
     // Merge: game-level candidates first (authoritative), then ML prop candidates.
     // De-duplicate by correlation group so a prop doesn't appear twice when both
     // the game pipeline and ESPN pipeline produce the same player/stat.
