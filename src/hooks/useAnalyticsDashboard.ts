@@ -143,6 +143,55 @@ export interface ConfidenceCalibrationBySportRow {
   avg_edge:         number;
 }
 
+export interface ModelContributionRow {
+  model_variant:    string;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+  avg_timing_score: number;
+}
+
+export interface ParlayModelMixRow {
+  tier:             string;
+  ml_ratio_bucket:  string;
+  parlay_count:     number;
+  resolved_count:   number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_leg_score:    number;
+  avg_timing_score: number;
+}
+
+export interface EdgeBucketPerformanceRow {
+  sport:          string;
+  market_type:    string;
+  edge_bucket:    string;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+}
+
+export interface TimingEdgeQualityRow {
+  timing_bucket:  string;
+  edge_bucket:    string;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+}
+
+export interface StabilityEdgeQualityRow {
+  stability_bucket: string;
+  edge_bucket:      string;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -269,6 +318,51 @@ export function useConfidenceCalibrationBySport(days = 30) {
   return useQuery({
     queryKey: ["analytics-confidence-calibration-by-sport", days],
     queryFn:  () => rpc<ConfidenceCalibrationBySportRow>("analytics_confidence_calibration_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useModelContribution(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-model-contribution", days],
+    queryFn:  () => rpc<ModelContributionRow>("analytics_model_contribution", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useParlayModelMix(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-parlay-model-mix", days],
+    queryFn:  () => rpc<ParlayModelMixRow>("analytics_parlay_model_mix", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useEdgeBucketPerformance(days = 30, minResolved = 5) {
+  return useQuery({
+    queryKey: ["analytics-edge-bucket-performance", days, minResolved],
+    queryFn:  () => rpc<EdgeBucketPerformanceRow>("analytics_edge_bucket_performance", { lookback_days: days, min_resolved: minResolved }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useTimingEdgeQuality(days = 30, minResolved = 5) {
+  return useQuery({
+    queryKey: ["analytics-timing-edge-quality", days, minResolved],
+    queryFn:  () => rpc<TimingEdgeQualityRow>("analytics_timing_edge_quality", { lookback_days: days, min_resolved: minResolved }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useStabilityEdgeQuality(days = 30, minResolved = 5) {
+  return useQuery({
+    queryKey: ["analytics-stability-edge-quality", days, minResolved],
+    queryFn:  () => rpc<StabilityEdgeQualityRow>("analytics_stability_edge_quality", { lookback_days: days, min_resolved: minResolved }),
     staleTime: STALE,
     gcTime:    GC,
   });

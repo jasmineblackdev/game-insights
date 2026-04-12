@@ -23,6 +23,7 @@ import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashboard";
+import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
@@ -177,7 +178,7 @@ function HubPickCard({
   );
 }
 
-type EdgeTab = "hub" | "value" | "parlay";
+type EdgeTab = "hub" | "value" | "parlay" | "analytics";
 
 function EdgeCardPageInner() {
   const [edgeTab, setEdgeTab] = useState<EdgeTab>("hub");
@@ -382,6 +383,7 @@ function EdgeCardPageInner() {
               ["hub", "Team picks", Layers],
               ["value", "Best value", BarChart3],
               ["parlay", "Parlay builder", Wrench],
+              ["analytics", "ML analytics", TrendingUp],
             ] as const
           ).map(([id, label, Icon]) => (
             <button
@@ -411,6 +413,9 @@ function EdgeCardPageInner() {
         ) : null}
         {edgeTab === "parlay" ? (
           <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+        ) : null}
+        {edgeTab === "analytics" ? (
+          <ParlayPerformanceDashboard />
         ) : null}
 
         {edgeTab === "hub" ? (

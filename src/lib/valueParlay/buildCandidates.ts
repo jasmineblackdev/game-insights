@@ -587,6 +587,7 @@ export function buildEnrichedPropCandidates(
       timingUrgency,
       timingScore,
       stabilityScore:      pred.ml_debug?.stability_score ?? 0.5,
+      modelVariant:        pred.ml_active ? "ml_blended" : "rules",
       correlationGroupId:  `ml-prop-${pred.game_id}-${pred.stat_type}`,
       valueScore:          vsCore,
       valueGrade:          valueGrade(vsCore),

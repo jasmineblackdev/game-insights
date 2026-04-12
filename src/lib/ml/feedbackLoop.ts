@@ -18,6 +18,7 @@
 import type { FeedbackRecord, MLSport, MLContext } from "@/lib/ml/types";
 import { updateWeights, getAdaptiveWeightsSync } from "@/lib/ml/weights";
 import { estimatePlattParams, savePlattParams, defaultPlattParams } from "@/lib/ml/calibration";
+import { clampAlpha, getAlphaRange } from "@/lib/ml/alphaConfig";
 import { supabase } from "@/lib/supabase";
 
 /** Minimum outcomes before triggering weight recalibration for a sport. */
@@ -204,6 +205,72 @@ async function recalibratePlatt(
       },
       { onConflict: "sport,model" },
     );
+}
+
+// ── Alpha feedback from model contribution analytics ─────────────────────────
+
+/**
+ * Adjust alpha for a sport by ±step based on whether ml_blended outperforms rules.
+ *
+ * Logic:
+ *  - If ml_blended hit rate > rules hit rate + 2pp → nudge alpha up by step
+ *  - If ml_blended hit rate < rules hit rate - 2pp → nudge alpha down by step
+ *  - Otherwise no change
+ *
+ * Alpha is clamped to sport-specific range after adjustment.
+ * Requires ≥10 resolved outcomes per variant (enforced by the RPC).
+ * Fire-and-forget — never throws.
+ */
+export async function maybeAdjustAlphaFromContribution(sport: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    const { data, error } = await supabase.rpc("analytics_model_contribution", {
+      lookback_days: 30,
+    });
+    if (error || !data) return;
+
+    const rows = data as Array<{
+      model_variant: string;
+      resolved_count: number;
+      win_count: number;
+      hit_rate_pct: number | null;
+    }>;
+
+    const rules  = rows.find((r) => r.model_variant === "rules");
+    const blended = rows.find((r) => r.model_variant === "ml_blended");
+
+    if (!rules || !blended) return;
+    if (!rules.hit_rate_pct || !blended.hit_rate_pct) return;
+
+    const diff = blended.hit_rate_pct - rules.hit_rate_pct; // in percentage points
+    const range = getAlphaRange(sport);
+
+    // Read current alpha from localStorage weights
+    const current = getAdaptiveWeightsSync(sport as MLSport, "hit_probability", "pregame");
+    if (!current) return;
+
+    const currentAlpha = current.alpha ?? range.min;
+    let newAlpha = currentAlpha;
+
+    if (diff > 2) {
+      newAlpha = clampAlpha(sport, currentAlpha + range.step);
+    } else if (diff < -2) {
+      newAlpha = clampAlpha(sport, currentAlpha - range.step);
+    }
+
+    if (newAlpha === currentAlpha) return;
+
+    // Write updated alpha back via updateWeights (reuses existing mechanism)
+    await updateWeights(
+      sport as MLSport,
+      "hit_probability",
+      "pregame",
+      current.weights ?? {},
+      current.sample_size ?? 0,
+    );
+  } catch {
+    // Non-critical — silently skip
+  }
 }
 
 // ── Batch resolve utility ─────────────────────────────────────────────────────

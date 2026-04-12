@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
 import { optimizeForMode, optimizeSmartParlays, type AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
+import { logParlayBuild } from "@/lib/valueParlay/parlayLogger";
 import {
   parlayAmericanOdds,
   parlayHitProbability,
@@ -116,6 +117,8 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
     (candidates: ValueBetCandidate[]) => {
       const r = optimizeForMode(candidates, parlayMode, analyticsWeights);
       setBuilderLegs(r.legs);
+      // Fire-and-forget: log the auto-built parlay for ML analytics
+      logParlayBuild(r, parlayMode, analyticsWeights).catch(() => {});
     },
     [parlayMode, analyticsWeights]
   );

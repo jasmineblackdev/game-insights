@@ -260,6 +260,7 @@ export async function logSurfacedPredictions(preds: PlayerEdgePrediction[]): Pro
         projection_ci_low:       pred.projection_ci_low ?? 0,
         projection_ci_high:      pred.projection_ci_high ?? 0,
       },
+      model_variant: pred.ml_active ? "ml_blended" : "rules",
       predicted_at: new Date().toISOString(),
       resolved_at: null,
     }));

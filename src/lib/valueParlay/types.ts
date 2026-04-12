@@ -63,6 +63,14 @@ export interface ValueBetCandidate {
    * Used as a leg quality signal in the ML-aware parlay scorer.
    */
   stabilityScore?: number;
+  /**
+   * Which model variant generated this candidate.
+   * "rules"      — pure rules engine (no ML contribution)
+   * "ml_blended" — rules + ML alpha blend (ml_active = true)
+   * "ml_full"    — future: fully ML-driven prediction
+   * Used in parlay_build_legs and analytics_model_contribution tracking.
+   */
+  modelVariant?: "rules" | "ml_blended" | "ml_full";
   sportsbookKey?: string;
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;
