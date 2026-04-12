@@ -125,6 +125,128 @@ function NoDataNote({ label }: { label: string }) {
   );
 }
 
+// ── Trend helpers ─────────────────────────────────────────────────────────────
+
+type TrendDir = "up" | "flat" | "down";
+
+/** Compare recent (7d) vs baseline (30d). Positive diff = improving. */
+function trendDir(
+  recent:    number | null,
+  baseline:  number | null,
+  threshold: number = 2,
+): TrendDir | null {
+  if (recent == null || baseline == null) return null;
+  const diff = recent - baseline;
+  if (Math.abs(diff) < threshold) return "flat";
+  return diff > 0 ? "up" : "down";
+}
+
+function TrendBadge({ dir, showLabel = false }: { dir: TrendDir | null; showLabel?: boolean }) {
+  if (!dir) return <span className="text-muted-foreground/40 text-[9px]">—</span>;
+  const color =
+    dir === "up"   ? "text-emerald-600 dark:text-emerald-400"
+    : dir === "down" ? "text-rose-500"
+    : "text-muted-foreground/60";
+  const arrow = dir === "up" ? "↑" : dir === "down" ? "↓" : "→";
+  const label = dir === "up" ? "improving" : dir === "down" ? "declining" : "flat";
+  return (
+    <span className={cn("text-[10px] font-bold tabular-nums", color)}>
+      {arrow}{showLabel && <span className="ml-0.5 font-normal text-[9px]">{label}</span>}
+    </span>
+  );
+}
+
+// ── Trend summary panel ───────────────────────────────────────────────────────
+
+/** Aggregate hit rate + avg edge pp across all sports from sport-ROI rows. */
+function aggHitRate(rows: RoiBySportRow[]): number | null {
+  const resolved = rows.reduce((s, r) => s + r.resolved_count, 0);
+  const wins     = rows.reduce((s, r) => s + r.win_count, 0);
+  return resolved > 0 ? Math.round((wins / resolved) * 1000) / 10 : null;
+}
+
+function aggEdgePp(rows: RoiBySportRow[]): number | null {
+  const totalResolved = rows.reduce((s, r) => s + r.resolved_count, 0);
+  if (!totalResolved) return null;
+  const weighted = rows.reduce((s, r) => s + r.avg_edge * r.resolved_count, 0);
+  return Math.round((weighted / totalResolved) * 10000) / 100;
+}
+
+function TrendSummaryPanel({
+  sportData7,
+  sportData30,
+  recData7,
+  recData30,
+  loading,
+}: {
+  sportData7:  RoiBySportRow[];
+  sportData30: RoiBySportRow[];
+  recData7:    RecommendedVsExcludedRow[];
+  recData30:   RecommendedVsExcludedRow[];
+  loading:     boolean;
+}) {
+  if (loading) return <LoadingRows n={3} />;
+
+  const hitRate7  = aggHitRate(sportData7);
+  const hitRate30 = aggHitRate(sportData30);
+  const edge7     = aggEdgePp(sportData7);
+  const edge30    = aggEdgePp(sportData30);
+  const recHit7   = recData7.find((r) => r.is_recommended)?.hit_rate_pct  ?? null;
+  const recHit30  = recData30.find((r) => r.is_recommended)?.hit_rate_pct ?? null;
+  const resolved7 = sportData7.reduce((s, r) => s + r.resolved_count, 0);
+
+  const hasAny = hitRate7 != null || hitRate30 != null;
+  if (!hasAny) return <NoDataNote label="trend" />;
+
+  type MetricRow = { label: string; val7: number | null; val30: number | null; suffix: string; threshold: number };
+  const metrics: MetricRow[] = [
+    { label: "Hit rate",       val7: hitRate7, val30: hitRate30, suffix: "%",  threshold: 2   },
+    { label: "Avg edge",       val7: edge7,    val30: edge30,    suffix: "pp", threshold: 0.5 },
+    { label: "Rec. hit rate",  val7: recHit7,  val30: recHit30,  suffix: "%",  threshold: 2   },
+  ];
+
+  return (
+    <div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px] tabular-nums">
+          <thead>
+            <tr className="text-muted-foreground text-left border-b border-border">
+              <th className="py-1 pr-3 font-semibold">Metric</th>
+              <th className="py-1 pr-3 font-semibold text-right">7d</th>
+              <th className="py-1 pr-3 font-semibold text-right">30d</th>
+              <th className="py-1 font-semibold text-center">Trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {metrics.map(({ label, val7, val30, suffix, threshold }) => {
+              const dir = trendDir(val7, val30, threshold);
+              return (
+                <tr key={label} className="border-b border-border/50 last:border-0">
+                  <td className="py-1.5 pr-3 text-foreground font-medium">{label}</td>
+                  <td className={cn("py-1.5 pr-3 text-right font-semibold", val7 != null ? pctColor(val7) : "text-muted-foreground")}>
+                    {val7 != null ? `${val7.toFixed(1)}${suffix}` : "—"}
+                  </td>
+                  <td className={cn("py-1.5 pr-3 text-right font-semibold", val30 != null ? pctColor(val30) : "text-muted-foreground")}>
+                    {val30 != null ? `${val30.toFixed(1)}${suffix}` : "—"}
+                  </td>
+                  <td className="py-1.5 text-center">
+                    <TrendBadge dir={dir} showLabel />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {resolved7 < MIN_NOISY && resolved7 > 0 && (
+        <p className="text-[9px] text-amber-500 mt-1.5">
+          ⚠ Only {resolved7} resolved picks in last 7d — trend may not be reliable
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Timing bucket panel ───────────────────────────────────────────────────────
 
 function timingBucketLabel(bucket: string): string {
@@ -405,14 +527,22 @@ function RoiBySportPanel({
   rows,
   loading,
   lowResolutionSports = new Set<string>(),
+  data7 = [],
+  data30 = [],
 }: {
   rows: RoiBySportRow[];
   loading: boolean;
   lowResolutionSports?: Set<string>;
+  /** Always 7-day rows — used for trend comparison regardless of active window. */
+  data7?: RoiBySportRow[];
+  /** Always 30-day rows — used for trend comparison. */
+  data30?: RoiBySportRow[];
 }) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
   if (!resolved.length) return <NoDataNote label="sport ROI" />;
+
+  const showTrend = data7.length > 0 && data30.length > 0;
 
   return (
     <div className="overflow-x-auto">
@@ -423,13 +553,17 @@ function RoiBySportPanel({
             <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
             <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
-            <th className="py-1 font-semibold text-right">Avg edge</th>
+            <th className={cn("py-1 font-semibold text-right", showTrend ? "pr-3" : "")}>Avg edge</th>
+            {showTrend && <th className="py-1 font-semibold text-center">Trend</th>}
           </tr>
         </thead>
         <tbody>
           {resolved.map((r) => {
             const n = r.resolved_count;
             const lowCoverage = lowResolutionSports.has(r.sport);
+            const hit7  = data7.find((x) => x.sport === r.sport)?.hit_rate_pct ?? null;
+            const hit30 = data30.find((x) => x.sport === r.sport)?.hit_rate_pct ?? null;
+            const dir = showTrend ? trendDir(hit7, hit30) : null;
             return (
               <tr key={r.sport} className="border-b border-border/50 last:border-0">
                 <td className="py-1.5 pr-3 font-bold text-foreground">
@@ -445,14 +579,22 @@ function RoiBySportPanel({
                 <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
                   {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
                 </td>
-                <td className="py-1.5 text-right text-muted-foreground">
+                <td className={cn("py-1.5 text-right text-muted-foreground", showTrend ? "pr-3" : "")}>
                   {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
                 </td>
+                {showTrend && (
+                  <td className="py-1.5 text-center">
+                    <TrendBadge dir={dir} />
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+      {showTrend && (
+        <p className="text-[9px] text-muted-foreground/60 mt-1">Trend: ↑↓→ compares 7d vs 30d hit rate</p>
+      )}
     </div>
   );
 }
@@ -886,6 +1028,15 @@ export function PerformanceDashboard() {
   const confidenceCalibQ = useConfidenceCalibration(days);
   const confCalibBySportQ = useConfidenceCalibrationBySport(days);
 
+  // Always fetch both windows so trend comparison is always available.
+  // React Query dedupes against the window-driven hooks above when days matches.
+  const roiSportQ7   = useRoiBySport(7);
+  const roiSportQ30  = useRoiBySport(30);
+  const recVsExclQ7  = useRecommendedVsExcluded(7);
+  const recVsExclQ30 = useRecommendedVsExcluded(30);
+
+  const trendLoading = roiSportQ7.isLoading || roiSportQ30.isLoading || recVsExclQ7.isLoading || recVsExclQ30.isLoading;
+
   // Sports with resolution < 40% get a caution flag on per-sport panels
   const lowResolutionSports = useMemo(
     () => new Set((resolutionQ.data ?? []).filter((r) => r.resolution_pct < 40).map((r) => r.sport)),
@@ -928,6 +1079,18 @@ export function PerformanceDashboard() {
             ))}
           </div>
 
+          {/* 0. Trend overview */}
+          <section className="space-y-2">
+            <SectionHeader title="7D VS 30D TREND OVERVIEW" />
+            <TrendSummaryPanel
+              sportData7={roiSportQ7.data ?? []}
+              sportData30={roiSportQ30.data ?? []}
+              recData7={recVsExclQ7.data ?? []}
+              recData30={recVsExclQ30.data ?? []}
+              loading={trendLoading}
+            />
+          </section>
+
           {/* 1. Timing performance */}
           <section className="space-y-2">
             <SectionHeader title="HIT RATE + ROI BY TIMING BUCKET" />
@@ -955,7 +1118,13 @@ export function PerformanceDashboard() {
           {/* 5. ROI by sport */}
           <section className="space-y-2">
             <SectionHeader title="HIT RATE + ROI BY SPORT" />
-            <RoiBySportPanel rows={roiSportQ.data ?? []} loading={roiSportQ.isLoading} lowResolutionSports={lowResolutionSports} />
+            <RoiBySportPanel
+              rows={roiSportQ.data ?? []}
+              loading={roiSportQ.isLoading}
+              lowResolutionSports={lowResolutionSports}
+              data7={roiSportQ7.data ?? []}
+              data30={roiSportQ30.data ?? []}
+            />
           </section>
 
           {/* 6. ROI by risk band */}
