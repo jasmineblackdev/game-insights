@@ -181,7 +181,8 @@ function HomePickCard({
 }) {
   const homeWins = game.winProbability.home >= game.winProbability.away;
   const pick = homeWins ? game.homeTeam : game.awayTeam;
-  const prob = Math.round(Math.max(game.winProbability.home, game.winProbability.away) * 100);
+  // winProbability values are already in 0–100 scale (percentage)
+  const prob = Math.round(Math.max(game.winProbability.home, game.winProbability.away));
   const confClass =
     game.confidence === "high"
       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
@@ -255,15 +256,44 @@ function HomePropCard({
   );
 }
 
+const PARLAY_TIERS = [
+  {
+    label: "Safe Parlay",
+    legs: "3–4 legs",
+    desc: "High-confidence, low-correlation picks. Best for consistent returns.",
+    hitProb: "~65–72%",
+    color: "border-emerald-500/40 bg-emerald-500/5",
+    badge: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  },
+  {
+    label: "Balanced Parlay",
+    legs: "4–6 legs",
+    desc: "Mix of safe and high-upside legs. Strong edge-to-risk ratio.",
+    hitProb: "~45–55%",
+    color: "border-amber-500/40 bg-amber-500/5",
+    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  },
+  {
+    label: "Aggressive Parlay",
+    legs: "6–8 legs",
+    desc: "High-upside combinations with bigger payout potential.",
+    hitProb: "~20–35%",
+    color: "border-violet-500/40 bg-violet-500/5",
+    badge: "bg-violet-500/15 text-violet-600 dark:text-violet-400",
+  },
+] as const;
+
 function HomeDashboard({
   topGames,
   topProps,
+  isPropsPending,
   league,
   onSelectGame,
   onNavigate,
 }: {
   topGames: GamePrediction[];
   topProps: PlayerEdgePrediction[];
+  isPropsPending: boolean;
   league: League;
   onSelectGame: (g: GamePrediction) => void;
   onNavigate: (m: ViewMode) => void;
@@ -299,8 +329,10 @@ function HomeDashboard({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-card/40 p-6 text-center text-sm text-muted-foreground">
-            Loading picks… select a league above to load today's games.
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-lg border border-border bg-card/40 h-32 animate-pulse" />
+            ))}
           </div>
         )}
       </section>
@@ -320,7 +352,13 @@ function HomeDashboard({
             See all props →
           </button>
         </div>
-        {topProps.length > 0 ? (
+        {isPropsPending ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-lg border border-border bg-card/40 h-32 animate-pulse" />
+            ))}
+          </div>
+        ) : topProps.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {topProps.map((pred, i) => (
               <HomePropCard key={pred.id} pred={pred} rank={i + 1} />
@@ -328,18 +366,18 @@ function HomeDashboard({
           </div>
         ) : (
           <div className="rounded-lg border border-border bg-card/40 p-6 text-center text-sm text-muted-foreground">
-            Loading props…
+            No props available — check Player Props tab for live data.
           </div>
         )}
       </section>
 
-      {/* Parlay Builder CTA */}
+      {/* Top Parlays Today */}
       <section>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="font-display font-bold text-lg text-foreground">Top Parlays Today</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Safe, Balanced, and Aggressive AI-built parlays
+              Pick a risk tier — AI builds the legs automatically
             </p>
           </div>
           <button
@@ -347,20 +385,31 @@ function HomeDashboard({
             onClick={() => onNavigate("parlay_builder")}
             className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
           >
-            Build parlay →
+            Open builder →
           </button>
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate("parlay_builder")}
-          className="w-full rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors p-6 flex flex-col items-center gap-3"
-        >
-          <Sparkles className="w-8 h-8 text-primary opacity-80" />
-          <p className="font-display font-bold text-base text-foreground">Open Parlay Builder</p>
-          <p className="text-xs text-muted-foreground max-w-xs text-center">
-            AI generates Safe (3-leg), Balanced (4-leg), and Aggressive (6-leg) parlays ranked by edge and hit probability.
-          </p>
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {PARLAY_TIERS.map((tier) => (
+            <button
+              key={tier.label}
+              type="button"
+              onClick={() => onNavigate("parlay_builder")}
+              className={cn(
+                "text-left rounded-lg border p-4 flex flex-col gap-2 hover:brightness-110 transition-all",
+                tier.color
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", tier.badge)}>
+                  {tier.legs}
+                </span>
+              </div>
+              <p className="font-display font-bold text-base text-foreground">{tier.label}</p>
+              <p className="text-xs text-muted-foreground">{tier.desc}</p>
+              <p className="text-[11px] font-semibold text-foreground mt-auto">Hit prob: {tier.hitProb}</p>
+            </button>
+          ))}
+        </div>
       </section>
     </div>
   );
@@ -853,6 +902,7 @@ const Index = () => {
                 <HomeDashboard
                   topGames={topPicksForToday(leagueGamesWithIntel)}
                   topProps={topHomeProps}
+                  isPropsPending={homePropsQuery.isPending}
                   league={league}
                   onSelectGame={setSelectedGame}
                   onNavigate={handleViewModeChange}
