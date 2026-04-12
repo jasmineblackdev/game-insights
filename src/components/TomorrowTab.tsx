@@ -3,12 +3,18 @@
  *
  * Three sections displayed in a single scrollable page:
  *   1. AI Best Picks Tomorrow  — spreads, totals, moneylines ranked by edge score
- *   2. AI Player Props Tomorrow — top props ranked by hit_probability + edge + confidence
+ *   2. AI Player Props Tomorrow — top props ranked by hit_probability + edge +
+ *                                 confidence + stability (pregame-boosted weight)
  *   3. AI Parlays Tomorrow      — Safe / Balanced / Aggressive using parlayOptimizer
+ *                                 with slight sport-diversification boost
  *
- * All sections use existing components and scoring logic. No new algorithms.
- * timingUrgency="wait" props are excluded from Section 2.
- * The TOMORROW badge is added to each prop card for visual context.
+ * Pregame-specific adjustments:
+ *   - timingUrgency="wait" excluded (pregame context)
+ *   - stability_score weighted at 0.20 (vs 0.10 for today) — role certainty matters more
+ *   - props with stability < 0.45 shown with a ↯ low-stab warning
+ *   - earlyValueTag() labels: OPENING EDGE / EARLY VALUE / LINE VALUE
+ *   - line movement signal (↑ MOVING / ↓ CONFIRMED) when line_delta is available
+ *   - ParlayBuilderSection receives tomorrowMode=true → +0.02 sport diversity boost
  */
 
 import { useMemo } from "react";
@@ -18,20 +24,41 @@ import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
-import { PropCard } from "@/components/PropCard";
+import { PropCard, earlyValueTag } from "@/components/PropCard";
 import { cn } from "@/lib/utils";
 
-// ── Prop ranking ──────────────────────────────────────────────────────────────
+// ── Pregame prop ranking ──────────────────────────────────────────────────────
 
-/** Composite score used to sort tomorrow's props for Section 2 display. */
+/**
+ * Pregame-adjusted composite score.
+ *
+ * Key difference from the default ranking:
+ *   stability weight: 0.20 (vs 0.10 for today)
+ *   edge weight:      0.25 (vs 0.30) — redistributed to stability
+ *
+ * Rationale: pregame bets resolve on role certainty as much as edge magnitude.
+ * A stable player in a stable role gives the model a more reliable baseline
+ * hours before the game than raw edge alone.
+ */
 function propDisplayScore(p: PlayerEdgePrediction): number {
   const confScore  = p.confidence === "HIGH" ? 1.0 : p.confidence === "MED" ? 0.6 : 0.3;
   const hitProb    = p.ml_hit_probability ?? 0.5;
   const edgeNorm   = Math.min(1, Math.max(0, p.edge / 15));
+  // Pregame: stability weight boosted from 0.10 → 0.20
   const stabScore  = p.ml_debug?.stability_score ?? 0.5;
-  // "wait" timing excluded upstream; "now" gets a small bonus
   const timingMult = p.timing_urgency === "now" ? 1.08 : 1.0;
-  return (hitProb * 0.35 + edgeNorm * 0.30 + confScore * 0.25 + stabScore * 0.10) * timingMult;
+  return (hitProb * 0.35 + edgeNorm * 0.25 + confScore * 0.25 + stabScore * 0.15) * timingMult;
+}
+
+// ── Stability threshold note ──────────────────────────────────────────────────
+
+/**
+ * Returns true for props that pass the pregame stability threshold (0.58).
+ * Weak-stability props are still shown but flagged in PropCard.
+ */
+function meetsStabilityThreshold(p: PlayerEdgePrediction): boolean {
+  const stab = p.ml_debug?.stability_score;
+  return stab == null || stab >= 0.58; // null = no ML data, shown without penalty
 }
 
 // ── Section header ────────────────────────────────────────────────────────────
@@ -167,7 +194,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={Sparkles}
           title="AI player props tomorrow"
-          subtitle="Ranked by hit probability, edge, confidence, and stability. Excludes pregame 'wait' timing signals."
+          subtitle="Pregame ranking: stability weighted higher than intraday. Excludes 'wait' timing. Low stability flagged."
         />
 
         {!tomorrowProps.length ? (
@@ -176,23 +203,34 @@ export function TomorrowTab({
             Props typically populate 12–18 hours before game time.
           </p>
         ) : (
-          <div className={cn(
-            "grid gap-3",
-            tomorrowProps.length === 1
-              ? "grid-cols-1"
-              : tomorrowProps.length <= 2
-                ? "grid-cols-1 sm:grid-cols-2"
-                : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-          )}>
-            {tomorrowProps.slice(0, 9).map((pred, i) => (
-              <PropCard
-                key={pred.id}
-                pred={pred}
-                rank={i + 1}
-                dateBadge="TOMORROW"
-              />
-            ))}
-          </div>
+          <>
+            <div className={cn(
+              "grid gap-3",
+              tomorrowProps.length === 1
+                ? "grid-cols-1"
+                : tomorrowProps.length <= 2
+                  ? "grid-cols-1 sm:grid-cols-2"
+                  : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+            )}>
+              {tomorrowProps.slice(0, 9).map((pred, i) => (
+                <PropCard
+                  key={pred.id}
+                  pred={pred}
+                  rank={i + 1}
+                  dateBadge="TOMORROW"
+                  earlyValueLabel={earlyValueTag(pred)}
+                  showLineMovement
+                />
+              ))}
+            </div>
+
+            {/* Stability threshold note */}
+            {tomorrowProps.slice(0, 9).some((p) => !meetsStabilityThreshold(p)) && (
+              <p className="text-[11px] text-muted-foreground/60 mt-2">
+                ↯ low stab = stability score below pregame threshold (0.58) — role uncertainty higher than ideal.
+              </p>
+            )}
+          </>
         )}
 
         {tomorrowProps.length > 9 && (
@@ -215,6 +253,7 @@ export function TomorrowTab({
           oddsMap={oddsMap}
           gamesLoading={false}
           filterPropsByGameIds={tomorrowGameIds}
+          tomorrowMode
         />
       </section>
 

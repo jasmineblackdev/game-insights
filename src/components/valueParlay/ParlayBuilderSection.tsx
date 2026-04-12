@@ -43,6 +43,12 @@ export function ParlayBuilderSection({
    * props to tomorrow's slate only.
    */
   filterPropsByGameIds?: Set<string>;
+  /**
+   * When true, injects a +0.02 sport-diversification boost into analytics weights.
+   * Used by the Tomorrow tab where full-slate visibility makes cross-sport
+   * mixes more achievable and valuable.
+   */
+  tomorrowMode?: boolean;
 }) {
   const {
     parlayMode,
@@ -83,8 +89,12 @@ export function ParlayBuilderSection({
         marketWeights[key] = 1.0 + Math.min(0.08, Math.max(-0.08, row.roi_pct / 125));
       }
     }
-    setAnalyticsWeights({ sportWeights, marketWeights });
-  }, [roiSportData, roiMarketData, setAnalyticsWeights]);
+    setAnalyticsWeights({
+      sportWeights,
+      marketWeights,
+      ...(tomorrowMode ? { diversificationBoost: 0.02 } : {}),
+    });
+  }, [roiSportData, roiMarketData, setAnalyticsWeights, tomorrowMode]);
 
   // Pull enriched props from the shared React Query cache (populated by PlayerEdgeSection).
   // staleTime matches PlayerEdgeSection so no extra network call is made.

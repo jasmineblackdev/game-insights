@@ -19,6 +19,15 @@ export interface AnalyticsWeights {
   sportWeights?: Record<string, number>;
   /** "SPORT:stat_type" → multiplier  e.g. { "NBA:points": 1.08 } */
   marketWeights?: Record<string, number>;
+  /**
+   * Extra weight added to the sport-diversification score in scoreParlay.
+   * Positive values reward cross-sport mixes more strongly.
+   * Range: [0, 0.05] recommended. Default 0.
+   *
+   * Used by the Tomorrow tab (+0.02) where full slate visibility makes
+   * cross-sport diversification easier to achieve and more valuable.
+   */
+  diversificationBoost?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -241,10 +250,14 @@ function scoreParlay(
   const volPen01  = legs.reduce((s, l) => s + l.volatilityScore, 0) / legs.length / 100;
   const uncPen01  = legs.reduce((s, l) => s + l.uncertaintyScore, 0) / legs.length / 100;
 
+  // diversificationBoost shifts weight from timing → sport diversity.
+  // Rationale: tomorrow's full slate makes cross-sport mixes more achievable,
+  // while timing urgency matters less for pregame-only builds.
+  const divBoost      = Math.min(0.05, Math.max(0, weights.diversificationBoost ?? 0));
   const smartParlayScore =
     avgLegScore     * 0.55 +
-    timingQScore    * 0.12 +
-    sportDivScore   * 0.08 +
+    timingQScore    * (0.12 - divBoost) +
+    sportDivScore   * (0.08 + divBoost) +
     marketStrScore  * 0.07 +
     confSpreadScore * 0.06 -
     corrPen01       * 0.07 -
