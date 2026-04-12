@@ -6,6 +6,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EdgeCardProvider } from "@/context/EdgeCardContext";
+import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { useLiveEdgeNotifications } from "@/hooks/useLiveEdgeNotifications";
@@ -49,6 +50,7 @@ const App = () => (
       <MlbStarterSupabaseSync />
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
         <EdgeCardProvider>
+          <ValueParlayProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
@@ -69,6 +71,7 @@ const App = () => (
               </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
+          </ValueParlayProvider>
         </EdgeCardProvider>
       </ThemeProvider>
     </QueryClientProvider>

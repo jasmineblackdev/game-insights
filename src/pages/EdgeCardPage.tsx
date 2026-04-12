@@ -825,9 +825,5 @@ function EdgeCardPageInner() {
 }
 
 export default function EdgeCardPage() {
-  return (
-    <ValueParlayProvider>
-      <EdgeCardPageInner />
-    </ValueParlayProvider>
-  );
+  return <EdgeCardPageInner />;
 }
