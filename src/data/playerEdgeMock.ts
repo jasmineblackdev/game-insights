@@ -33,6 +33,10 @@ export type PlayerEdgePrediction = PlayerPropInput & {
   timing_note?: string;
   /** Composite AI ranking score 0–100 */
   player_edge_score?: number;
+  /** First-seen line this session (sessionStorage) */
+  opening_line_value?: number;
+  /** line_value − opening_line_value. Positive = line moved up (worse for Over). */
+  line_delta?: number;
 };
 
 const CONF_RANK = { HIGH: 0, MED: 1, LOW: 2 } as const;

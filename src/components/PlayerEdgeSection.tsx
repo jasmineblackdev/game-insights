@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Star, Clock, Copy, ChevronDown, ChevronUp } from "lucide-react";
+import { Star, Clock, Copy, ChevronDown, ChevronUp, TrendingUp, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import {
   isPlayerEdgeLiveConfigured,
 } from "@/lib/playerEdgeApi";
 import { usePlayerEdgeFavorites } from "@/hooks/usePlayerEdgeFavorites";
+import { logPick, fetchAccuracyStats } from "@/lib/picksLog";
 import {
   type PlayerEdgePrediction,
   type PlayerEdgeSportFilter,
@@ -123,11 +124,14 @@ function PlayerEdgeCard({
     ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
     : "bg-red-500/15 text-red-600 dark:text-red-400";
 
-  // Copy pick text to clipboard
+  // Copy pick text to clipboard and log it
   const copyPick = () => {
     const text = `${pred.player_name} — ${headline} · ${pred.sport} · Edge ${pred.prediction_direction === "MORE" ? "+" : "−"}${Math.abs(pred.edge).toFixed(1)} · Conf ${pred.confidence}`;
     navigator.clipboard?.writeText(text).then(
-      () => toast.success("Pick copied to clipboard"),
+      () => {
+        toast.success("Pick copied & logged");
+        void logPick(pred);
+      },
       () => toast.message("Copy failed")
     );
   };
@@ -237,12 +241,21 @@ function PlayerEdgeCard({
         </div>
       </div>
 
-      {/* ── Timing badge ─────────────────────────────────── */}
-      {pred.timing_note && (
-        <div>
-          <TimingBadge note={pred.timing_note} />
-        </div>
-      )}
+      {/* ── Timing badge + line movement ──────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        {pred.timing_note && <TimingBadge note={pred.timing_note} />}
+        {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
+          <span className={cn(
+            "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
+            pred.line_delta > 0
+              ? "bg-red-500/10 text-red-500"     // line moved up → worse for Over
+              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" // moved down → better
+          )}>
+            <TrendingUp className={cn("w-2.5 h-2.5", pred.line_delta > 0 && "rotate-180")} />
+            Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
+          </span>
+        )}
+      </div>
 
       {/* ── Why this bet ─────────────────────────────────── */}
       <div className="space-y-1.5 text-[11px] flex-1">
@@ -362,6 +375,13 @@ export function PlayerEdgeSection() {
     refetchOnWindowFocus: false,
   });
 
+  const { data: accuracy } = useQuery({
+    queryKey: ["picks-accuracy"],
+    queryFn: fetchAccuracyStats,
+    staleTime: 2 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
   const allItems = useMemo(() => sortPlayerEdgePredictions(data?.items ?? []), [data]);
 
   // Filtered view (when user picks a sport/stat)
@@ -382,14 +402,49 @@ export function PlayerEdgeSection() {
     <section className="mt-12 pt-10 border-t border-border space-y-8" aria-labelledby="player-edge-heading">
       {/* ── Page header ───────────────────────────────── */}
       <div className="space-y-2">
-        <h2 id="player-edge-heading" className="font-display font-bold text-xl sm:text-2xl md:text-3xl text-foreground">
-          Player Edge <span className="text-primary text-base font-semibold ml-1">AI</span>
-        </h2>
+        <div className="flex items-start justify-between gap-4">
+          <h2 id="player-edge-heading" className="font-display font-bold text-xl sm:text-2xl md:text-3xl text-foreground">
+            Player Edge <span className="text-primary text-base font-semibold ml-1">AI</span>
+          </h2>
+          <Link
+            to="/picks"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 transition-colors shrink-0"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            My Picks
+          </Link>
+        </div>
         <p className="text-sm text-muted-foreground max-w-2xl">
           Daily AI prop scanner — NBA, NFL, MLB, Boxing, and UFC/MMA fights ranked by model edge, confidence, and matchup advantage.
         </p>
         {isPlayerEdgeLiveConfigured() && (
           <p className="text-[10px] text-primary/70">Enhanced props: custom endpoint active.</p>
+        )}
+        {accuracy && accuracy.total >= 5 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold text-foreground">30-day accuracy:</span>
+            {accuracy.winPct != null && (
+              <span className={cn(
+                "font-bold px-2 py-0.5 rounded-full",
+                accuracy.winPct >= 60 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" :
+                accuracy.winPct >= 50 ? "bg-amber-500/15 text-amber-700 dark:text-amber-400" :
+                "bg-red-500/15 text-red-500"
+              )}>
+                {accuracy.winPct}% overall
+              </span>
+            )}
+            {(["HIGH", "MED", "LOW"] as const).map((c) => {
+              const tier = accuracy.byConfidence[c];
+              if (!tier || tier.wins + tier.losses < 3) return null;
+              const pct = Math.round(tier.wins / (tier.wins + tier.losses) * 100);
+              return (
+                <span key={c} className="text-muted-foreground">
+                  {c}: <span className="font-semibold text-foreground">{pct}%</span> ({tier.wins}W-{tier.losses}L)
+                </span>
+              );
+            })}
+            <Link to="/picks" className="text-primary hover:underline">view all →</Link>
+          </div>
         )}
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <span>{allItems.length} props scanned</span>

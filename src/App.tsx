@@ -16,6 +16,7 @@ import { pullMlbStarterConfirmationsFromSupabase } from "@/lib/mlbStarterConfirm
 import Index from "./pages/Index.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
+import PicksPage from "./pages/PicksPage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 /** SPA navigation keeps window scrollY; short pages (e.g. /edge) then look blank until refresh. */
@@ -60,6 +61,7 @@ const App = () => (
                     <Route path="/" element={<Index />} />
                     <Route path="/edge" element={<EdgeCardPage />} />
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
+                    <Route path="/picks" element={<PicksPage />} />
                     {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>
