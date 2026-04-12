@@ -643,30 +643,47 @@ function RoiByRiskBandPanel({ rows, loading }: { rows: RoiByRiskBandRow[]; loadi
 
 // ── Timing by sport panel ─────────────────────────────────────────────────────
 
+/** Weighted hit rate across all timing buckets for a single sport. */
+function aggTimingSportHitRate(rows: TimingBySportRow[], sport: string): number | null {
+  const sportRows = rows.filter((r) => r.sport === sport);
+  const resolved  = sportRows.reduce((s, r) => s + r.resolved_count, 0);
+  const wins      = sportRows.reduce((s, r) => s + r.win_count, 0);
+  return resolved > 0 ? Math.round((wins / resolved) * 1000) / 10 : null;
+}
+
 function TimingBySportPanel({
   rows,
   loading,
   lowResolutionSports = new Set<string>(),
+  data7 = [],
+  data30 = [],
 }: {
   rows: TimingBySportRow[];
   loading: boolean;
   lowResolutionSports?: Set<string>;
+  data7?: TimingBySportRow[];
+  data30?: TimingBySportRow[];
 }) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
   if (!resolved.length) return <NoDataNote label="timing by sport" />;
 
   const sports = [...new Set(resolved.map((r) => r.sport))];
+  const showTrend = data7.length > 0 && data30.length > 0;
 
   return (
     <div className="space-y-4">
       {sports.map((sport) => {
         const sportRows = resolved.filter((r) => r.sport === sport);
         const lowCoverage = lowResolutionSports.has(sport);
+        const sportDir = showTrend
+          ? trendDir(aggTimingSportHitRate(data7, sport), aggTimingSportHitRate(data30, sport))
+          : null;
         return (
           <div key={sport}>
-            <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1">
+            <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1 flex items-center gap-1.5">
               {sport}
+              {showTrend && <TrendBadge dir={sportDir} />}
               {lowCoverage && <LowCoverageNote sport={sport} />}
             </p>
             <div className="overflow-x-auto">
@@ -710,20 +727,35 @@ function TimingBySportPanel({
 
 // ── Recommended vs excluded by sport panel ────────────────────────────────────
 
+/** Delta (rec - excl hit rate) for a sport from a row set. */
+function sportFilterDelta(rows: RecommendedVsExcludedBySportRow[], sport: string): number | null {
+  const rec  = rows.find((r) => r.sport === sport && r.is_recommended);
+  const excl = rows.find((r) => r.sport === sport && !r.is_recommended);
+  if (rec?.hit_rate_pct != null && excl?.hit_rate_pct != null) {
+    return rec.hit_rate_pct - excl.hit_rate_pct;
+  }
+  return null;
+}
+
 function RecVsExclBySportPanel({
   rows,
   loading,
   lowResolutionSports = new Set<string>(),
+  data7 = [],
+  data30 = [],
 }: {
   rows: RecommendedVsExcludedBySportRow[];
   loading: boolean;
   lowResolutionSports?: Set<string>;
+  data7?: RecommendedVsExcludedBySportRow[];
+  data30?: RecommendedVsExcludedBySportRow[];
 }) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
   if (!resolved.length) return <NoDataNote label="filter quality by sport" />;
 
   const sports = [...new Set(resolved.map((r) => r.sport))];
+  const showTrend = data7.length > 0 && data30.length > 0;
 
   return (
     <div className="space-y-3">
@@ -736,6 +768,10 @@ function RecVsExclBySportPanel({
           rec?.hit_rate_pct != null && excl?.hit_rate_pct != null
             ? rec.hit_rate_pct - excl.hit_rate_pct
             : null;
+        // Trend: is the filter delta (rec - excl) widening or narrowing?
+        const filterTrend = showTrend
+          ? trendDir(sportFilterDelta(data7, sport), sportFilterDelta(data30, sport), 2)
+          : null;
 
         return (
           <div key={sport} className="space-y-1">
@@ -751,6 +787,7 @@ function RecVsExclBySportPanel({
                   {delta >= 0 ? "+" : ""}{delta.toFixed(1)}pp
                 </span>
               )}
+              {showTrend && <TrendBadge dir={filterTrend} />}
               {minN < MIN_RELIABLE && <span className="text-[9px] text-amber-500">n={minN} — low sample</span>}
               {lowCoverage && <LowCoverageNote sport={sport} />}
             </div>
@@ -876,12 +913,16 @@ function ConfCalibrationPanel({
   overallLoading,
   bySportLoading,
   lowResolutionSports = new Set<string>(),
+  overall7 = [],
+  overall30 = [],
 }: {
   overall: ConfidenceCalibrationRow[];
   bySport: ConfidenceCalibrationBySportRow[];
   overallLoading: boolean;
   bySportLoading: boolean;
   lowResolutionSports?: Set<string>;
+  overall7?: ConfidenceCalibrationRow[];
+  overall30?: ConfidenceCalibrationRow[];
 }) {
   // Calibration verdict: HIGH hit% > MED hit% > LOW hit%?
   const resolvedOverall = overall.filter((r) => (r.resolved_count ?? 0) >= MIN_NOISY);
@@ -892,6 +933,17 @@ function ConfCalibrationPanel({
     high != null && med != null && low != null && high > med && med > low;
   const partiallyOrdered =
     high != null && med != null && high > med;
+
+  // Trend: is HIGH confidence hit rate improving? Is the HIGH–LOW calibration gap widening?
+  const showCalibTrend = overall7.length > 0 && overall30.length > 0;
+  const high7   = overall7.find((r) => r.confidence === "HIGH")?.hit_rate_pct ?? null;
+  const high30  = overall30.find((r) => r.confidence === "HIGH")?.hit_rate_pct ?? null;
+  const low7    = overall7.find((r) => r.confidence === "LOW")?.hit_rate_pct ?? null;
+  const low30   = overall30.find((r) => r.confidence === "LOW")?.hit_rate_pct ?? null;
+  const gap7    = high7 != null && low7  != null ? high7  - low7  : null;
+  const gap30   = high30 != null && low30 != null ? high30 - low30 : null;
+  const highTrend = showCalibTrend ? trendDir(high7, high30) : null;
+  const gapTrend  = showCalibTrend ? trendDir(gap7, gap30, 1) : null;
 
   const sports = [...new Set(bySport.map((r) => r.sport))];
 
@@ -925,6 +977,26 @@ function ConfCalibrationPanel({
             : partiallyOrdered
             ? "Partially calibrated: HIGH > MED confirmed — LOW needs more data"
             : "⚠ Calibration gap: HIGH/MED ordering not confirmed — investigate confidence scoring"}
+        </div>
+      )}
+
+      {/* Calibration trend mini-table */}
+      {showCalibTrend && (high7 != null || high30 != null) && (
+        <div className="border border-border/50 rounded p-2 space-y-1 text-[10px]">
+          <p className="text-[9px] font-semibold text-muted-foreground tracking-wider mb-1.5">CALIBRATION TREND (7d vs 30d)</p>
+          {[
+            { label: "HIGH hit rate",   val7: high7,  val30: high30, dir: highTrend, suffix: "%" },
+            { label: "H–L gap",         val7: gap7,   val30: gap30,  dir: gapTrend,  suffix: "pp", note: "widening = better calibration" },
+          ].map(({ label, val7: v7, val30: v30, dir, suffix, note }) => (
+            <div key={label} className="flex items-center gap-2 flex-wrap">
+              <span className="text-muted-foreground w-24 shrink-0">{label}</span>
+              <span className="tabular-nums text-foreground">{v7 != null ? `${v7.toFixed(1)}${suffix}` : "—"}</span>
+              <span className="text-muted-foreground/50">vs</span>
+              <span className="tabular-nums text-muted-foreground">{v30 != null ? `${v30.toFixed(1)}${suffix}` : "—"}</span>
+              <TrendBadge dir={dir} showLabel />
+              {note && <span className="text-[9px] text-muted-foreground/50">{note}</span>}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1030,12 +1102,20 @@ export function PerformanceDashboard() {
 
   // Always fetch both windows so trend comparison is always available.
   // React Query dedupes against the window-driven hooks above when days matches.
-  const roiSportQ7   = useRoiBySport(7);
-  const roiSportQ30  = useRoiBySport(30);
-  const recVsExclQ7  = useRecommendedVsExcluded(7);
-  const recVsExclQ30 = useRecommendedVsExcluded(30);
+  const roiSportQ7          = useRoiBySport(7);
+  const roiSportQ30         = useRoiBySport(30);
+  const recVsExclQ7         = useRecommendedVsExcluded(7);
+  const recVsExclQ30        = useRecommendedVsExcluded(30);
+  const recVsExclSportQ7    = useRecommendedVsExcludedBySport(7);
+  const recVsExclSportQ30   = useRecommendedVsExcludedBySport(30);
+  const timingBySportQ7     = useTimingBySport(7);
+  const timingBySportQ30    = useTimingBySport(30);
+  const confidenceCalibQ7   = useConfidenceCalibration(7);
+  const confidenceCalibQ30  = useConfidenceCalibration(30);
 
-  const trendLoading = roiSportQ7.isLoading || roiSportQ30.isLoading || recVsExclQ7.isLoading || recVsExclQ30.isLoading;
+  const trendLoading =
+    roiSportQ7.isLoading || roiSportQ30.isLoading ||
+    recVsExclQ7.isLoading || recVsExclQ30.isLoading;
 
   // Sports with resolution < 40% get a caution flag on per-sport panels
   const lowResolutionSports = useMemo(
@@ -1142,13 +1222,25 @@ export function PerformanceDashboard() {
           {/* 8. Timing by sport */}
           <section className="space-y-2">
             <SectionHeader title="TIMING PERFORMANCE BY SPORT" />
-            <TimingBySportPanel rows={timingBySportQ.data ?? []} loading={timingBySportQ.isLoading} lowResolutionSports={lowResolutionSports} />
+            <TimingBySportPanel
+              rows={timingBySportQ.data ?? []}
+              loading={timingBySportQ.isLoading}
+              lowResolutionSports={lowResolutionSports}
+              data7={timingBySportQ7.data ?? []}
+              data30={timingBySportQ30.data ?? []}
+            />
           </section>
 
           {/* 9. Filter quality by sport */}
           <section className="space-y-2">
             <SectionHeader title="FILTER QUALITY BY SPORT (RECOMMENDED VS EXCLUDED)" />
-            <RecVsExclBySportPanel rows={recVsExclSportQ.data ?? []} loading={recVsExclSportQ.isLoading} lowResolutionSports={lowResolutionSports} />
+            <RecVsExclBySportPanel
+              rows={recVsExclSportQ.data ?? []}
+              loading={recVsExclSportQ.isLoading}
+              lowResolutionSports={lowResolutionSports}
+              data7={recVsExclSportQ7.data ?? []}
+              data30={recVsExclSportQ30.data ?? []}
+            />
           </section>
 
           {/* 10. ROI by market type */}
@@ -1172,6 +1264,8 @@ export function PerformanceDashboard() {
               overallLoading={confidenceCalibQ.isLoading}
               bySportLoading={confCalibBySportQ.isLoading}
               lowResolutionSports={lowResolutionSports}
+              overall7={confidenceCalibQ7.data ?? []}
+              overall30={confidenceCalibQ30.data ?? []}
             />
           </section>
         </div>
