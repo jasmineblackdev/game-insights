@@ -73,11 +73,25 @@ function passesHardRules(legs: ValueBetCandidate[], maxPerSport: number): boolea
   return true;
 }
 
-/** Prefer sweet-spot prices; block structurally bad legs for parlay construction. */
-function legPassesParlayBuildFilters(c: ValueBetCandidate): boolean {
+/**
+ * Prefer sweet-spot prices; block structurally bad legs for parlay construction.
+ * Mode-aware timing gating:
+ *   safe       → "wait" legs always excluded
+ *   balanced   → "wait" legs only pass when edge ≥ 0.08 (strong edge exception)
+ *   aggressive → all timing states allowed
+ */
+function legPassesParlayBuildFilters(c: ValueBetCandidate, mode: ParlayBuildMode = "balanced"): boolean {
   if (c.edge <= 0) return false;
   if (c.americanOdds <= -350 && c.edge < 0.07) return false;
   if (c.americanOdds > 0 && c.volatilityScore >= 55 && c.edge <= 0.08) return false;
+
+  const timing = c.timingUrgency;
+  if (timing === "wait") {
+    if (mode === "safe") return false;
+    if (mode === "balanced" && c.edge < 0.08) return false;
+    // aggressive: allow all timing states
+  }
+
   return true;
 }
 
@@ -106,7 +120,7 @@ function buildWarnings(legs: ValueBetCandidate[]): string[] {
   return w;
 }
 
-function scoreParlay(legs: ValueBetCandidate[]): SmartParlayResult {
+function scoreParlay(legs: ValueBetCandidate[], _mode: ParlayBuildMode = "balanced"): SmartParlayResult {
   const odds = legs.map((l) => l.americanOdds);
   const combined = parlayAmericanOdds(odds);
   const probs = legs.map((l) => l.modelProbability);
@@ -121,12 +135,19 @@ function scoreParlay(legs: ValueBetCandidate[]): SmartParlayResult {
   const payoutEff = Math.min(1, (mult - 1) / Math.max(1, legs.length * 0.35));
   const confirmQ = 1 - uncPen * 0.8;
 
+  // Explicit timing component — independent of volatilityScore.
+  // avgTimingScore 0–1: "now" legs push score up, "wait" legs push it down.
+  // Centered at 0.5 → net contribution ±0.03 at extremes (neutral default 0.55).
+  const avgTimingScore = legs.reduce((s, l) => s + (l.timingScore ?? 0.55), 0) / legs.length;
+  const timingBonus = (avgTimingScore - 0.5) * 0.06;
+
   const smartParlayScore =
     sumVal * 0.35 +
     avgConf * 0.2 +
     payoutEff * 0.15 +
     confirmQ * 0.1 +
-    div * 0.1 -
+    div * 0.1 +
+    timingBonus -
     (corrPen / 100) * 0.05 -
     volPen * 0.05;
 
@@ -155,10 +176,14 @@ function greedyBuild(
     maxPerSport: number;
     preferSafer: boolean;
     preferPayout: boolean;
+    mode: ParlayBuildMode;
     /** When true, first pass ignores `isRecommended` (ranked-live pool). */
     skipRecommendedFilter?: boolean;
   }
 ): ValueBetCandidate[] {
+  // Timing weight in sort: safe prioritizes "now" legs more aggressively.
+  const timingWeight = opts.mode === "safe" ? 0.12 : opts.mode === "aggressive" ? 0.04 : 0.08;
+
   const sorted = [...pool].sort((a, b) => {
     if (opts.preferSafer) {
       const rd = a.riskScore - b.riskScore;
@@ -168,8 +193,8 @@ function greedyBuild(
       const ad = b.americanOdds - a.americanOdds;
       if (Math.abs(ad) > 20) return ad;
     }
-    const sa = a.valueScore + oddsSweetSpotBonus(a.americanOdds);
-    const sb = b.valueScore + oddsSweetSpotBonus(b.americanOdds);
+    const sa = a.valueScore + oddsSweetSpotBonus(a.americanOdds) + (a.timingScore ?? 0.55) * timingWeight;
+    const sb = b.valueScore + oddsSweetSpotBonus(b.americanOdds) + (b.timingScore ?? 0.55) * timingWeight;
     return sb - sa;
   });
 
@@ -200,7 +225,7 @@ function greedyBuild(
       if (c.confidence === "low") continue;
       if (c.edge <= 0) continue;
       if (c.edge < MIN_EDGE_RECOMMEND) continue;
-      if (!legPassesParlayBuildFilters(c)) continue;
+      if (!legPassesParlayBuildFilters(c, opts.mode)) continue;
       picked.push(c);
       gameCounts.set(c.gameId, gc);
       sportC[c.sport] = sc;
@@ -226,16 +251,18 @@ export function optimizeSmartParlays(
       c.edge >= MIN_EDGE_RECOMMEND &&
       c.edge > 0 &&
       c.confidence !== "low" &&
-      legPassesParlayBuildFilters(c)
+      legPassesParlayBuildFilters(c, mode)
   );
   if (!pool.length) {
     pool = candidates.filter((c) => c.edge > 0 && c.confidence !== "low" && c.edge >= 0.03);
   }
   const maxPerSport = mode === "aggressive" ? 6 : 4;
+  // Safe mode dedupes more aggressively: tighter per-sport cap
+  const effectiveMaxPerSport = mode === "safe" ? Math.min(3, maxPerSport) : maxPerSport;
 
   const targetBest = Math.min(12, max);
-  let legsBest = greedyBuild(pool, targetBest, { maxPerSport, preferSafer: false, preferPayout: false });
-  while (legsBest.length > 2 && !passesHardRules(legsBest, maxPerSport)) {
+  let legsBest = greedyBuild(pool, targetBest, { maxPerSport: effectiveMaxPerSport, preferSafer: false, preferPayout: false, mode });
+  while (legsBest.length > 2 && !passesHardRules(legsBest, effectiveMaxPerSport)) {
     legsBest = legsBest.slice(0, -1);
   }
   if (legsBest.length < 2) {
@@ -243,21 +270,26 @@ export function optimizeSmartParlays(
       .filter((c) => c.confidence !== "low")
       .slice(0, Math.min(4, Math.max(2, pool.length)));
   }
-  const bestValue = scoreParlay(legsBest.length ? legsBest : pool.slice(0, Math.min(3, pool.length)));
+  const bestValue = scoreParlay(
+    legsBest.length ? legsBest : pool.slice(0, Math.min(3, pool.length)),
+    mode
+  );
 
   const legsSafe = greedyBuild(pool, Math.max(min, Math.min(5, max)), {
-    maxPerSport,
+    maxPerSport: effectiveMaxPerSport,
     preferSafer: true,
     preferPayout: false,
+    mode,
   });
-  const safer = scoreParlay(legsSafe);
+  const safer = scoreParlay(legsSafe, mode);
 
   const legsPay = greedyBuild(pool, Math.min(12, max + 2), {
     maxPerSport: maxPerSport + 1,
     preferSafer: false,
     preferPayout: true,
+    mode,
   });
-  const higherPayout = scoreParlay(legsPay);
+  const higherPayout = scoreParlay(legsPay, mode);
 
   return { bestValue, safer, higherPayout };
 }
@@ -272,10 +304,11 @@ export function optimizeForMode(candidates: ValueBetCandidate[], mode: ParlayBui
 export function optimizeFixedLegCount(
   candidates: ValueBetCandidate[],
   legCount: number,
-  maxPerSport = 4
+  maxPerSport = 4,
+  mode: ParlayBuildMode = "balanced"
 ): SmartParlayResult | null {
   const pool = candidates.filter(
-    (c) => c.edge > 0 && c.confidence !== "low" && legPassesParlayBuildFilters(c)
+    (c) => c.edge > 0 && c.confidence !== "low" && legPassesParlayBuildFilters(c, mode)
   );
   if (pool.length < legCount) return null;
 
@@ -283,6 +316,7 @@ export function optimizeFixedLegCount(
     maxPerSport,
     preferSafer: false,
     preferPayout: false,
+    mode,
     skipRecommendedFilter: true,
   });
   while (legs.length > 2 && !passesHardRules(legs, maxPerSport)) {
@@ -293,6 +327,7 @@ export function optimizeFixedLegCount(
       maxPerSport,
       preferSafer: true,
       preferPayout: false,
+      mode,
       skipRecommendedFilter: true,
     });
     while (legs.length > 2 && !passesHardRules(legs, maxPerSport)) {
@@ -300,5 +335,5 @@ export function optimizeFixedLegCount(
     }
   }
   if (legs.length < legCount) return null;
-  return scoreParlay(legs);
+  return scoreParlay(legs, mode);
 }

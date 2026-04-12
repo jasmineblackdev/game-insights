@@ -22,6 +22,7 @@ import { useEdgeCard } from "@/context/EdgeCardContext";
 import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
+import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashboard";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
@@ -403,7 +404,10 @@ function EdgeCardPageInner() {
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6 sm:space-y-8">
         {edgeTab === "value" ? (
-          <BestValuePicksSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+          <>
+            <BestValuePicksSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+            <PerformanceDashboard />
+          </>
         ) : null}
         {edgeTab === "parlay" ? (
           <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />

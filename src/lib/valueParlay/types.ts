@@ -39,6 +39,24 @@ export interface ValueBetCandidate {
   riskBand: "low" | "moderate" | "elevated" | "high";
   riskNote: string;
   isRecommended: boolean;
+  /**
+   * ML timing urgency signal — first-class parlay scoring dimension.
+   * "now"     = optimal window, positive timing bonus in parlay score
+   * "monitor" = neutral timing, no bonus/penalty
+   * "wait"    = adverse timing; excluded from safe parlays, penalised in balanced
+   */
+  timingUrgency?: "now" | "wait" | "monitor";
+  /**
+   * Continuous timing quality: 0–1.
+   * "now" → ~0.85, "monitor" → ~0.55, "wait" → ~0.15.
+   * Used as explicit parlay-score component (separate from volatilityScore).
+   */
+  timingScore?: number;
+  /**
+   * Human-readable reason this candidate was excluded / not recommended.
+   * Present when isRecommended=false; undefined when recommended.
+   */
+  exclusionReason?: string;
   sportsbookKey?: string;
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;

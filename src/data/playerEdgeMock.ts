@@ -189,25 +189,30 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
 }
 
 /**
+ * Continuous timing contribution for ranking.
+ * Consistent with the parlay engine's timingScore concept (0–1).
+ * Used as an additive bonus so "now" props surface reliably over "monitor"
+ * even when their raw scores are close — not just as a binary rank bucket.
+ */
+function timingRankBonus(urgency: PlayerEdgePrediction["timing_urgency"]): number {
+  if (urgency === "now")     return 2.5;
+  if (urgency === "monitor") return 0.0;
+  if (urgency === "wait")    return -2.0;
+  return 0.0;
+}
+
+/**
  * Sort predictions by composite score with ML-aware tiebreakers.
  *
- * Tiebreaker order:
- *  1. Timing urgency — "now" beats "monitor" beats "wait"
- *  2. Confidence tier
- *  3. Edge magnitude
+ * Primary sort: computePlayerEdgeScore() (which already multiplies by timingMultiplier).
+ * Tie-breaking: continuous timingRankBonus blended into a composite rank score,
+ * so ordering is smooth rather than a cliff at the 0.5 gap threshold.
  */
 export function sortPlayerEdgePredictions(list: PlayerEdgePrediction[]): PlayerEdgePrediction[] {
-  const URGENCY_RANK = { now: 0, monitor: 1, wait: 2 } as const;
-
   return [...list].sort((a, b) => {
-    const as = computePlayerEdgeScore(a);
-    const bs = computePlayerEdgeScore(b);
+    const as = computePlayerEdgeScore(a) + timingRankBonus(a.timing_urgency);
+    const bs = computePlayerEdgeScore(b) + timingRankBonus(b.timing_urgency);
     if (Math.abs(as - bs) > 0.5) return bs - as;
-
-    // Timing urgency tiebreaker
-    const au = a.timing_urgency ? URGENCY_RANK[a.timing_urgency] : 1;
-    const bu = b.timing_urgency ? URGENCY_RANK[b.timing_urgency] : 1;
-    if (au !== bu) return au - bu;
 
     // Confidence tiebreaker
     const cr = CONF_RANK[a.confidence] - CONF_RANK[b.confidence];

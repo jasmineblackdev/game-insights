@@ -429,20 +429,44 @@ const SPORT_TO_LEAGUE: Record<string, League> = {
   NBA: "nba", NFL: "nfl", MLB: "mlb", Boxing: "boxing", MMA: "mma",
 };
 
+/** Map ML timing_urgency → continuous timingScore (0–1). */
+function urgencyToTimingScore(urgency: string | undefined): number {
+  if (urgency === "now")     return 0.85;
+  if (urgency === "monitor") return 0.55;
+  if (urgency === "wait")    return 0.15;
+  return 0.55; // neutral default
+}
+
+/**
+ * Explain why a candidate is not recommended (debug / UI).
+ * Returns undefined when candidate IS recommended.
+ */
+function buildExclusionReason(
+  edge: number,
+  conf: import("@/data/mockGames").ConfidenceLevel,
+  volatilityScore: number,
+  timingUrgency?: "now" | "wait" | "monitor",
+): string | undefined {
+  if (conf === "low") return "Confidence: LOW — insufficient signal";
+  if (timingUrgency === "wait") return "Timing: model signals to wait";
+  if (edge < 0.04) return `Edge too small (${(edge * 100).toFixed(1)}% < 4.0% threshold)`;
+  if (volatilityScore >= 66) return `Volatility too high (${volatilityScore.toFixed(0)} ≥ 66)`;
+  return undefined;
+}
+
 /**
  * Convert ML-enriched PlayerEdgePrediction[] → ValueBetCandidate[].
  *
- * These come from the ESPN/combat pipeline (not game-level predictions) and
- * carry ML signals: timing_urgency, volatility_flag, ml_hit_probability.
+ * Timing and volatility are now first-class, separate dimensions:
+ *   volatilityScore = pure variance signal (consistency + volatility_flag only)
+ *   timingScore     = 0–1 timing quality  (now=0.85, monitor=0.55, wait=0.15)
+ *   timingUrgency   = raw urgency enum for mode-aware parlay filtering
  *
- * ML signals are encoded into existing ValueBetCandidate fields so the
- * parlay optimizer and all existing filters benefit without any structural change:
- *   - timing_urgency "wait"  → volatilityScore +25, isRecommended=false
- *   - timing_urgency "now"   → volatilityScore −8 (helps safe parlay selection)
- *   - volatility_flag true   → volatilityScore +15
- *
- * For safe parlay mode, the existing filter `vol < 66` naturally excludes
- * "wait" + volatile props whose combined volatilityScore exceeds the threshold.
+ * The parlay optimizer applies timing bonus/penalty explicitly in scoreParlay()
+ * and uses mode-aware thresholds in legPassesParlayBuildFilters():
+ *   safe       → strictly exclude "wait" legs
+ *   balanced   → allow "wait" only when edge ≥ 0.08
+ *   aggressive → allow all timing states
  */
 export function buildEnrichedPropCandidates(
   enrichedProps: PlayerEdgePrediction[],
@@ -478,22 +502,17 @@ export function buildEnrichedPropCandidates(
     const vigged = Math.min(0.93, Math.max(0.07, marketProb * 1.047));
     const americanOdds = americanFromImpliedProb(vigged);
 
-    // ── Volatility encoding — ML signals written into volatilityScore ──────
+    // ── volatilityScore = PURE variance signal (timing removed) ───────────
     const consistencyBase =
       pred.consistency_label === "volatile" ? 62
       : pred.consistency_label === "medium"  ? 40
       : 24;
-
-    const timingAdj =
-      pred.timing_urgency === "wait"    ? +25
-      : pred.timing_urgency === "now"   ? -8
-      : 0; // "monitor" or undefined
-
     const volatilityAdj = pred.volatility_flag ? +15 : 0;
+    const volatilityScore = Math.max(0, Math.min(100, consistencyBase + volatilityAdj));
 
-    const volatilityScore = Math.max(0, Math.min(100,
-      consistencyBase + timingAdj + volatilityAdj
-    ));
+    // ── timingScore = first-class timing dimension (0–1) ──────────────────
+    const timingUrgency = pred.timing_urgency as "now" | "wait" | "monitor" | undefined;
+    const timingScore = urgencyToTimingScore(timingUrgency);
 
     // ── Uncertainty from confidence + injury ──────────────────────────────
     const uncertaintyScore = Math.min(100,
@@ -520,18 +539,22 @@ export function buildEnrichedPropCandidates(
       marketDisagreementRisk:   18,
     });
 
-    // "wait" props are never recommended regardless of edge
+    // "wait" props are never recommended (mode-aware gating happens in optimizer)
     const isRecommended =
       edge >= 0.04 &&
       edge > 0 &&
       conf !== "low" &&
-      pred.timing_urgency !== "wait" &&
+      timingUrgency !== "wait" &&
       volatilityScore < 66;
 
-    // Build a human-readable timing note for riskNote
+    const exclusionReason = isRecommended
+      ? undefined
+      : buildExclusionReason(edge, conf, volatilityScore, timingUrgency);
+
+    // Build a human-readable risk note (timing info surfaced here too)
     const timingNote = pred.best_time_to_bet
-      ? `${pred.best_time_to_bet}`
-      : pred.timing_urgency === "now" ? "Bet now" : "";
+      ? pred.best_time_to_bet
+      : timingUrgency === "now" ? "Bet now" : timingUrgency === "wait" ? "Wait — timing unfavorable" : "";
     const volatileNote = pred.volatility_flag ? "ML: volatile" : "";
     const riskNotes = [
       pred.risk_factor,
@@ -561,6 +584,8 @@ export function buildEnrichedPropCandidates(
       confidence:          conf,
       volatilityScore,
       uncertaintyScore,
+      timingUrgency,
+      timingScore,
       correlationGroupId:  `ml-prop-${pred.game_id}-${pred.stat_type}`,
       valueScore:          vsCore,
       valueGrade:          valueGrade(vsCore),
@@ -568,6 +593,7 @@ export function buildEnrichedPropCandidates(
       riskBand:            riskBand(risk),
       riskNote:            riskNotes,
       isRecommended,
+      exclusionReason,
       matchupLabel:        `${pred.team} vs ${pred.opponent}`,
       lineMovementDeltaPp: pred.line_delta ?? null,
     });

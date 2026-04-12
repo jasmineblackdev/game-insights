@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ChevronDown, ChevronUp, Plus, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
@@ -19,6 +19,13 @@ import type { ParlayBuildMode, ValueBetCandidate } from "@/lib/valueParlay/types
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
+import {
+  analyzeExclusionDistribution,
+  analyzeTimingBuckets,
+  analyzeSafePoolDepth,
+  logCandidateAnalytics,
+} from "@/lib/valueParlay/candidateAnalytics";
+import { logCandidateBuild } from "@/lib/valueParlay/analyticsLogger";
 
 type PickKind = "all" | "team" | "props";
 type LeagueFilter = "all" | League;
@@ -129,6 +136,21 @@ function ValuePickCard({
             Value score {c.valueScore.toFixed(2)} · Risk index {c.riskScore.toFixed(0)} (
             {c.riskBand})
           </p>
+          {c.timingScore != null ? (
+            <p>
+              Timing score{" "}
+              <span className={c.timingScore >= 0.75 ? "text-emerald-500" : c.timingScore <= 0.25 ? "text-amber-500" : ""}>
+                {(c.timingScore * 100).toFixed(0)}/100
+              </span>
+              {c.timingUrgency ? ` · ${c.timingUrgency}` : ""}
+            </p>
+          ) : null}
+          {c.exclusionReason ? (
+            <p className="text-amber-500/80">
+              <span className="font-semibold">Excluded: </span>
+              {c.exclusionReason}
+            </p>
+          ) : null}
           <p>Correlation bucket: {c.correlationGroupId}</p>
         </div>
       ) : null}
@@ -167,6 +189,7 @@ export function BestValuePicksSection({
   const [leagueFilter, setLeagueFilter] = useState<LeagueFilter>("all");
   const [riskPreset, setRiskPreset] = useState<RiskPreset>("all");
   const [expandId, setExpandId] = useState<string | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const { data: propData } = useQuery({
     queryKey: ["player-edge-v2"],
@@ -184,6 +207,18 @@ export function BestValuePicksSection({
     );
     return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
   }, [games, oddsMap, propData]);
+
+  // Dev analytics: log to console + persist to Supabase whenever pool changes
+  useEffect(() => {
+    if (candidates.length > 0) {
+      logCandidateAnalytics(candidates, `BestValuePicks (${candidates.length})`);
+      logCandidateBuild(candidates).catch(() => {});
+    }
+  }, [candidates]);
+
+  const exclStats = useMemo(() => analyzeExclusionDistribution(candidates), [candidates]);
+  const timingStats = useMemo(() => analyzeTimingBuckets(candidates), [candidates]);
+  const safeStats = useMemo(() => analyzeSafePoolDepth(candidates), [candidates]);
 
   const filtered = useMemo(() => {
     let list = candidates;
@@ -304,6 +339,103 @@ export function BestValuePicksSection({
           ))}
         </div>
       </div>
+
+      {/* Analytics bar — filter health at a glance */}
+      {!loading && candidates.length > 0 ? (
+        <div className="rounded-lg border border-border bg-card/30 text-[10px]">
+          <button
+            type="button"
+            className="w-full flex items-center justify-between px-4 py-2 text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setShowAnalytics((v) => !v)}
+          >
+            <span className="font-semibold tracking-wider">
+              POOL ANALYTICS · {exclStats.recommended}/{exclStats.total} recommended
+              {exclStats.overfireWarning ? " · ⚠ filter overfire" : ""}
+              {safeStats.thinSports.length > 0 ? ` · ⚠ thin safe pool: ${safeStats.thinSports.join(", ")}` : ""}
+            </span>
+            {showAnalytics ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          </button>
+
+          {showAnalytics ? (
+            <div className="px-4 pb-3 space-y-3 border-t border-border">
+              {/* Exclusion breakdown */}
+              <div>
+                <p className="font-semibold tracking-wider text-muted-foreground pt-2 mb-1.5">EXCLUSION BREAKDOWN</p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Recommended {exclStats.recommended} ({exclStats.recommendedPct}%)
+                  </span>
+                  {Object.entries(exclStats.byReason).sort(([, a], [, b]) => b - a).map(([reason, count]) => (
+                    <span
+                      key={reason}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full border",
+                        exclStats.overfireWarning && reason === exclStats.topReason
+                          ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                          : "bg-muted/40 text-muted-foreground border-border"
+                      )}
+                    >
+                      {reason} {count}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timing distribution */}
+              <div>
+                <p className="font-semibold tracking-wider text-muted-foreground mb-1.5">TIMING DISTRIBUTION (ML PROPS)</p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Now {timingStats.now}
+                    {timingStats.tooManyNows ? " ⚠" : ""}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-muted/40 text-muted-foreground border border-border">
+                    Monitor {timingStats.monitor}
+                  </span>
+                  <span className={cn(
+                    "px-2 py-0.5 rounded-full border",
+                    timingStats.tooManyWaits
+                      ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                      : "bg-muted/40 text-muted-foreground border-border"
+                  )}>
+                    Wait {timingStats.wait}
+                    {timingStats.tooManyWaits ? " ⚠" : ""}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border">
+                    Untagged {timingStats.untagged}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-muted/30 text-muted-foreground border border-border tabular-nums">
+                    Avg score {(timingStats.avgTimingScore * 100).toFixed(0)}/100
+                  </span>
+                </div>
+              </div>
+
+              {/* Safe pool depth */}
+              <div>
+                <p className="font-semibold tracking-wider text-muted-foreground mb-1.5">SAFE MODE POOL DEPTH</p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-muted/40 text-muted-foreground border border-border">
+                    Eligible {safeStats.safeEligible}
+                  </span>
+                  {Object.entries(safeStats.bySport).map(([sport, n]) => (
+                    <span
+                      key={sport}
+                      className={cn(
+                        "px-2 py-0.5 rounded-full border uppercase font-bold",
+                        safeStats.thinSports.includes(sport)
+                          ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                          : "bg-muted/40 text-muted-foreground border-border"
+                      )}
+                    >
+                      {sport} {n}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
