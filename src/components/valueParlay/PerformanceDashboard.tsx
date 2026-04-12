@@ -101,9 +101,25 @@ function fmt(n: number | null, suffix = "%", decimals = 1): string {
   return `${n.toFixed(decimals)}${suffix}`;
 }
 
-function SectionHeader({ title }: { title: string }) {
+/** Panel-level total resolved count badge — warns when entire panel is low-N. */
+function PanelNBadge({ n }: { n: number }) {
+  const cls =
+    n >= 50  ? "text-emerald-600/70 dark:text-emerald-400/60 border-emerald-500/20 bg-emerald-500/5"
+    : n >= 10 ? "text-amber-500 border-amber-500/25 bg-amber-500/5"
+    :           "text-rose-500 border-rose-500/25 bg-rose-500/5";
   return (
-    <p className="text-[10px] font-semibold tracking-wider text-muted-foreground mb-2">{title}</p>
+    <span className={cn("text-[9px] font-mono font-semibold tabular-nums px-1.5 py-0.5 rounded border", cls)}>
+      {n < 10 ? "⚠ " : ""}n={n}
+    </span>
+  );
+}
+
+function SectionHeader({ title, totalN }: { title: string; totalN?: number }) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">{title}</p>
+      {totalN != null && <PanelNBadge n={totalN} />}
+    </div>
   );
 }
 
@@ -1117,6 +1133,23 @@ export function PerformanceDashboard() {
     roiSportQ7.isLoading || roiSportQ30.isLoading ||
     recVsExclQ7.isLoading || recVsExclQ30.isLoading;
 
+  // Panel-level total resolved counts for overreaction-risk panels.
+  // Shown as header badges so it's obvious at a glance if a panel is low-N.
+  const timingBySportTotalN = useMemo(
+    () => (timingBySportQ.data ?? []).reduce((s, r) => s + r.resolved_count, 0),
+    [timingBySportQ.data]
+  );
+  const recVsExclSportTotalN = useMemo(
+    () => (recVsExclSportQ.data ?? [])
+      .filter((r) => r.is_recommended)
+      .reduce((s, r) => s + r.resolved_count, 0),
+    [recVsExclSportQ.data]
+  );
+  const roiMarketTotalN = useMemo(
+    () => (roiMarketQ.data ?? []).reduce((s, r) => s + r.resolved_count, 0),
+    [roiMarketQ.data]
+  );
+
   // Sports with resolution < 40% get a caution flag on per-sport panels
   const lowResolutionSports = useMemo(
     () => new Set((resolutionQ.data ?? []).filter((r) => r.resolution_pct < 40).map((r) => r.sport)),
@@ -1221,7 +1254,7 @@ export function PerformanceDashboard() {
 
           {/* 8. Timing by sport */}
           <section className="space-y-2">
-            <SectionHeader title="TIMING PERFORMANCE BY SPORT" />
+            <SectionHeader title="TIMING PERFORMANCE BY SPORT" totalN={timingBySportQ.isLoading ? undefined : timingBySportTotalN} />
             <TimingBySportPanel
               rows={timingBySportQ.data ?? []}
               loading={timingBySportQ.isLoading}
@@ -1233,7 +1266,7 @@ export function PerformanceDashboard() {
 
           {/* 9. Filter quality by sport */}
           <section className="space-y-2">
-            <SectionHeader title="FILTER QUALITY BY SPORT (RECOMMENDED VS EXCLUDED)" />
+            <SectionHeader title="FILTER QUALITY BY SPORT (RECOMMENDED VS EXCLUDED)" totalN={recVsExclSportQ.isLoading ? undefined : recVsExclSportTotalN} />
             <RecVsExclBySportPanel
               rows={recVsExclSportQ.data ?? []}
               loading={recVsExclSportQ.isLoading}
@@ -1245,7 +1278,7 @@ export function PerformanceDashboard() {
 
           {/* 10. ROI by market type */}
           <section className="space-y-2">
-            <SectionHeader title="ROI BY MARKET TYPE (TOP BY ROI)" />
+            <SectionHeader title="ROI BY MARKET TYPE (TOP BY ROI)" totalN={roiMarketQ.isLoading ? undefined : roiMarketTotalN} />
             <RoiByMarketTypePanel rows={roiMarketQ.data ?? []} loading={roiMarketQ.isLoading} />
           </section>
 

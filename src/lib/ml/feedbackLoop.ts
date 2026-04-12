@@ -21,6 +21,35 @@ import { estimatePlattParams, savePlattParams, defaultPlattParams } from "@/lib/
 import { clampAlpha, getAlphaRange } from "@/lib/ml/alphaConfig";
 import { supabase } from "@/lib/supabase";
 
+// ── Alpha adjustment log (localStorage) ──────────────────────────────────────
+
+const ALPHA_ADJ_LS_PREFIX = "gamelens-alpha-adj-v1";
+
+export interface AlphaAdjustmentLog {
+  direction:    "up" | "down" | "unchanged";
+  alpha_before: number;
+  alpha_after:  number;
+  /** Hit rate delta (ml_blended - rules) in percentage points. */
+  diff_pp:      number;
+  timestamp:    string;
+}
+
+function writeAlphaAdjustmentLog(sport: string, entry: AlphaAdjustmentLog): void {
+  try {
+    localStorage.setItem(`${ALPHA_ADJ_LS_PREFIX}:${sport}`, JSON.stringify(entry));
+  } catch { /* localStorage unavailable — skip */ }
+}
+
+export function readAlphaAdjustmentLog(sport: string): AlphaAdjustmentLog | null {
+  try {
+    const raw = localStorage.getItem(`${ALPHA_ADJ_LS_PREFIX}:${sport}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as AlphaAdjustmentLog;
+  } catch {
+    return null;
+  }
+}
+
 /** Minimum outcomes before triggering weight recalibration for a sport. */
 const RECALIBRATION_THRESHOLD = 25;
 const PLATT_CALIBRATION_THRESHOLD = 100;
@@ -249,16 +278,29 @@ export async function maybeAdjustAlphaFromContribution(sport: string): Promise<v
     const current = getAdaptiveWeightsSync(sport as MLSport, "hit_probability", "pregame");
     if (!current) return;
 
-    const currentAlpha = current.alpha ?? range.min;
+    // computeAlpha is imported lazily to avoid circular dep; use inline formula
+    const currentAlpha = Math.min(0.40, 0.05 + (current.sample_size ?? 0) / 2000);
     let newAlpha = currentAlpha;
+    let direction: AlphaAdjustmentLog["direction"] = "unchanged";
 
     if (diff > 2) {
-      newAlpha = clampAlpha(sport, currentAlpha + range.step);
+      newAlpha   = clampAlpha(sport, currentAlpha + range.step);
+      direction  = newAlpha > currentAlpha ? "up" : "unchanged";
     } else if (diff < -2) {
-      newAlpha = clampAlpha(sport, currentAlpha - range.step);
+      newAlpha   = clampAlpha(sport, currentAlpha - range.step);
+      direction  = newAlpha < currentAlpha ? "down" : "unchanged";
     }
 
-    if (newAlpha === currentAlpha) return;
+    // Always log the check result — "unchanged" entries are useful for the panel
+    writeAlphaAdjustmentLog(sport, {
+      direction,
+      alpha_before: Math.round(currentAlpha * 10000) / 10000,
+      alpha_after:  Math.round(newAlpha    * 10000) / 10000,
+      diff_pp:      Math.round(diff * 10)  / 10,
+      timestamp:    new Date().toISOString(),
+    });
+
+    if (direction === "unchanged") return;
 
     // Write updated alpha back via updateWeights (reuses existing mechanism)
     await updateWeights(

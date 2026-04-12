@@ -21,6 +21,8 @@ import {
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
+import { readAlphaAdjustmentLog, type AlphaAdjustmentLog } from "@/lib/ml/feedbackLoop";
+import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
 // ── Sample size badge ────────────────────────────────────────────────────────
@@ -519,15 +521,16 @@ function TierSummaryPanel({ days }: { days: number }) {
 // ── Panel 7: Alpha status ─────────────────────────────────────────────────────
 
 interface AlphaRow {
-  sport:       string;
-  label:       string;
-  alpha:       number;
-  sampleSize:  number;
-  learned:     boolean;
-  min:         number;
-  max:         number;
-  step:        number;
+  sport:        string;
+  label:        string;
+  alpha:        number;
+  sampleSize:   number;
+  learned:      boolean;
+  min:          number;
+  max:          number;
+  step:         number;
   calibratedAt: string | null;
+  lastAdj:      AlphaAdjustmentLog | null;
 }
 
 const ALPHA_SPORTS: Array<{ key: string; label: string }> = [
@@ -562,7 +565,7 @@ function AlphaStatusPanel() {
 
   useEffect(() => {
     const loaded: AlphaRow[] = ALPHA_SPORTS.map(({ key, label }) => {
-      const w = getAdaptiveWeightsSync(key as Parameters<typeof getAdaptiveWeightsSync>[0], "hit_probability", "pregame");
+      const w     = getAdaptiveWeightsSync(key as Parameters<typeof getAdaptiveWeightsSync>[0], "hit_probability", "pregame");
       const range = getAlphaRange(key);
       return {
         sport:        key,
@@ -574,6 +577,7 @@ function AlphaStatusPanel() {
         max:          range.max,
         step:         range.step,
         calibratedAt: w.calibrated_at,
+        lastAdj:      readAlphaAdjustmentLog(key),
       };
     });
     setRows(loaded);
@@ -601,7 +605,8 @@ function AlphaStatusPanel() {
                   </th>
                   <th className="text-right py-1 pr-3 font-medium">Range</th>
                   <th className="text-right py-1 pr-3 font-medium">Samples</th>
-                  <th className="text-right py-1 font-medium">Status</th>
+                  <th className="text-right py-1 pr-3 font-medium">Status</th>
+                  <th className="text-right py-1 font-medium">Last adj</th>
                 </tr>
               </thead>
               <tbody>
@@ -609,6 +614,17 @@ function AlphaStatusPanel() {
                   const barW    = alphaBarWidth(r.alpha, r.min, r.max);
                   const dirChar = alphaStatusDir(r.alpha, r.min, r.max);
                   const textCls = alphaStatusColor(r.alpha, r.min, r.max, r.learned);
+                  const adj     = r.lastAdj;
+                  const adjAge  = adj
+                    ? formatDistanceToNow(new Date(adj.timestamp), { addSuffix: true })
+                    : null;
+                  const adjDirChar =
+                    adj?.direction === "up"   ? "↑" :
+                    adj?.direction === "down" ? "↓" : "→";
+                  const adjCls =
+                    adj?.direction === "up"   ? "text-emerald-500" :
+                    adj?.direction === "down" ? "text-red-400" :
+                                               "text-muted-foreground/60";
                   return (
                     <tr key={r.sport} className="border-t border-border/40">
                       <td className="py-2 pr-3 font-semibold text-foreground">{r.label}</td>
@@ -632,13 +648,28 @@ function AlphaStatusPanel() {
                       <td className="text-right py-2 pr-3">
                         <SampleBadge n={r.sampleSize} />
                       </td>
-                      <td className="text-right py-2">
+                      <td className="text-right py-2 pr-3">
                         {r.learned ? (
                           <span className="text-emerald-500 text-[10px] font-semibold">active</span>
                         ) : r.sampleSize >= 10 ? (
                           <span className="text-yellow-500 text-[10px] font-semibold">learning</span>
                         ) : (
                           <span className="text-muted-foreground/60 text-[10px]">seeding</span>
+                        )}
+                      </td>
+                      <td className="text-right py-2">
+                        {adj ? (
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span className={cn("text-[10px] font-semibold tabular-nums", adjCls)}>
+                              {adjDirChar}{" "}
+                              {adj.direction !== "unchanged"
+                                ? `${adj.diff_pp > 0 ? "+" : ""}${adj.diff_pp.toFixed(1)}pp`
+                                : "no change"}
+                            </span>
+                            <span className="text-[9px] text-muted-foreground/50">{adjAge}</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground/40">never run</span>
                         )}
                       </td>
                     </tr>
@@ -663,6 +694,8 @@ function AlphaStatusPanel() {
             <p className="pt-0.5">
               Alpha auto-adjusts ±{ALPHA_RANGES.nba?.step ?? 0.02} per sport when ml_blended
               outperforms/underperforms rules by &gt;2pp over the last 30 days.
+              The &quot;Last adj&quot; column shows ↑/↓ when adjusted, → when checked but unchanged.
+              &quot;never run&quot; means the feedback loop hasn&apos;t been triggered for that sport yet.
               Combat sports adjust more slowly due to smaller sample pools.
             </p>
           </div>
