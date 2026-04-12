@@ -7,6 +7,10 @@ import {
 import { fetchLivePlayerEdgePredictions } from "@/lib/espnPlayerStats";
 import { fetchCombatPlayerEdgePredictions } from "@/lib/combatPlayerEdge";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import {
+  enrichPredictions,
+  logSurfacedPredictions,
+} from "@/lib/ml/playerEdgeEnrichment";
 
 export type PlayerEdgeAccuracyRollup = {
   window: string;
@@ -114,7 +118,10 @@ export async function fetchPlayerEdgePredictions(
       if (sport !== "all") params.sport = sport;
       if (stat !== "all") params.statType = stat;
       const { items, accuracy } = await fetchPlayerEdgeJson(dataUrl, params);
-      return { items: ensureGameSort(items), accuracy, source: "api" };
+      const enriched = enrichPredictions(ensureGameSort(items));
+      // Fire-and-forget: log surfaced predictions for ML feedback loop
+      logSurfacedPredictions(enriched).catch(() => {});
+      return { items: enriched, accuracy, source: "api" };
     } catch (e) {
       console.warn("[GameLens] Player Edge API unavailable, falling back to ESPN stats:", e);
     }
@@ -133,7 +140,10 @@ export async function fetchPlayerEdgePredictions(
       if (stat !== "all" && p.stat_type !== stat) return false;
       return true;
     });
-    return { items: ensureGameSort(filtered), source: "api" };
+    const enriched = enrichPredictions(ensureGameSort(filtered));
+    // Fire-and-forget: log surfaced predictions for ML feedback loop
+    logSurfacedPredictions(enriched).catch(() => {});
+    return { items: enriched, source: "api" };
   } catch (e) {
     console.warn("[GameLens] Player stats unavailable:", e);
     return { items: [], source: "api" };
@@ -146,7 +156,10 @@ export async function fetchPlayerEdgeProjectionById(id: string): Promise<PlayerE
     try {
       const { items } = await fetchPlayerEdgeJson(dataUrl, { id });
       const list = ensureGameSort(items);
-      if (list.length > 0) return list[0] ?? null;
+      if (list.length > 0) {
+        const enriched = enrichPredictions(list);
+        return enriched[0] ?? null;
+      }
     } catch (e) {
       console.warn("[GameLens] Player Edge detail fetch failed:", e);
     }
@@ -157,7 +170,8 @@ export async function fetchPlayerEdgeProjectionById(id: string): Promise<PlayerE
       fetchLivePlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
       fetchCombatPlayerEdgePredictions().catch(() => [] as PlayerEdgePrediction[]),
     ]);
-    return [...espnItems, ...combatItems].find((p) => p.id === id) ?? null;
+    const found = [...espnItems, ...combatItems].find((p) => p.id === id);
+    return found ? (enrichPredictions([found])[0] ?? null) : null;
   } catch {
     return null;
   }

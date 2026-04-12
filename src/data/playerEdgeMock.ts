@@ -22,6 +22,24 @@ export type PlayerRiskTier = "safe" | "balanced" | "high_upside" | "longshot";
 
 export type PlayerConsistencyLabel = "stable" | "medium" | "volatile";
 
+/** Internal ML debug snapshot — logged to prediction_history, not shown in UI. */
+export interface MLDebugSnapshot {
+  rules_projection:     number;
+  ml_projection:        number;
+  blended_projection:   number;
+  implied_probability:  number;
+  edge_rules:           number;
+  edge_blended:         number;
+  confidence_rules:     string;
+  confidence_blended:   string;
+  timing_urgency:       string;
+  volatility_flag:      boolean;
+  alpha:                number;
+  ml_sample_size:       number;
+  ml_active:            boolean;
+  stability_score:      number;
+}
+
 export type PlayerEdgePrediction = PlayerPropInput & {
   game_sort: number;
   confidence_score_0_100?: number;
@@ -37,6 +55,24 @@ export type PlayerEdgePrediction = PlayerPropInput & {
   opening_line_value?: number;
   /** line_value − opening_line_value. Positive = line moved up (worse for Over). */
   line_delta?: number;
+
+  // ── ML-enriched fields (added by playerEdgeEnrichment.ts) ────────────────
+  /** Whether the ML layer had ≥25 resolved outcomes and is actively contributing. */
+  ml_active?: boolean;
+  /** Blended P(bet wins) from hitProbability model + rules engine. Range: [0.05, 0.95]. */
+  ml_hit_probability?: number;
+  /** Timing urgency from ML timing model. "now" → rank higher. */
+  timing_urgency?: "now" | "wait" | "monitor";
+  /** Human-readable timing recommendation (e.g. "Bet now", "After Q1"). */
+  best_time_to_bet?: string | null;
+  /** True when stat variance is high — confidence model flags this as unreliable. */
+  volatility_flag?: boolean;
+  /** 80% confidence interval lower bound from propProjection model. */
+  projection_ci_low?: number;
+  /** 80% confidence interval upper bound from propProjection model. */
+  projection_ci_high?: number;
+  /** Internal debug snapshot — not surfaced in the UI, used for logging only. */
+  ml_debug?: MLDebugSnapshot;
 };
 
 const CONF_RANK = { HIGH: 0, MED: 1, LOW: 2 } as const;
@@ -68,10 +104,30 @@ export function statFilterLabel(f: PlayerEdgeStatFilter): string {
 }
 
 /**
+ * Timing urgency multiplier for ranking.
+ * "now" props rank higher; "wait" props rank lower.
+ * Conservative range — never inverts a strong vs weak prediction.
+ */
+function timingMultiplier(urgency: PlayerEdgePrediction["timing_urgency"]): number {
+  if (urgency === "now")     return 1.12;
+  if (urgency === "wait")    return 0.90;
+  return 1.00; // "monitor" or undefined
+}
+
+/**
  * Compute composite player edge score from available fields.
+ *
+ * When ML fields are present, the score incorporates:
+ *  - ml_hit_probability (replaces rules-only confidence component)
+ *  - timing_urgency     (multiplier on total score)
+ *  - volatility_flag    (additional penalty when ML flags high variance)
+ *
+ * Rules engine fields remain primary; ML fields are a conservative modifier.
+ *
  * player_edge_score = (model_edge * 0.30) + (projection_confidence * 0.20)
  *   + (matchup_advantage * 0.15) + (role_stability * 0.10)
  *   + (recent_form * 0.10) + (market_value * 0.10) - (volatility_penalty * 0.05)
+ *   * timing_multiplier
  */
 export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
   if (pred.player_edge_score != null) return pred.player_edge_score;
@@ -80,9 +136,20 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
   const maxEdge = pred.sport === "NBA" ? 8 : pred.sport === "NFL" ? 30 : pred.sport === "MLB" ? 3 : 15;
   const model_edge = Math.min(1, Math.abs(pred.edge) / maxEdge);
 
+  // When ML hit probability is available, blend it with rules confidence signal
+  // ml_hit_probability is in [0.05, 0.95] — scale to [0, 1] from the 0.5 midpoint
+  const mlHitSignal = pred.ml_hit_probability != null
+    ? (pred.ml_hit_probability - 0.50) * 2  // Centered: 0.5→0, 0.75→0.5, 0.95→0.9
+    : null;
+
   const rawConf = pred.confidence_score_0_100
     ?? (pred.confidence === "HIGH" ? 72 : pred.confidence === "MED" ? 58 : 44);
-  const projection_confidence = rawConf / 100;
+  const rulesConfSignal = rawConf / 100;
+
+  // Blend rules confidence with ML hit probability (ML only when active)
+  const projection_confidence = mlHitSignal != null && pred.ml_active
+    ? rulesConfSignal * 0.60 + Math.max(0, mlHitSignal) * 0.40
+    : rulesConfSignal;
 
   const matchup_advantage =
     pred.confidence === "HIGH" ? 1.0 : pred.confidence === "MED" ? 0.6 : 0.3;
@@ -100,12 +167,14 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
     : pred.risk_tier === "longshot" ? 0.9
     : 0.6;
 
+  // ML volatility flag adds to penalty when present
+  const mlVolatilityExtra = pred.volatility_flag ? 0.5 : 0;
   const volatility_penalty =
-    pred.consistency_label === "volatile" ? 1.0
-    : pred.consistency_label === "medium" ? 0.5
-    : 0;
+    pred.consistency_label === "volatile" ? 1.0 + mlVolatilityExtra
+    : pred.consistency_label === "medium" ? 0.5 + mlVolatilityExtra * 0.5
+    : mlVolatilityExtra * 0.5;
 
-  return (
+  const rawScore = (
     model_edge * 0.30
     + projection_confidence * 0.20
     + matchup_advantage * 0.15
@@ -114,15 +183,37 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
     + market_value * 0.10
     - volatility_penalty * 0.05
   ) * 100;
+
+  // Timing urgency adjusts the raw score post-computation
+  return rawScore * timingMultiplier(pred.timing_urgency);
 }
 
+/**
+ * Sort predictions by composite score with ML-aware tiebreakers.
+ *
+ * Tiebreaker order:
+ *  1. Timing urgency — "now" beats "monitor" beats "wait"
+ *  2. Confidence tier
+ *  3. Edge magnitude
+ */
 export function sortPlayerEdgePredictions(list: PlayerEdgePrediction[]): PlayerEdgePrediction[] {
+  const URGENCY_RANK = { now: 0, monitor: 1, wait: 2 } as const;
+
   return [...list].sort((a, b) => {
     const as = computePlayerEdgeScore(a);
     const bs = computePlayerEdgeScore(b);
     if (Math.abs(as - bs) > 0.5) return bs - as;
+
+    // Timing urgency tiebreaker
+    const au = a.timing_urgency ? URGENCY_RANK[a.timing_urgency] : 1;
+    const bu = b.timing_urgency ? URGENCY_RANK[b.timing_urgency] : 1;
+    if (au !== bu) return au - bu;
+
+    // Confidence tiebreaker
     const cr = CONF_RANK[a.confidence] - CONF_RANK[b.confidence];
     if (cr !== 0) return cr;
+
+    // Edge tiebreaker
     return Math.abs(b.edge) - Math.abs(a.edge);
   });
 }

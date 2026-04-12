@@ -18,7 +18,7 @@
 import type { FeedbackRecord, MLSport, MLContext } from "@/lib/ml/types";
 import { updateWeights, getAdaptiveWeightsSync } from "@/lib/ml/weights";
 import { estimatePlattParams, savePlattParams, defaultPlattParams } from "@/lib/ml/calibration";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase";
 
 /** Minimum outcomes before triggering weight recalibration for a sport. */
 const RECALIBRATION_THRESHOLD = 25;
