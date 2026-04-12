@@ -9,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { ClipboardList, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -18,6 +18,8 @@ import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchBoxingPredictions } from "@/lib/boxingFetch";
 import { fetchMmaPredictions } from "@/lib/mmaFetch";
+import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
+import { sortPlayerEdgePredictions, type PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
@@ -25,7 +27,7 @@ import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { OddsDebugBadge } from "@/components/OddsDebugBadge";
 
-type ViewMode = "games" | "props" | "draft" | "college_futures" | "parlay_edge";
+type ViewMode = "home" | "best_picks" | "player_props" | "parlay_builder" | "live" | "draft" | "college_futures";
 
 function DataSourceStatus() {
   // Supabase health: just verify the connection is live, don't require specific tables
@@ -149,11 +151,226 @@ function leagueLabel(league: League): string {
   return league.toUpperCase();
 }
 
+// ── Home dashboard helpers ────────────────────────────────────────────────────
+
+function topPicksForToday(games: GamePrediction[]): GamePrediction[] {
+  const today = games.filter((g) => g.gameDate === "today");
+  const pool = today.length > 0 ? today : games;
+  const confOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+  return [...pool]
+    .sort((a, b) => {
+      const ca = confOrder[a.confidence] ?? 2;
+      const cb = confOrder[b.confidence] ?? 2;
+      if (ca !== cb) return ca - cb;
+      return (
+        Math.abs(b.winProbability.home - b.winProbability.away) -
+        Math.abs(a.winProbability.home - a.winProbability.away)
+      );
+    })
+    .slice(0, 3);
+}
+
+function HomePickCard({
+  game,
+  rank,
+  onSelect,
+}: {
+  game: GamePrediction;
+  rank: number;
+  onSelect: () => void;
+}) {
+  const homeWins = game.winProbability.home >= game.winProbability.away;
+  const pick = homeWins ? game.homeTeam : game.awayTeam;
+  const prob = Math.round(Math.max(game.winProbability.home, game.winProbability.away) * 100);
+  const confClass =
+    game.confidence === "high"
+      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+      : game.confidence === "medium"
+        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+        : "bg-muted text-muted-foreground";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className="text-left rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors p-4 flex flex-col gap-2 w-full"
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground font-medium">Pick #{rank}</span>
+        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
+          {game.confidence.toUpperCase()}
+        </span>
+        <span className="text-[10px] font-medium text-muted-foreground ml-auto">{game.league.toUpperCase()}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {game.homeTeam.name} vs {game.awayTeam.name}
+      </p>
+      <p className="font-display font-bold text-lg text-foreground leading-tight">
+        {pick.name} to win
+      </p>
+      <p className="text-xs text-muted-foreground">{prob}% model probability</p>
+    </button>
+  );
+}
+
+function HomePropCard({
+  pred,
+  rank,
+}: {
+  pred: PlayerEdgePrediction;
+  rank: number;
+}) {
+  const dirLabel = pred.prediction_direction === "MORE" ? "Over" : "Under";
+  const stat = pred.stat_type.replace(/_/g, " ");
+  const headline =
+    pred.stat_type === "fight_winner"
+      ? `${pred.player_name} to Win`
+      : `${dirLabel} ${pred.line_value} ${stat}`;
+
+  const confClass =
+    pred.confidence === "HIGH"
+      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+      : pred.confidence === "MED"
+        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+        : "bg-muted text-muted-foreground";
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-muted-foreground font-medium">Prop #{rank}</span>
+        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
+          {pred.confidence}
+        </span>
+        <span className="text-[10px] font-medium text-muted-foreground ml-auto">{pred.sport}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">{pred.player_name}</p>
+      <p className="font-display font-bold text-lg text-foreground leading-tight">{headline}</p>
+      <p className="text-xs text-muted-foreground">
+        Edge{" "}
+        <span className={cn("font-bold", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
+          {pred.prediction_direction === "MORE" ? "+" : "−"}{Math.abs(pred.edge).toFixed(1)}
+        </span>
+      </p>
+    </div>
+  );
+}
+
+function HomeDashboard({
+  topGames,
+  topProps,
+  league,
+  onSelectGame,
+  onNavigate,
+}: {
+  topGames: GamePrediction[];
+  topProps: PlayerEdgePrediction[];
+  league: League;
+  onSelectGame: (g: GamePrediction) => void;
+  onNavigate: (m: ViewMode) => void;
+}) {
+  return (
+    <div className="space-y-10">
+      {/* Top AI Picks Today */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-bold text-lg text-foreground">Top AI Picks Today</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Highest-confidence {leagueLabel(league)} picks right now
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate("best_picks")}
+            className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
+          >
+            See all picks →
+          </button>
+        </div>
+        {topGames.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {topGames.map((game, i) => (
+              <HomePickCard
+                key={game.id}
+                game={game}
+                rank={i + 1}
+                onSelect={() => onSelectGame(game)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-card/40 p-6 text-center text-sm text-muted-foreground">
+            Loading picks… select a league above to load today's games.
+          </div>
+        )}
+      </section>
+
+      {/* Best Player Props Today */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-bold text-lg text-foreground">Best Player Props Today</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Top-ranked props by edge and confidence</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate("player_props")}
+            className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
+          >
+            See all props →
+          </button>
+        </div>
+        {topProps.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {topProps.map((pred, i) => (
+              <HomePropCard key={pred.id} pred={pred} rank={i + 1} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border bg-card/40 p-6 text-center text-sm text-muted-foreground">
+            Loading props…
+          </div>
+        )}
+      </section>
+
+      {/* Parlay Builder CTA */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-display font-bold text-lg text-foreground">Top Parlays Today</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Safe, Balanced, and Aggressive AI-built parlays
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate("parlay_builder")}
+            className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
+          >
+            Build parlay →
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate("parlay_builder")}
+          className="w-full rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors p-6 flex flex-col items-center gap-3"
+        >
+          <Sparkles className="w-8 h-8 text-primary opacity-80" />
+          <p className="font-display font-bold text-base text-foreground">Open Parlay Builder</p>
+          <p className="text-xs text-muted-foreground max-w-xs text-center">
+            AI generates Safe (3-leg), Balanced (4-leg), and Aggressive (6-leg) parlays ranked by edge and hit probability.
+          </p>
+        </button>
+      </section>
+    </div>
+  );
+}
+
 const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
-  const [viewMode, setViewMode] = useState<ViewMode>("games");
+  const [viewMode, setViewMode] = useState<ViewMode>("home");
   const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
 
   // Phase 1: ESPN-only — shows cards in ~200ms
@@ -353,9 +570,23 @@ const Index = () => {
   const todayLabel = `Today · ${formatDate(today)}`;
   const tomorrowLabel = `Tomorrow · ${formatDate(tomorrow)}`;
 
-  const filteredGames = leagueGamesWithIntel.filter((g) => g.gameDate === dateFilter);
+  // "live" mode always shows today; "best_picks" uses the date picker selection
+  const effectiveDateFilter = viewMode === "live" ? "today" : dateFilter;
+  const filteredGames = leagueGamesWithIntel.filter((g) => g.gameDate === effectiveDateFilter);
 
   const highConfCount = filteredGames.filter((g) => g.confidence === "high").length;
+
+  const homePropsQuery = useQuery({
+    queryKey: ["player-edge-v2"],
+    queryFn: () => fetchPlayerEdgePredictions("all", "all"),
+    staleTime: 3 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    enabled: viewMode === "home",
+  });
+  const topHomeProps = useMemo<PlayerEdgePrediction[]>(
+    () => sortPlayerEdgePredictions(homePropsQuery.data?.items ?? []).slice(0, 3),
+    [homePropsQuery.data]
+  );
 
   const draftPicksQuery = useQuery({
     queryKey: ["draft-picks", league],
@@ -443,30 +674,29 @@ const Index = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="font-display font-bold text-2xl sm:text-3xl md:text-4xl text-foreground mb-2 break-words"
                 >
-                  {viewMode === "parlay_edge" ? (
-                    <>
-                      Parlay <span className="text-gradient-primary">Edge</span>
-                    </>
-                  ) : viewMode === "college_futures" ? (
-                    <>
-                      College <span className="text-gradient-primary">Futures</span>
-                    </>
-                  ) : viewMode === "draft" ? (
-                    <>
-                      {leagueLabel(league)}{" "}
-                      <span className="text-gradient-primary">Draft Edge</span>
-                    </>
-                  ) : viewMode === "props" ? (
-                    <>Player <span className="text-gradient-primary">Props</span></>
-                  ) : (
+                  {viewMode === "home" ? (
+                    <>Top AI <span className="text-gradient-primary">Picks Today</span></>
+                  ) : viewMode === "best_picks" ? (
                     <>
                       {dateFilter === "today"
                         ? "Today's"
                         : dateFilter === "tomorrow"
                           ? "Tomorrow's"
                           : "Next 7 days · "}{" "}
-                      <span className="text-gradient-primary">Predictions</span>
+                      <span className="text-gradient-primary">Best Picks</span>
                     </>
+                  ) : viewMode === "player_props" ? (
+                    <>Player <span className="text-gradient-primary">Props</span></>
+                  ) : viewMode === "parlay_builder" ? (
+                    <>Parlay <span className="text-gradient-primary">Builder</span></>
+                  ) : viewMode === "live" ? (
+                    <>Live <span className="text-gradient-primary">Opportunities</span></>
+                  ) : viewMode === "college_futures" ? (
+                    <>College <span className="text-gradient-primary">Futures</span></>
+                  ) : viewMode === "draft" ? (
+                    <>{leagueLabel(league)} <span className="text-gradient-primary">Draft Edge</span></>
+                  ) : (
+                    <>Today's <span className="text-gradient-primary">Picks</span></>
                   )}
                 </motion.h2>
                 <motion.p
@@ -475,29 +705,24 @@ const Index = () => {
                   transition={{ delay: 0.1 }}
                   className="text-sm text-muted-foreground max-w-lg leading-relaxed"
                 >
-                  {viewMode === "parlay_edge" ? (
-                    <>
-                      AI-built parlays ranked by edge, confidence, and risk tier. Safe 3-leg, Balanced 4-leg, and Aggressive 6-leg cards generated automatically. Learns which sport mixes and market combos perform best over time.
-                    </>
+                  {viewMode === "home" ? (
+                    <>AI's best bets across games and props — updated daily. Tap any pick to copy or explore.</>
+                  ) : viewMode === "player_props" ? (
+                    <>Player prop edges across NBA, NFL, and MLB — filter by sport and stat type.</>
+                  ) : viewMode === "parlay_builder" ? (
+                    <>AI-built parlays ranked by edge, confidence, and risk tier — Safe, Balanced, and Aggressive cards built automatically.</>
+                  ) : viewMode === "live" ? (
+                    <>Today's live and upcoming games — highest-confidence picks for right now.</>
                   ) : viewMode === "college_futures" ? (
-                    <>
-                      Championship futures markets for college football, basketball, and baseball — conference winners, national champions, and award props. Powered by The Odds API.
-                    </>
+                    <>Championship futures markets for college football, basketball, and baseball.</>
                   ) : viewMode === "draft" ? (
                     <>
-                      AI-style outcomes: probability ranges, team fit, positional value, and prop-style cards (O/U, round /
-                      window moves, team needs). Add any card to your Edge Card — separate from game markets.
+                      AI-style outcomes: probability ranges, team fit, positional value, and prop-style cards.
                       {draftPicks.length > 0 ? (
-                        <>
-                          {" "}
-                          Expand <span className="text-foreground/80">Classic pick-by-pick board</span> below for grades and
-                          scouting blurbs.
-                        </>
+                        <> Expand <span className="text-foreground/80">Classic pick-by-pick board</span> below.</>
                       ) : null}
                     </>
-                  ) : viewMode === "props" ? (
-                    <>Player prop edges across NBA, NFL, and MLB — filter by sport and stat type.</>
-                  ) : league === "nba" ? (
+                  ) : viewMode === "best_picks" && league === "nba" ? (
                     <>Live NBA predictions — win probability, spread lean, injuries, and team trends.</>
                   ) : league === "nfl" ? (
                     <>Live NFL predictions — win probability, spread lean, injuries, weather, and team trends.</>
@@ -576,78 +801,37 @@ const Index = () => {
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center mb-5">
                 <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible sm:pb-0 [scrollbar-width:thin]">
                   <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handleViewModeChange("games")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "games"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <Tv2 className="w-3 h-3 shrink-0" />
-                      Games
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleViewModeChange("props")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "props"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <User className="w-3 h-3 shrink-0" />
-                      Props
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleViewModeChange("draft")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "draft"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <ClipboardList className="w-3 h-3 shrink-0" />
-                      Draft
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleViewModeChange("college_futures")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "college_futures"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <Trophy className="w-3 h-3 shrink-0" />
-                      College futures
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleViewModeChange("parlay_edge")}
-                      className={cn(
-                        "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
-                        viewMode === "parlay_edge"
-                          ? "bg-card text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground active:bg-muted"
-                      )}
-                    >
-                      <Sparkles className="w-3 h-3 shrink-0" />
-                      Parlay Edge
-                    </button>
+                    {(
+                      [
+                        { mode: "home",           icon: Home,        label: "Home" },
+                        { mode: "best_picks",     icon: TrendingUp,  label: "Best Picks" },
+                        { mode: "player_props",   icon: User,        label: "Player Props" },
+                        { mode: "parlay_builder", icon: Sparkles,    label: "Parlay Builder" },
+                        { mode: "live",           icon: Zap,         label: "Live" },
+                      ] as const
+                    ).map(({ mode, icon: Icon, label }) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => handleViewModeChange(mode)}
+                        className={cn(
+                          "flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0",
+                          viewMode === mode
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground active:bg-muted"
+                        )}
+                      >
+                        <Icon className="w-3 h-3 shrink-0" />
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Date switcher only visible in Games mode.
+                {/* Date switcher only visible in Best Picks mode.
                     Combat sports show "Next 14 days" as the third option
                     since fights rarely fall on exact today/tomorrow dates. */}
-                {viewMode === "games" && (
+                {viewMode === "best_picks" && (
                   <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible [scrollbar-width:thin] min-w-0 w-full sm:w-auto">
                     <DatePicker
                       value={dateFilter}
@@ -665,11 +849,19 @@ const Index = () => {
               </div>
 
               {/* Content */}
-              {viewMode === "parlay_edge" ? (
+              {viewMode === "home" ? (
+                <HomeDashboard
+                  topGames={topPicksForToday(leagueGamesWithIntel)}
+                  topProps={topHomeProps}
+                  league={league}
+                  onSelectGame={setSelectedGame}
+                  onNavigate={handleViewModeChange}
+                />
+              ) : viewMode === "parlay_builder" ? (
                 <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
-              ) : viewMode === "props" ? (
+              ) : viewMode === "player_props" ? (
                 <PlayerEdgeSection />
               ) : viewMode === "draft" ? (
                 <div className="space-y-10">

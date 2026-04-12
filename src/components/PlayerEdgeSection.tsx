@@ -145,7 +145,7 @@ function PlayerEdgeCard({
         confColor(pred)
       )}
     >
-      {/* ── Header row ─────────────────────────────────── */}
+      {/* ── Header row: player identity ────────────────── */}
       <div className="flex items-start gap-3">
         <div className="relative shrink-0">
           <div className="w-11 h-11 rounded-full bg-primary/10 border border-border flex items-center justify-center text-xs font-bold text-primary">
@@ -174,104 +174,107 @@ function PlayerEdgeCard({
               <Star className={cn("w-4 h-4", favorited && "fill-current")} />
             </button>
           )}
-          <div className="flex flex-wrap items-center gap-1.5 gap-y-1">
-            <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-              {pred.sport}
-            </span>
-            <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confBadgeClass(pred))}>
-              {pred.confidence}
-            </span>
-            {pred.risk_tier && (
-              <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", riskBadgeClass(pred.risk_tier))}>
-                {riskLabel(pred.risk_tier)}
-              </span>
-            )}
-          </div>
+          {/* Sport badge only — confidence moves below headline */}
+          <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+            {pred.sport}
+          </span>
           <p className="font-display font-bold text-sm text-foreground mt-1 truncate">{pred.player_name}</p>
           <p className="text-xs text-muted-foreground">
             {isCombatSport ? `vs ${pred.opponent}` : `${pred.team} vs ${pred.opponent}`}
             {pred.game_time ? ` · ${pred.game_time}` : ""}
           </p>
-          {pred.trend_note && (
-            <p className="text-[11px] text-primary font-medium mt-0.5">{pred.trend_note}</p>
-          )}
         </div>
       </div>
 
-      {/* ── Bet headline (DK-style big recommendation) ── */}
-      <div className="bg-muted/40 rounded-md px-3 py-2.5 text-center">
-        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-0.5">
+      {/* ── BIG: Bet recommendation ───────────────────────── */}
+      <div className="bg-muted/40 rounded-md px-3 py-3 text-center">
+        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
           {isCombatSport ? "Fight Prop" : "Bet Recommendation"}
         </p>
-        <p className="font-display font-bold text-lg text-foreground leading-tight">{headline}</p>
-        {pred.confidence_score_0_100 != null && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">
-            AI score{" "}
-            <span className="font-bold text-foreground">{Math.round(score)}</span>
-            <span className="text-muted-foreground">/100</span>
-          </p>
+        <p className="font-display font-bold text-xl text-foreground leading-tight">{headline}</p>
+      </div>
+
+      {/* ── MEDIUM: Confidence + risk tier ───────────────── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Confidence</span>
+          <span className={cn("text-sm font-bold px-2.5 py-0.5 rounded-full", confBadgeClass(pred))}>
+            {pred.confidence === "HIGH" ? "High" : pred.confidence === "MED" ? "Medium" : "Low"}
+          </span>
+        </div>
+        {pred.risk_tier && (
+          <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", riskBadgeClass(pred.risk_tier))}>
+            {riskLabel(pred.risk_tier)}
+          </span>
+        )}
+        {pred.trend_note && (
+          <span className="text-[10px] text-primary font-medium">{pred.trend_note}</span>
         )}
       </div>
 
-      {/* ── Stats grid ───────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+      {/* ── SMALL: Projection + Edge (supporting math) ───── */}
+      <div className="flex items-center gap-4 text-[11px]">
         <div>
-          <p className="text-muted-foreground">Projection</p>
-          <p className="font-bold text-foreground tabular-nums">
+          <span className="text-muted-foreground">Projection </span>
+          <span className="font-bold text-foreground tabular-nums">
             {isCombatSport && pred.stat_type === "fight_winner"
               ? `${pred.projected_value}%`
               : pred.projected_value}
-          </p>
+          </span>
         </div>
         <div>
-          <p className="text-muted-foreground">Edge</p>
-          <p className={cn("font-bold tabular-nums", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
+          <span className="text-muted-foreground">Edge </span>
+          <span className={cn("font-bold tabular-nums", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
             {pred.prediction_direction === "MORE" ? "+" : "−"}{Math.abs(pred.edge).toFixed(1)}
             {isCombatSport && pred.stat_type === "fight_winner" ? "%" : ""}
-          </p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">Consistency</p>
-          <p className={cn(
-            "font-bold capitalize",
-            pred.consistency_label === "stable" && "text-emerald-600 dark:text-emerald-400",
-            pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
-            pred.consistency_label === "volatile" && "text-red-500"
-          )}>
-            {pred.consistency_label ?? "—"}
-          </p>
-        </div>
-      </div>
-
-      {/* ── Timing badge + line movement ──────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
-        {pred.timing_note && <TimingBadge note={pred.timing_note} />}
-        {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
-          <span className={cn(
-            "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
-            pred.line_delta > 0
-              ? "bg-red-500/10 text-red-500"     // line moved up → worse for Over
-              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" // moved down → better
-          )}>
-            <TrendingUp className={cn("w-2.5 h-2.5", pred.line_delta > 0 && "rotate-180")} />
-            Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
           </span>
+        </div>
+        {pred.consistency_label && (
+          <div>
+            <span className="text-muted-foreground">Form </span>
+            <span className={cn(
+              "font-bold capitalize",
+              pred.consistency_label === "stable" && "text-emerald-600 dark:text-emerald-400",
+              pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
+              pred.consistency_label === "volatile" && "text-red-500"
+            )}>
+              {pred.consistency_label}
+            </span>
+          </div>
         )}
       </div>
 
-      {/* ── Why this bet ─────────────────────────────────── */}
-      <div className="space-y-1.5 text-[11px] flex-1">
-        <p className="text-emerald-600 dark:text-emerald-400 font-semibold">Why bet this</p>
+      {/* ── Timing + line movement ────────────────────────── */}
+      {(pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {pred.timing_note && <TimingBadge note={pred.timing_note} />}
+          {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
+            <span className={cn(
+              "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
+              pred.line_delta > 0
+                ? "bg-red-500/10 text-red-500"
+                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+            )}>
+              <TrendingUp className={cn("w-2.5 h-2.5", pred.line_delta > 0 && "rotate-180")} />
+              Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ── Why strong + Risk ────────────────────────────── */}
+      <div className="space-y-2 text-[11px] flex-1">
+        <p className="text-emerald-600 dark:text-emerald-400 font-semibold">Why strong</p>
         <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
           {(pred.explanations?.length
             ? pred.explanations
             : [pred.reason_1, pred.reason_2].filter(Boolean)
           ).map((line, i) => <li key={i}>{line}</li>)}
         </ul>
-        <p className="text-red-500/80 pt-1">
-          <span className="font-semibold">Risk · </span>
-          {pred.risk_factor}
-        </p>
+        <div className="flex gap-1.5 items-start pt-0.5">
+          <span className="text-red-500/80 font-semibold shrink-0">Risk:</span>
+          <span className="text-muted-foreground">{pred.risk_factor}</span>
+        </div>
       </div>
 
       {/* ── Actions ──────────────────────────────────────── */}
