@@ -95,9 +95,26 @@ function isCombat(sport: string): boolean {
 
 // ── Timing badge ─────────────────────────────────────────────────────────────
 
-function TimingBadge({ note }: { note: string }) {
+function TimingBadge({
+  note,
+  urgency,
+}: {
+  note: string;
+  urgency?: "now" | "wait" | "monitor";
+}) {
+  const isNow  = urgency === "now";
+  const isWait = urgency === "wait";
+  const colorClass = isNow
+    ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/12"
+    : isWait
+    ? "text-muted-foreground bg-muted/70"
+    : "text-amber-700 dark:text-amber-400 bg-amber-500/10";
+
   return (
-    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+    <span className={cn(
+      "inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full",
+      colorClass
+    )}>
       <Clock className="w-2.5 h-2.5" />
       {note}
     </span>
@@ -207,6 +224,12 @@ function PlayerEdgeCard({
             {riskLabel(pred.risk_tier)}
           </span>
         )}
+        {/* ML volatility flag — only shown when ML flags variance not already visible in consistency_label */}
+        {pred.volatility_flag && pred.consistency_label !== "volatile" && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
+            Volatile
+          </span>
+        )}
         {pred.trend_note && (
           <span className="text-[10px] text-primary font-medium">{pred.trend_note}</span>
         )}
@@ -245,9 +268,15 @@ function PlayerEdgeCard({
       </div>
 
       {/* ── Timing + line movement ────────────────────────── */}
-      {(pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1)) && (
+      {(pred.best_time_to_bet || pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1)) && (
         <div className="flex flex-wrap items-center gap-2">
-          {pred.timing_note && <TimingBadge note={pred.timing_note} />}
+          {/* ML timing recommendation — prefer best_time_to_bet, fall back to timing_note */}
+          {(pred.best_time_to_bet || pred.timing_note) && (
+            <TimingBadge
+              note={pred.best_time_to_bet ?? pred.timing_note!}
+              urgency={pred.timing_urgency}
+            />
+          )}
           {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
             <span className={cn(
               "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
