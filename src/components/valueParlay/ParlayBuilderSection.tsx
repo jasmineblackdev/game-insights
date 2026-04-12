@@ -32,6 +32,7 @@ export function ParlayBuilderSection({
   gamesLoading,
   bookOddsLoading = false,
   filterPropsByGameIds,
+  tomorrowMode = false,
 }: {
   games: GamePrediction[];
   oddsMap: Map<string, GameOddsBundle>;
