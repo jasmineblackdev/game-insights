@@ -170,6 +170,25 @@ function eventToPrediction(event: EspnEvent, todayEastern: string): GamePredicti
   };
 }
 
+/** Fast path — ESPN scoreboard only, no enrichment. Shows cards in ~200ms. */
+export async function fetchNbaGamesFast(): Promise<GamePrediction[]> {
+  const today = easternYmd();
+  const tomorrow = nextCalendarYmd(today);
+  const [e0, e1] = await Promise.all([
+    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(today)),
+    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(tomorrow)),
+  ]);
+  const merged = mergeScoreboardDays(e0, e1);
+  const predictions: GamePrediction[] = [];
+  for (const event of merged) {
+    const p = eventToPrediction(event, today);
+    if (p) predictions.push(p);
+  }
+  predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
+  return predictions;
+}
+
+/** Full enriched path — runs after fast query resolves. */
 export async function fetchNbaGamePredictions(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const tomorrow = nextCalendarYmd(today);
@@ -189,7 +208,17 @@ export async function fetchNbaGamePredictions(): Promise<GamePrediction[]> {
 
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
-  let out = await enrichGamePredictions(predictions, "nba");
-  out = await mergeTheOddsApiNotes(out, "basketball_nba");
-  return applyPredictionQualityPipeline(await applyAdvancedIntelligenceToGames(out));
+  // Parallelise independent enrichment steps to cut sequential chain
+  const enriched = await enrichGamePredictions(predictions, "nba");
+  const [oddsOut, intelOut] = await Promise.all([
+    mergeTheOddsApiNotes(enriched, "basketball_nba"),
+    applyAdvancedIntelligenceToGames(enriched),
+  ]);
+  // Merge: odds notes live in enrichmentNotes, intel lives in _meta.bettingIntel
+  const byId = new Map(oddsOut.map((g) => [g.id, g.enrichmentNotes]));
+  const merged2 = intelOut.map((g) => ({
+    ...g,
+    enrichmentNotes: byId.get(g.id) ?? g.enrichmentNotes,
+  }));
+  return applyPredictionQualityPipeline(merged2);
 }

@@ -11,9 +11,9 @@ import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
 import { ClipboardList, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
+import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
-import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
+import { fetchMlbEnrichedGames, fetchMlbGamesFast } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
 import { fetchBoxingPredictions } from "@/lib/boxingFetch";
@@ -32,15 +32,17 @@ function DataSourceStatus() {
     queryKey: ["supabase", "health", "v2"],
     queryFn: async () => {
       if (!supabase) throw new Error("Supabase client not configured");
-      // Use a lightweight REST call — if we get back any response (even empty) the connection works
       const { error } = await supabase.from("boxing_fights").select("fight_id").limit(1);
-      // Table-not-found (code 42P01) or empty result means DB is reachable — not an error
       if (error && error.code !== "42P01" && !error.message?.includes("does not exist")) throw error;
       return true;
     },
     enabled: !!supabase,
-    staleTime: 60_000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     retry: 1,
+    // Delay health check so it doesn't compete with the primary ESPN fetch on cold load
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
   });
 
   if (health.isPending) {
@@ -153,26 +155,50 @@ const Index = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("games");
   const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
 
+  // Phase 1: ESPN-only — shows cards in ~200ms
+  const nbaFastQuery = useQuery({
+    queryKey: ["nba-espn-fast", easternYmd()],
+    queryFn: fetchNbaGamesFast,
+    staleTime: 30_000,
+    gcTime: 5 * 60 * 1000,
+  });
+
+  // Phase 2: Full enrichment (odds + Supabase intelligence) — updates cards after fast load
   const nbaQuery = useQuery({
     queryKey: ["nba-espn-scoreboard", easternYmd()],
     queryFn: fetchNbaGamePredictions,
+    enabled: nbaFastQuery.isSuccess,
     staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
-    refetchIntervalInBackground: false, // pause polling when tab is hidden — saves battery + API calls
+    refetchIntervalInBackground: false,
   });
 
+  // NFL is offseason Apr–Aug — only fetch when the user explicitly selects it
   const nflQuery = useQuery({
     queryKey: ["nfl-espn-scoreboard", easternYmd()],
     queryFn: fetchNflGamePredictions,
+    enabled: league === "nfl",
     staleTime: 2 * 60 * 1000,
-    refetchInterval: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: league === "nfl" ? 2 * 60 * 1000 : false,
     refetchIntervalInBackground: false,
+  });
+
+  // Phase 1: ESPN + probables only — fast MLB card render
+  const mlbFastQuery = useQuery({
+    queryKey: ["mlb-espn-fast", easternYmd()],
+    queryFn: fetchMlbGamesFast,
+    staleTime: 30_000,
+    gcTime: 5 * 60 * 1000,
   });
 
   const mlbBaseQuery = useQuery({
     queryKey: ["mlb-espn-enriched", easternYmd()],
     queryFn: fetchMlbEnrichedGames,
+    enabled: mlbFastQuery.isSuccess,
     staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchInterval: 2 * 60 * 1000,
     refetchIntervalInBackground: false,
   });
@@ -182,28 +208,38 @@ const Index = () => {
     queryFn: () => applyMlbPredictionModel(mergeMlbStarterConfirmations(mlbBaseQuery.data ?? [])),
     enabled: mlbBaseQuery.isSuccess,
     staleTime: Infinity,
+    gcTime: 10 * 60 * 1000,
   });
 
+  // Combat sports: only fetch when selected — these hit The Odds API (rate-limited)
   const boxingQuery = useQuery({
     queryKey: ["boxing-predictions"],
     queryFn: fetchBoxingPredictions,
+    enabled: league === "boxing",
     staleTime: 5 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchInterval: league === "boxing" ? 5 * 60 * 1000 : false,
     refetchIntervalInBackground: false,
   });
 
   const mmaQuery = useQuery({
     queryKey: ["mma-predictions"],
     queryFn: fetchMmaPredictions,
+    enabled: league === "mma",
     staleTime: 5 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchInterval: league === "mma" ? 5 * 60 * 1000 : false,
     refetchIntervalInBackground: false,
   });
 
-  const mlbListPending = mlbBaseQuery.isPending || (mlbBaseQuery.isSuccess && mlbModeledQuery.isPending);
+  // Show fast (ESPN-only) data immediately; upgrade to enriched when ready
+  const nbaGames = nbaQuery.data ?? nbaFastQuery.data ?? [];
+  const mlbGames = mlbModeledQuery.data ?? mlbFastQuery.data ?? [];
+
+  const mlbListPending = mlbFastQuery.isPending;
   const activeQuery =
     league === "nba"
-      ? nbaQuery
+      ? { isPending: nbaFastQuery.isPending, isError: nbaQuery.isError && nbaFastQuery.isError, error: nbaQuery.error }
       : league === "nfl"
         ? nflQuery
         : league === "mlb"
@@ -217,11 +253,11 @@ const Index = () => {
             : boxingQuery;
   const leagueGames =
     league === "nba"
-      ? (nbaQuery.data ?? [])
+      ? nbaGames
       : league === "nfl"
         ? (nflQuery.data ?? [])
         : league === "mlb"
-          ? (mlbModeledQuery.data ?? [])
+          ? mlbGames
           : league === "mma"
             ? (mmaQuery.data ?? [])
             : (boxingQuery.data ?? []);
@@ -231,13 +267,13 @@ const Index = () => {
   // All-sport pool for Parlay Edge (cross-sport candidates need every league loaded)
   const allGames = useMemo<GamePrediction[]>(
     () => [
-      ...(nbaQuery.data ?? []),
+      ...nbaGames,
       ...(nflQuery.data ?? []),
-      ...(mlbModeledQuery.data ?? []),
+      ...mlbGames,
       ...(boxingQuery.data ?? []),
       ...(mmaQuery.data ?? []),
     ],
-    [nbaQuery.data, nflQuery.data, mlbModeledQuery.data, boxingQuery.data, mmaQuery.data]
+    [nbaGames, nflQuery.data, mlbGames, boxingQuery.data, mmaQuery.data]
   );
 
   const [oddsMapHome, setOddsMapHome] = useState<Map<string, GameOddsBundle>>(() => new Map());

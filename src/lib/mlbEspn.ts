@@ -337,6 +337,25 @@ function eventToPrediction(
  * Enriched MLB games (ESPN + probables + enrich + odds) **without** the weighted model.
  * Home tab runs `applyMlbPredictionModel(mergeMlbStarterConfirmations(...))` so verified starters can refresh the model.
  */
+/** Fast path — ESPN scoreboard + probable pitchers only. Shows cards in ~250ms. */
+export async function fetchMlbGamesFast(): Promise<GamePrediction[]> {
+  const today = easternYmd();
+  const tomorrow = nextCalendarYmd(today);
+  const [e0, e1, mlbProbables] = await Promise.all([
+    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(today)),
+    fetchEspnScoreboardEvents(SCOREBOARD, ymdToParam(tomorrow)),
+    fetchMlbProbablePitchers(today, tomorrow),
+  ]);
+  const merged = mergeScoreboardDays(e0, e1);
+  const predictions: GamePrediction[] = [];
+  for (const event of merged) {
+    const p = eventToPrediction(event, today, mlbProbables);
+    if (p) predictions.push(p);
+  }
+  predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
+  return predictions;
+}
+
 export async function fetchMlbEnrichedGames(): Promise<GamePrediction[]> {
   const today = easternYmd();
   const tomorrow = nextCalendarYmd(today);
@@ -357,9 +376,8 @@ export async function fetchMlbEnrichedGames(): Promise<GamePrediction[]> {
 
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
-  let out = await enrichGamePredictions(predictions, "mlb");
-  out = await mergeTheOddsApiNotes(out, "baseball_mlb", { extraMarkets: ODDS_API_MLB_LEG_MARKETS });
-  return out;
+  const out = await enrichGamePredictions(predictions, "mlb");
+  return mergeTheOddsApiNotes(out, "baseball_mlb", { extraMarkets: ODDS_API_MLB_LEG_MARKETS });
 }
 
 export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {
