@@ -21,12 +21,15 @@ import {
 } from "@/lib/boxingPredictionModel";
 import {
   fetchBoxingOdds,
-  fetchBoxingEvents,
   americanToImplied,
   deVigTwoWay,
   type BoxingOddsLine,
   type BoxingCombatEvent,
 } from "@/lib/boxingOddsApi";
+import {
+  fetchCombatOddsWithFallback,
+  type CombatOddsEvent,
+} from "@/lib/multiOddsProvider";
 import { easternYmd } from "@/lib/espnShared";
 
 // ── Supabase row shapes ───────────────────────────────────────────────────────
@@ -291,11 +294,33 @@ function buildPrediction(
   };
 }
 
+// ── Convert multi-provider CombatOddsEvent → BoxingCombatEvent ───────────────
+
+function combatEventToBoxing(ev: CombatOddsEvent): BoxingCombatEvent {
+  const line: BoxingOddsLine = {
+    fightId:       ev.id,
+    homeMoneyline: ev.homeMoneyline,
+    awayMoneyline: ev.awayMoneyline,
+    ...(ev.totalRounds != null ? { overUnderRounds: ev.totalRounds } : {}),
+    ...(ev.overOdds    != null ? { overOdds:        ev.overOdds }    : {}),
+    ...(ev.underOdds   != null ? { underOdds:       ev.underOdds }   : {}),
+    sportsbookKey: ev.source,
+  };
+  return {
+    eventId:     ev.id,
+    commenceTime: ev.commenceTime,
+    homeName:    ev.homeName,
+    awayName:    ev.awayName,
+    line,
+  };
+}
+
 // ── Build predictions from raw Odds API events (no DB required) ──────────────
 
 function buildPredictionsFromOddsEvents(
   events: BoxingCombatEvent[],
   weights: BoxingFactorWeights,
+  sourceLabel?: string,
 ): GamePrediction[] {
   const predictions: GamePrediction[] = [];
   for (const ev of events) {
@@ -328,7 +353,7 @@ function buildPredictionsFromOddsEvents(
       scheduledRounds,
       isTitleFight:   false,
       modelNotes:     [],
-      oddsSource:     "The Odds API",
+      oddsSource:     sourceLabel ?? "The Odds API",
     };
 
     const line: BoxingOddsLine | undefined = ev.line ?? undefined;
@@ -415,10 +440,15 @@ export async function fetchBoxingPredictions(): Promise<GamePrediction[]> {
   const supabasePredictions = await fetchBoxingFromSupabase(weights);
   if (supabasePredictions.length > 0) return supabasePredictions;
 
-  // Path 2: Odds API primary (no DB required)
-  const events = await fetchBoxingEvents().catch(() => [] as BoxingCombatEvent[]);
-  if (events.length > 0) {
-    return buildPredictionsFromOddsEvents(events, weights);
+  // Path 2: Multi-provider fallback (no DB required)
+  try {
+    const combatEvents = await fetchCombatOddsWithFallback("boxing");
+    if (combatEvents.length > 0) {
+      const source = combatEvents[0].source;
+      return buildPredictionsFromOddsEvents(combatEvents.map(combatEventToBoxing), weights, source);
+    }
+  } catch {
+    // All providers exhausted — fall through to empty
   }
 
   return [];

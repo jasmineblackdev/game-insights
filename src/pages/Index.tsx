@@ -23,6 +23,7 @@ import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
+import { OddsDebugBadge } from "@/components/OddsDebugBadge";
 
 type ViewMode = "games" | "props" | "draft" | "college_futures" | "parlay_edge";
 
@@ -763,6 +764,9 @@ const Index = () => {
           )}
         </AnimatePresence>
       </main>
+      {(league === "mma" || league === "boxing") && (
+        <OddsDebugBadge sport={league} />
+      )}
     </div>
   );
 };

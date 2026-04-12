@@ -22,12 +22,15 @@ import {
 } from "@/lib/mmaPredictionModel";
 import {
   fetchMmaOdds,
-  fetchMmaEvents,
   americanToImplied,
   deVigTwoWay,
   type MmaOddsLine,
   type MmaCombatEvent,
 } from "@/lib/mmaOddsApi";
+import {
+  fetchCombatOddsWithFallback,
+  type CombatOddsEvent,
+} from "@/lib/multiOddsProvider";
 import { easternYmd } from "@/lib/espnShared";
 
 // ── Supabase row shapes ───────────────────────────────────────────────────────
@@ -373,11 +376,37 @@ function buildMmaPrediction(
   };
 }
 
+// ── Convert multi-provider CombatOddsEvent → MmaCombatEvent ──────────────────
+
+function combatEventToMma(ev: CombatOddsEvent): MmaCombatEvent {
+  const now = new Date().toISOString();
+  const line: MmaOddsLine = {
+    fightId:       ev.id,
+    oddsEventId:   ev.id,
+    homeMoneyline: ev.homeMoneyline,
+    awayMoneyline: ev.awayMoneyline,
+    ...(ev.drawMoneyline != null ? { drawMoneyline: ev.drawMoneyline } : {}),
+    ...(ev.totalRounds   != null ? { overRounds: ev.totalRounds }      : {}),
+    ...(ev.overOdds      != null ? { overOdds:   ev.overOdds }         : {}),
+    ...(ev.underOdds     != null ? { underOdds:  ev.underOdds }        : {}),
+    sportsbook: ev.source,
+    fetchedAt:  now,
+  };
+  return {
+    eventId:     ev.id,
+    commenceTime: ev.commenceTime,
+    homeName:    ev.homeName,
+    awayName:    ev.awayName,
+    line,
+  };
+}
+
 // ── Build predictions from raw Odds API events (no DB required) ──────────────
 
 function buildPredictionsFromOddsEvents(
   events: MmaCombatEvent[],
   weights: MmaFactorWeights,
+  sourceLabel?: string,
 ): GamePrediction[] {
   const predictions: GamePrediction[] = [];
   for (const ev of events) {
@@ -415,7 +444,7 @@ function buildPredictionsFromOddsEvents(
       isMainEvent: false,
       isChampionshipBout: false,
       modelNotes: [],
-      oddsSource: "The Odds API",
+      oddsSource: sourceLabel ?? "The Odds API",
     };
 
     const line: MmaOddsLine | undefined = ev.line ?? undefined;
@@ -503,10 +532,15 @@ export async function fetchMmaPredictions(): Promise<GamePrediction[]> {
   const supabasePredictions = await fetchMmaFromSupabase(weights);
   if (supabasePredictions.length > 0) return supabasePredictions;
 
-  // Path 2: Odds API primary (no DB required)
-  const events = await fetchMmaEvents().catch(() => [] as MmaCombatEvent[]);
-  if (events.length > 0) {
-    return buildPredictionsFromOddsEvents(events, weights);
+  // Path 2: Multi-provider fallback (no DB required)
+  try {
+    const combatEvents = await fetchCombatOddsWithFallback("mma");
+    if (combatEvents.length > 0) {
+      const source = combatEvents[0].source;
+      return buildPredictionsFromOddsEvents(combatEvents.map(combatEventToMma), weights, source);
+    }
+  } catch {
+    // All providers exhausted — fall through to empty
   }
 
   return [];
