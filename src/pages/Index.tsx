@@ -705,11 +705,20 @@ const Index = () => {
                   ))}
                 </div>
               ) : activeQuery.isError ? (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive">
-                  {(league === "boxing" || league === "mma")
-                    ? `Could not load ${leagueLabel(league)} fight data. Check your Odds API key or network connection.`
-                    : `Could not load ESPN ${leagueLabel(league)} data (${activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network; if the API blocks the browser, proxy through Supabase Edge Functions.`
-                  }
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-sm text-destructive space-y-1">
+                  {(league === "boxing" || league === "mma") ? (
+                    <>
+                      <p className="font-semibold">Could not load {leagueLabel(league)} fight data.</p>
+                      <p className="text-destructive/80">
+                        {activeQuery.error instanceof Error && activeQuery.error.message.includes("quota")
+                          ? "The Odds API monthly quota is exhausted. Get a new API key at the-odds-api.com and update it via: npx supabase secrets set THE_ODDS_API_KEY=your_key"
+                          : "Check your Odds API key or network connection."
+                        }
+                      </p>
+                    </>
+                  ) : (
+                    `Could not load ESPN ${leagueLabel(league)} data (${activeQuery.error instanceof Error ? activeQuery.error.message : "unknown error"}). Check your network.`
+                  )}
                 </div>
               ) : filteredGames.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -105,7 +105,15 @@ export async function fetchBoxingEvents(): Promise<BoxingCombatEvent[]> {
       regions: "us",
       oddsFormat: "american",
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 402 || res.status === 429) {
+        const body = await res.json().catch(() => ({})) as { error_code?: string };
+        throw new Error(body.error_code === "OUT_OF_USAGE_CREDITS"
+          ? "Odds API quota exhausted — update your API key to restore Boxing data."
+          : `Odds API error ${res.status}`);
+      }
+      return [];
+    }
     const events = (await res.json()) as OddsEvent[];
     if (!Array.isArray(events)) return [];
 
