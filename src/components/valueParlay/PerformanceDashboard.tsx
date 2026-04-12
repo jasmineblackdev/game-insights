@@ -11,7 +11,7 @@
  * Lookup window toggles between 7 and 30 days.
  */
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { BarChart2, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -26,6 +26,8 @@ import {
   useRecommendedVsExcludedBySport,
   useRoiByMarketType,
   useResolutionCompleteness,
+  useConfidenceCalibration,
+  useConfidenceCalibrationBySport,
 } from "@/hooks/useAnalyticsDashboard";
 import type {
   TimingBucketRow,
@@ -39,9 +41,46 @@ import type {
   RecommendedVsExcludedBySportRow,
   RoiByMarketTypeRow,
   ResolutionCompletenessRow,
+  ConfidenceCalibrationRow,
+  ConfidenceCalibrationBySportRow,
 } from "@/hooks/useAnalyticsDashboard";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// ── Sample-size reliability helpers ──────────────────────────────────────────
+
+/** Minimum resolved count for a stat to be meaningfully interpreted. */
+const MIN_RELIABLE = 10;
+const MIN_NOISY    = 5;
+
+/** Color class for a resolved count cell — makes sample size visually obvious. */
+function sampleSizeClass(n: number): string {
+  if (n >= MIN_RELIABLE) return "text-foreground";
+  if (n >= MIN_NOISY)    return "text-amber-600 dark:text-amber-400";
+  return "text-muted-foreground/60";
+}
+
+/** Inline sample size badge shown alongside hit rate / ROI when n is low. */
+function SampleNote({ n }: { n: number }) {
+  if (n >= MIN_RELIABLE) return null;
+  return (
+    <span className={cn(
+      "ml-1 text-[9px] font-semibold",
+      n >= MIN_NOISY ? "text-amber-500" : "text-muted-foreground/50"
+    )}>
+      {n < MIN_NOISY ? "n<5 — noise" : "low n"}
+    </span>
+  );
+}
+
+/** Panel-level caution note when a sport has low resolution coverage. */
+function LowCoverageNote({ sport }: { sport: string }) {
+  return (
+    <span className="ml-1 text-[9px] text-amber-500 font-medium" title={`${sport}: low resolution coverage — interpret with caution`}>
+      ⚠ low coverage
+    </span>
+  );
+}
 
 function pctColor(pct: number | null): string {
   if (pct == null) return "text-muted-foreground";
@@ -106,39 +145,42 @@ function TimingPanel({ rows, loading }: { rows: TimingBucketRow[]; loading: bool
         <thead>
           <tr className="text-muted-foreground text-left border-b border-border">
             <th className="py-1 pr-3 font-semibold">Bucket</th>
-            <th className="py-1 pr-3 font-semibold text-right">Total</th>
-            <th className="py-1 pr-3 font-semibold text-right">Resolved</th>
+            <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
             <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
             <th className="py-1 font-semibold text-right">Avg edge</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.timing_bucket} className="border-b border-border/50 last:border-0">
-              <td className="py-1.5 pr-3 font-semibold">
-                <span className={cn(
-                  "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
-                  r.timing_bucket === "now"     && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                  r.timing_bucket === "wait"    && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-                  r.timing_bucket === "monitor" && "bg-muted/40 text-muted-foreground",
-                )}>
-                  {timingBucketLabel(r.timing_bucket)}
-                </span>
-              </td>
-              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.total_predictions}</td>
-              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_predictions}</td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                {fmt(r.hit_rate_pct)}
-              </td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", roiColor(r.roi_pct))}>
-                {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
-              </td>
-              <td className="py-1.5 text-right text-muted-foreground">
-                {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const n = r.resolved_predictions;
+            return (
+              <tr key={r.timing_bucket} className="border-b border-border/50 last:border-0">
+                <td className="py-1.5 pr-3 font-semibold">
+                  <span className={cn(
+                    "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+                    r.timing_bucket === "now"     && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                    r.timing_bucket === "wait"    && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                    r.timing_bucket === "monitor" && "bg-muted/40 text-muted-foreground",
+                  )}>
+                    {timingBucketLabel(r.timing_bucket)}
+                  </span>
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                  {n}<SampleNote n={n} />
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                  {fmt(r.hit_rate_pct)}
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                  {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                </td>
+                <td className="py-1.5 text-right text-muted-foreground">
+                  {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -284,6 +326,7 @@ function RecommendedVsExcludedPanel({
 
   const rec  = rows.find((r) => r.is_recommended);
   const excl = rows.find((r) => !r.is_recommended);
+  const minN = Math.min(rec?.resolved_count ?? 0, excl?.resolved_count ?? 0);
   const delta =
     rec?.hit_rate_pct != null && excl?.hit_rate_pct != null
       ? rec.hit_rate_pct - excl.hit_rate_pct
@@ -305,6 +348,7 @@ function RecommendedVsExcludedPanel({
             : delta >= 0
             ? `Slight edge: recommended hits ${delta.toFixed(1)}pp higher — needs more data`
             : `⚠ Filter may be hurting: excluded is outperforming recommended by ${Math.abs(delta).toFixed(1)}pp`}
+          {minN < MIN_RELIABLE && <span className="ml-2 text-amber-500">⚠ low sample (n={minN})</span>}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -312,39 +356,42 @@ function RecommendedVsExcludedPanel({
           <thead>
             <tr className="text-muted-foreground text-left border-b border-border">
               <th className="py-1 pr-3 font-semibold">Status</th>
-              <th className="py-1 pr-3 font-semibold text-right">Matched</th>
-              <th className="py-1 pr-3 font-semibold text-right">Resolved</th>
+              <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
               <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
               <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
               <th className="py-1 font-semibold text-right">Avg edge</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={String(r.is_recommended)} className="border-b border-border/50 last:border-0">
-                <td className="py-1.5 pr-3">
-                  <span className={cn(
-                    "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
-                    r.is_recommended
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      : "bg-muted/40 text-muted-foreground"
-                  )}>
-                    {r.is_recommended ? "Recommended" : "Excluded"}
-                  </span>
-                </td>
-                <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.total_matched}</td>
-                <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_count}</td>
-                <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                  {fmt(r.hit_rate_pct)}
-                </td>
-                <td className={cn("py-1.5 pr-3 text-right font-semibold", roiColor(r.roi_pct))}>
-                  {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
-                </td>
-                <td className="py-1.5 text-right text-muted-foreground">
-                  {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const n = r.resolved_count;
+              return (
+                <tr key={String(r.is_recommended)} className="border-b border-border/50 last:border-0">
+                  <td className="py-1.5 pr-3">
+                    <span className={cn(
+                      "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+                      r.is_recommended
+                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        : "bg-muted/40 text-muted-foreground"
+                    )}>
+                      {r.is_recommended ? "Recommended" : "Excluded"}
+                    </span>
+                  </td>
+                  <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                    {n}<SampleNote n={n} />
+                  </td>
+                  <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                    {fmt(r.hit_rate_pct)}
+                  </td>
+                  <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                    {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                  </td>
+                  <td className="py-1.5 text-right text-muted-foreground">
+                    {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -354,7 +401,15 @@ function RecommendedVsExcludedPanel({
 
 // ── ROI by sport panel ────────────────────────────────────────────────────────
 
-function RoiBySportPanel({ rows, loading }: { rows: RoiBySportRow[]; loading: boolean }) {
+function RoiBySportPanel({
+  rows,
+  loading,
+  lowResolutionSports = new Set<string>(),
+}: {
+  rows: RoiBySportRow[];
+  loading: boolean;
+  lowResolutionSports?: Set<string>;
+}) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
   if (!resolved.length) return <NoDataNote label="sport ROI" />;
@@ -365,28 +420,37 @@ function RoiBySportPanel({ rows, loading }: { rows: RoiBySportRow[]; loading: bo
         <thead>
           <tr className="text-muted-foreground text-left border-b border-border">
             <th className="py-1 pr-3 font-semibold">Sport</th>
-            <th className="py-1 pr-3 font-semibold text-right">Resolved</th>
+            <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
             <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
             <th className="py-1 font-semibold text-right">Avg edge</th>
           </tr>
         </thead>
         <tbody>
-          {resolved.map((r) => (
-            <tr key={r.sport} className="border-b border-border/50 last:border-0">
-              <td className="py-1.5 pr-3 font-bold text-foreground">{r.sport}</td>
-              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_count}</td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                {fmt(r.hit_rate_pct)}
-              </td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", roiColor(r.roi_pct))}>
-                {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
-              </td>
-              <td className="py-1.5 text-right text-muted-foreground">
-                {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
-              </td>
-            </tr>
-          ))}
+          {resolved.map((r) => {
+            const n = r.resolved_count;
+            const lowCoverage = lowResolutionSports.has(r.sport);
+            return (
+              <tr key={r.sport} className="border-b border-border/50 last:border-0">
+                <td className="py-1.5 pr-3 font-bold text-foreground">
+                  {r.sport}
+                  {lowCoverage && <LowCoverageNote sport={r.sport} />}
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                  {n}<SampleNote n={n} />
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                  {fmt(r.hit_rate_pct)}
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                  {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                </td>
+                <td className="py-1.5 text-right text-muted-foreground">
+                  {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -406,24 +470,29 @@ function RoiByRiskBandPanel({ rows, loading }: { rows: RoiByRiskBandRow[]; loadi
         <thead>
           <tr className="text-muted-foreground text-left border-b border-border">
             <th className="py-1 pr-3 font-semibold">Risk band</th>
-            <th className="py-1 pr-3 font-semibold text-right">Matched</th>
+            <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
             <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 font-semibold text-right">ROI%</th>
           </tr>
         </thead>
         <tbody>
-          {resolved.map((r) => (
-            <tr key={r.risk_band} className="border-b border-border/50 last:border-0">
-              <td className="py-1.5 pr-3 font-medium text-foreground capitalize">{r.risk_band}</td>
-              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_count}</td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                {fmt(r.hit_rate_pct)}
-              </td>
-              <td className={cn("py-1.5 text-right font-semibold", roiColor(r.roi_pct))}>
-                {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
-              </td>
-            </tr>
-          ))}
+          {resolved.map((r) => {
+            const n = r.resolved_count;
+            return (
+              <tr key={r.risk_band} className="border-b border-border/50 last:border-0">
+                <td className="py-1.5 pr-3 font-medium text-foreground capitalize">{r.risk_band}</td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                  {n}<SampleNote n={n} />
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                  {fmt(r.hit_rate_pct)}
+                </td>
+                <td className={cn("py-1.5 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                  {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -432,45 +501,61 @@ function RoiByRiskBandPanel({ rows, loading }: { rows: RoiByRiskBandRow[]; loadi
 
 // ── Timing by sport panel ─────────────────────────────────────────────────────
 
-function TimingBySportPanel({ rows, loading }: { rows: TimingBySportRow[]; loading: boolean }) {
+function TimingBySportPanel({
+  rows,
+  loading,
+  lowResolutionSports = new Set<string>(),
+}: {
+  rows: TimingBySportRow[];
+  loading: boolean;
+  lowResolutionSports?: Set<string>;
+}) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
   if (!resolved.length) return <NoDataNote label="timing by sport" />;
 
-  // Group rows by sport for rendering
   const sports = [...new Set(resolved.map((r) => r.sport))];
 
   return (
     <div className="space-y-4">
       {sports.map((sport) => {
         const sportRows = resolved.filter((r) => r.sport === sport);
+        const lowCoverage = lowResolutionSports.has(sport);
         return (
           <div key={sport}>
-            <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1">{sport}</p>
+            <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1">
+              {sport}
+              {lowCoverage && <LowCoverageNote sport={sport} />}
+            </p>
             <div className="overflow-x-auto">
               <table className="w-full text-[10px] tabular-nums">
                 <tbody>
-                  {sportRows.map((r) => (
-                    <tr key={r.timing_bucket} className="border-b border-border/40 last:border-0">
-                      <td className="py-1 pr-3">
-                        <span className={cn(
-                          "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
-                          r.timing_bucket === "now"     && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-                          r.timing_bucket === "wait"    && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-                          r.timing_bucket === "monitor" && "bg-muted/40 text-muted-foreground",
-                        )}>
-                          {r.timing_bucket}
-                        </span>
-                      </td>
-                      <td className="py-1 pr-3 text-right text-muted-foreground">{r.resolved_count} resolved</td>
-                      <td className={cn("py-1 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                        {fmt(r.hit_rate_pct)} hit
-                      </td>
-                      <td className={cn("py-1 text-right font-semibold", roiColor(r.roi_pct))}>
-                        {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)} ROI
-                      </td>
-                    </tr>
-                  ))}
+                  {sportRows.map((r) => {
+                    const n = r.resolved_count;
+                    return (
+                      <tr key={r.timing_bucket} className="border-b border-border/40 last:border-0">
+                        <td className="py-1 pr-3">
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+                            r.timing_bucket === "now"     && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                            r.timing_bucket === "wait"    && "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+                            r.timing_bucket === "monitor" && "bg-muted/40 text-muted-foreground",
+                          )}>
+                            {r.timing_bucket}
+                          </span>
+                        </td>
+                        <td className={cn("py-1 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                          n={n}<SampleNote n={n} />
+                        </td>
+                        <td className={cn("py-1 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                          {fmt(r.hit_rate_pct)} hit
+                        </td>
+                        <td className={cn("py-1 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                          {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)} ROI
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -486,9 +571,11 @@ function TimingBySportPanel({ rows, loading }: { rows: TimingBySportRow[]; loadi
 function RecVsExclBySportPanel({
   rows,
   loading,
+  lowResolutionSports = new Set<string>(),
 }: {
   rows: RecommendedVsExcludedBySportRow[];
   loading: boolean;
+  lowResolutionSports?: Set<string>;
 }) {
   if (loading) return <LoadingRows />;
   const resolved = rows.filter((r) => r.resolved_count > 0);
@@ -501,6 +588,8 @@ function RecVsExclBySportPanel({
       {sports.map((sport) => {
         const rec  = resolved.find((r) => r.sport === sport && r.is_recommended);
         const excl = resolved.find((r) => r.sport === sport && !r.is_recommended);
+        const minN = Math.min(rec?.resolved_count ?? 0, excl?.resolved_count ?? 0);
+        const lowCoverage = lowResolutionSports.has(sport);
         const delta =
           rec?.hit_rate_pct != null && excl?.hit_rate_pct != null
             ? rec.hit_rate_pct - excl.hit_rate_pct
@@ -508,7 +597,7 @@ function RecVsExclBySportPanel({
 
         return (
           <div key={sport} className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <p className="text-[9px] font-bold tracking-wider text-muted-foreground">{sport}</p>
               {delta != null && (
                 <span className={cn(
@@ -520,26 +609,30 @@ function RecVsExclBySportPanel({
                   {delta >= 0 ? "+" : ""}{delta.toFixed(1)}pp
                 </span>
               )}
+              {minN < MIN_RELIABLE && <span className="text-[9px] text-amber-500">n={minN} — low sample</span>}
+              {lowCoverage && <LowCoverageNote sport={sport} />}
             </div>
             <div className="grid grid-cols-2 gap-2 text-[10px]">
-              {[rec, excl].map((r) =>
-                r ? (
+              {[rec, excl].map((r) => {
+                if (!r) return null;
+                const n = r.resolved_count;
+                return (
                   <div key={String(r.is_recommended)} className="flex items-center justify-between bg-muted/20 rounded px-2 py-1">
                     <span className={cn(
                       "font-semibold",
                       r.is_recommended ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
                     )}>
-                      {r.is_recommended ? "Rec" : "Excl"}
+                      {r.is_recommended ? "Rec" : "Excl"} <span className={cn("text-[9px]", sampleSizeClass(n))}>n={n}</span>
                     </span>
-                    <span className={cn("font-semibold tabular-nums", pctColor(r.hit_rate_pct))}>
+                    <span className={cn("font-semibold tabular-nums", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
                       {fmt(r.hit_rate_pct)}
                     </span>
-                    <span className={cn("font-semibold tabular-nums", roiColor(r.roi_pct))}>
+                    <span className={cn("font-semibold tabular-nums", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
                       {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
                     </span>
                   </div>
-                ) : null
-              )}
+                );
+              })}
             </div>
           </div>
         );
@@ -567,19 +660,24 @@ function RoiByMarketTypePanel({ rows, loading }: { rows: RoiByMarketTypeRow[]; l
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={`${r.sport}-${r.stat_type}`} className="border-b border-border/40 last:border-0">
-              <td className="py-1.5 pr-2 text-muted-foreground font-semibold">{r.sport}</td>
-              <td className="py-1.5 pr-3 text-foreground font-medium">{r.stat_type.replace(/_/g, " ")}</td>
-              <td className="py-1.5 pr-3 text-right text-muted-foreground">{r.resolved_count}</td>
-              <td className={cn("py-1.5 pr-3 text-right font-semibold", pctColor(r.hit_rate_pct))}>
-                {fmt(r.hit_rate_pct)}
-              </td>
-              <td className={cn("py-1.5 text-right font-semibold", roiColor(r.roi_pct))}>
-                {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const n = r.resolved_count;
+            return (
+              <tr key={`${r.sport}-${r.stat_type}`} className="border-b border-border/40 last:border-0">
+                <td className="py-1.5 pr-2 text-muted-foreground font-semibold">{r.sport}</td>
+                <td className="py-1.5 pr-3 text-foreground font-medium">{r.stat_type.replace(/_/g, " ")}</td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                  {n}<SampleNote n={n} />
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                  {fmt(r.hit_rate_pct)}
+                </td>
+                <td className={cn("py-1.5 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                  {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -626,6 +724,148 @@ function ResolutionPanel({ rows, loading }: { rows: ResolutionCompletenessRow[];
   );
 }
 
+// ── Confidence calibration panel ─────────────────────────────────────────────
+
+const CONF_ORDER = ["HIGH", "MED", "LOW"];
+
+function ConfCalibrationPanel({
+  overall,
+  bySport,
+  overallLoading,
+  bySportLoading,
+  lowResolutionSports = new Set<string>(),
+}: {
+  overall: ConfidenceCalibrationRow[];
+  bySport: ConfidenceCalibrationBySportRow[];
+  overallLoading: boolean;
+  bySportLoading: boolean;
+  lowResolutionSports?: Set<string>;
+}) {
+  // Calibration verdict: HIGH hit% > MED hit% > LOW hit%?
+  const resolvedOverall = overall.filter((r) => (r.resolved_count ?? 0) >= MIN_NOISY);
+  const high = resolvedOverall.find((r) => r.confidence === "HIGH")?.hit_rate_pct;
+  const med  = resolvedOverall.find((r) => r.confidence === "MED")?.hit_rate_pct;
+  const low  = resolvedOverall.find((r) => r.confidence === "LOW")?.hit_rate_pct;
+  const wellOrdered =
+    high != null && med != null && low != null && high > med && med > low;
+  const partiallyOrdered =
+    high != null && med != null && high > med;
+
+  const sports = [...new Set(bySport.map((r) => r.sport))];
+
+  function confBadge(conf: string) {
+    return (
+      <span className={cn(
+        "px-1.5 py-0.5 rounded-full text-[9px] font-bold",
+        conf === "HIGH" ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+        : conf === "MED" ? "bg-primary/10 text-primary"
+        : "bg-muted/40 text-muted-foreground"
+      )}>
+        {conf}
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Overall calibration verdict */}
+      {!overallLoading && resolvedOverall.length > 0 && (
+        <div className={cn(
+          "text-[10px] px-2.5 py-1.5 rounded border",
+          wellOrdered
+            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+            : partiallyOrdered
+            ? "bg-muted/40 text-muted-foreground border-border"
+            : "bg-rose-500/10 text-rose-500 border-rose-500/20"
+        )}>
+          {wellOrdered
+            ? "Well calibrated: HIGH > MED > LOW hit rate ordering confirmed"
+            : partiallyOrdered
+            ? "Partially calibrated: HIGH > MED confirmed — LOW needs more data"
+            : "⚠ Calibration gap: HIGH/MED ordering not confirmed — investigate confidence scoring"}
+        </div>
+      )}
+
+      {/* Overall table */}
+      {overallLoading ? <LoadingRows n={3} /> : overall.filter(r => r.resolved_count > 0).length === 0 ? (
+        <NoDataNote label="confidence calibration" />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[10px] tabular-nums">
+            <thead>
+              <tr className="text-muted-foreground text-left border-b border-border">
+                <th className="py-1 pr-3 font-semibold">Confidence</th>
+                <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
+                <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
+                <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
+                <th className="py-1 font-semibold text-right">Avg edge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...overall].sort((a, b) => CONF_ORDER.indexOf(a.confidence) - CONF_ORDER.indexOf(b.confidence)).map((r) => {
+                const n = r.resolved_count;
+                return (
+                  <tr key={r.confidence} className="border-b border-border/50 last:border-0">
+                    <td className="py-1.5 pr-3">{confBadge(r.confidence)}</td>
+                    <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
+                      {n}<SampleNote n={n} />
+                    </td>
+                    <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                      {fmt(r.hit_rate_pct)}
+                    </td>
+                    <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
+                      {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                    </td>
+                    <td className="py-1.5 text-right text-muted-foreground">
+                      {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* By-sport breakdown */}
+      {!bySportLoading && bySport.filter(r => r.resolved_count > 0).length > 0 && (
+        <div className="space-y-3 pt-1 border-t border-border/50">
+          <p className="text-[9px] font-semibold tracking-wider text-muted-foreground pt-1">BY SPORT</p>
+          {sports.map((sport) => {
+            const sportRows = bySport
+              .filter((r) => r.sport === sport && r.resolved_count > 0)
+              .sort((a, b) => CONF_ORDER.indexOf(a.confidence) - CONF_ORDER.indexOf(b.confidence));
+            if (!sportRows.length) return null;
+            const lowCoverage = lowResolutionSports.has(sport);
+            return (
+              <div key={sport}>
+                <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1">
+                  {sport}
+                  {lowCoverage && <LowCoverageNote sport={sport} />}
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {sportRows.map((r) => {
+                    const n = r.resolved_count;
+                    return (
+                      <div key={r.confidence} className="flex items-center gap-1 bg-muted/20 rounded px-2 py-1 text-[10px]">
+                        {confBadge(r.confidence)}
+                        <span className={cn("font-semibold tabular-nums", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                          {fmt(r.hit_rate_pct)}
+                        </span>
+                        <span className={cn("text-[9px]", sampleSizeClass(n))}>n={n}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main dashboard ────────────────────────────────────────────────────────────
 
 export function PerformanceDashboard() {
@@ -643,6 +883,14 @@ export function PerformanceDashboard() {
   const recVsExclSportQ  = useRecommendedVsExcludedBySport(days);
   const roiMarketQ       = useRoiByMarketType(days);
   const resolutionQ      = useResolutionCompleteness(days);
+  const confidenceCalibQ = useConfidenceCalibration(days);
+  const confCalibBySportQ = useConfidenceCalibrationBySport(days);
+
+  // Sports with resolution < 40% get a caution flag on per-sport panels
+  const lowResolutionSports = useMemo(
+    () => new Set((resolutionQ.data ?? []).filter((r) => r.resolution_pct < 40).map((r) => r.sport)),
+    [resolutionQ.data]
+  );
 
   return (
     <div className="rounded-lg border border-border bg-card/40">
@@ -707,7 +955,7 @@ export function PerformanceDashboard() {
           {/* 5. ROI by sport */}
           <section className="space-y-2">
             <SectionHeader title="HIT RATE + ROI BY SPORT" />
-            <RoiBySportPanel rows={roiSportQ.data ?? []} loading={roiSportQ.isLoading} />
+            <RoiBySportPanel rows={roiSportQ.data ?? []} loading={roiSportQ.isLoading} lowResolutionSports={lowResolutionSports} />
           </section>
 
           {/* 6. ROI by risk band */}
@@ -716,40 +964,46 @@ export function PerformanceDashboard() {
             <RoiByRiskBandPanel rows={roiRiskQ.data ?? []} loading={roiRiskQ.isLoading} />
           </section>
 
-          {/* 7. Exclusion reasons */}
-          <section className="space-y-2">
-            <SectionHeader title="EXCLUSION REASON FREQUENCY" />
-            <ExclusionPanel rows={exclQ.data ?? []} loading={exclQ.isLoading} />
-          </section>
-
-          {/* 8. Safe pool depth */}
+          {/* 7. Safe pool depth */}
           <section className="space-y-2">
             <SectionHeader title="SAFE MODE POOL DEPTH BY SPORT" />
             <SafePoolPanel rows={safeQ.data ?? []} loading={safeQ.isLoading} />
           </section>
 
-          {/* 9. Timing by sport */}
+          {/* 8. Timing by sport */}
           <section className="space-y-2">
             <SectionHeader title="TIMING PERFORMANCE BY SPORT" />
-            <TimingBySportPanel rows={timingBySportQ.data ?? []} loading={timingBySportQ.isLoading} />
+            <TimingBySportPanel rows={timingBySportQ.data ?? []} loading={timingBySportQ.isLoading} lowResolutionSports={lowResolutionSports} />
           </section>
 
-          {/* 10. Filter quality by sport */}
+          {/* 9. Filter quality by sport */}
           <section className="space-y-2">
             <SectionHeader title="FILTER QUALITY BY SPORT (RECOMMENDED VS EXCLUDED)" />
-            <RecVsExclBySportPanel rows={recVsExclSportQ.data ?? []} loading={recVsExclSportQ.isLoading} />
+            <RecVsExclBySportPanel rows={recVsExclSportQ.data ?? []} loading={recVsExclSportQ.isLoading} lowResolutionSports={lowResolutionSports} />
           </section>
 
-          {/* 11. ROI by market type */}
+          {/* 10. ROI by market type */}
           <section className="space-y-2">
             <SectionHeader title="ROI BY MARKET TYPE (TOP BY ROI)" />
             <RoiByMarketTypePanel rows={roiMarketQ.data ?? []} loading={roiMarketQ.isLoading} />
           </section>
 
-          {/* 12. Resolution completeness */}
+          {/* 11. Resolution completeness */}
           <section className="space-y-2">
             <SectionHeader title="RESOLUTION COMPLETENESS BY SPORT" />
             <ResolutionPanel rows={resolutionQ.data ?? []} loading={resolutionQ.isLoading} />
+          </section>
+
+          {/* 12. Confidence calibration */}
+          <section className="space-y-2">
+            <SectionHeader title="CONFIDENCE CALIBRATION (HIGH > MED > LOW)" />
+            <ConfCalibrationPanel
+              overall={confidenceCalibQ.data ?? []}
+              bySport={confCalibBySportQ.data ?? []}
+              overallLoading={confidenceCalibQ.isLoading}
+              bySportLoading={confCalibBySportQ.isLoading}
+              lowResolutionSports={lowResolutionSports}
+            />
           </section>
         </div>
       )}

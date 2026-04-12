@@ -121,6 +121,28 @@ export interface ResolutionCompletenessRow {
   stale_pending:    number;
 }
 
+export interface ConfidenceCalibrationRow {
+  confidence:       string;
+  total_predictions: number;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+  avg_hit_prob?:    number;
+}
+
+export interface ConfidenceCalibrationBySportRow {
+  sport:            string;
+  confidence:       string;
+  total_predictions: number;
+  resolved_count:   number;
+  win_count:        number;
+  hit_rate_pct:     number | null;
+  roi_pct:          number | null;
+  avg_edge:         number;
+}
+
 // ── Fetchers ────────────────────────────────────────────────────────────────
 
 async function rpc<T>(fn: string, params: Record<string, unknown>): Promise<T[]> {
@@ -229,6 +251,24 @@ export function useResolutionCompleteness(days = 30) {
   return useQuery({
     queryKey: ["analytics-resolution-completeness", days],
     queryFn:  () => rpc<ResolutionCompletenessRow>("analytics_resolution_completeness", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useConfidenceCalibration(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-confidence-calibration", days],
+    queryFn:  () => rpc<ConfidenceCalibrationRow>("analytics_confidence_calibration", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useConfidenceCalibrationBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-confidence-calibration-by-sport", days],
+    queryFn:  () => rpc<ConfidenceCalibrationBySportRow>("analytics_confidence_calibration_by_sport", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });
