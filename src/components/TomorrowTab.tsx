@@ -25,7 +25,73 @@ import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { PropCard, earlyValueTag } from "@/components/PropCard";
+import {
+  useEarlyValueImpactBySport,
+  type EarlyValueImpactBySportRow,
+} from "@/hooks/useAnalyticsDashboard";
 import { cn } from "@/lib/utils";
+
+// ── Early value boost map ─────────────────────────────────────────────────────
+
+/**
+ * Boost amounts applied when a sport has full ✓ validation for an early-value label.
+ * Kept small and conservative — a nudge, not a rerank.
+ */
+const EV_VALIDATED_BOOST: Record<string, number> = {
+  "LINE VALUE":   0.03,
+  "OPENING EDGE": 0.02,
+  "EARLY VALUE":  0.01,
+};
+
+/**
+ * Builds a map from "SPORT:LABEL" → boost amount using the by-sport analytics data.
+ *
+ * A boost is only emitted when the sport has **full ✓ validation**:
+ *   - All three labeled buckets have ≥5 resolved legs
+ *   - Hit rates are descending: LINE VALUE ≥ OPENING EDGE ≥ EARLY VALUE
+ *   - All three beat the no-label (unlabeled) baseline
+ *
+ * Partial signal (→) gets no boost yet. Unconfirmed (⚠) gets none.
+ * This mirrors the exact validation gate in EarlyValueImpactBySportSection.
+ */
+function buildEarlyValueBoostMap(
+  rows: EarlyValueImpactBySportRow[]
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const sports = [...new Set(rows.map((r) => r.sport))];
+
+  for (const sport of sports) {
+    const byLabel = (label: string) =>
+      rows.find((r) => r.sport === sport && r.label === label);
+
+    const lv   = byLabel("LINE VALUE");
+    const oe   = byLabel("OPENING EDGE");
+    const ev   = byLabel("EARLY VALUE");
+    const none = byLabel("none");
+
+    const ready = (r: EarlyValueImpactBySportRow | undefined) =>
+      r != null && Number(r.resolved_count) >= 5;
+
+    if (!ready(lv) || !ready(oe) || !ready(ev) || !ready(none)) continue;
+
+    const lvHit   = lv!.hit_rate_pct   ?? 0;
+    const oeHit   = oe!.hit_rate_pct   ?? 0;
+    const evHit   = ev!.hit_rate_pct   ?? 0;
+    const noneHit = none!.hit_rate_pct ?? 0;
+
+    const descending   = lvHit >= oeHit && oeHit >= evHit;
+    const allAboveNone = lvHit > noneHit && oeHit > noneHit && evHit > noneHit;
+
+    if (!descending || !allAboveNone) continue;
+
+    // Full ✓ — apply boosts for this sport's validated labels
+    map.set(`${sport}:LINE VALUE`,   EV_VALIDATED_BOOST["LINE VALUE"]);
+    map.set(`${sport}:OPENING EDGE`, EV_VALIDATED_BOOST["OPENING EDGE"]);
+    map.set(`${sport}:EARLY VALUE`,  EV_VALIDATED_BOOST["EARLY VALUE"]);
+  }
+
+  return map;
+}
 
 // ── Pregame prop ranking ──────────────────────────────────────────────────────
 
@@ -39,15 +105,33 @@ import { cn } from "@/lib/utils";
  * Rationale: pregame bets resolve on role certainty as much as edge magnitude.
  * A stable player in a stable role gives the model a more reliable baseline
  * hours before the game than raw edge alone.
+ *
+ * boostMap: optional per-sport validated early-value boost (capped at +0.03).
+ * Only populated for sports that have reached full ✓ validation in the analytics.
  */
-function propDisplayScore(p: PlayerEdgePrediction): number {
+function propDisplayScore(
+  p: PlayerEdgePrediction,
+  boostMap?: Map<string, number>
+): number {
   const confScore  = p.confidence === "HIGH" ? 1.0 : p.confidence === "MED" ? 0.6 : 0.3;
   const hitProb    = p.ml_hit_probability ?? 0.5;
   const edgeNorm   = Math.min(1, Math.max(0, p.edge / 15));
   // Pregame: stability weight boosted from 0.10 → 0.20
   const stabScore  = p.ml_debug?.stability_score ?? 0.5;
   const timingMult = p.timing_urgency === "now" ? 1.08 : 1.0;
-  return (hitProb * 0.35 + edgeNorm * 0.25 + confScore * 0.25 + stabScore * 0.15) * timingMult;
+
+  const base = (hitProb * 0.35 + edgeNorm * 0.25 + confScore * 0.25 + stabScore * 0.15) * timingMult;
+
+  if (boostMap?.size) {
+    const sport = String(p.sport).toUpperCase();
+    const label = earlyValueTag(p);
+    if (label) {
+      const boost = boostMap.get(`${sport}:${label}`) ?? 0;
+      return Math.min(1, base + boost);
+    }
+  }
+
+  return base;
 }
 
 // ── Stability threshold note ──────────────────────────────────────────────────
@@ -89,6 +173,59 @@ function SectionHeader({
         </span>
       )}
     </div>
+  );
+}
+
+// ── Boost status note ─────────────────────────────────────────────────────────
+
+/**
+ * Small internal diagnostic line shown below the props grid when at least one
+ * sport has an active validated early-value boost.
+ *
+ * Answers at a glance:
+ *   - Which sports are currently boosted?
+ *   - Which labels are active per sport?
+ *   - How many of the visible props were actually nudged?
+ *
+ * Intentionally de-emphasized (10px, muted) — diagnostic only, not user-facing copy.
+ * Returns null when no boosts are active (boostMap is empty).
+ */
+function BoostStatusNote({
+  boostMap,
+  visibleProps,
+}: {
+  boostMap: Map<string, number>;
+  visibleProps: PlayerEdgePrediction[];
+}) {
+  if (!boostMap.size) return null;
+
+  // Group active boosts by sport: { NBA: ["LINE VALUE +3%", "OPENING EDGE +2%", ...] }
+  const bySport = new Map<string, string[]>();
+  for (const [key, boost] of boostMap) {
+    const [sport, ...labelParts] = key.split(":");
+    const label = labelParts.join(":");
+    if (!bySport.has(sport)) bySport.set(sport, []);
+    bySport.get(sport)!.push(`${label} +${(boost * 100).toFixed(0)}%`);
+  }
+
+  // Count how many visible props actually received a boost
+  const boostedCount = visibleProps.filter((p) => {
+    const sport = String(p.sport).toUpperCase();
+    const label = earlyValueTag(p);
+    return label != null && boostMap.has(`${sport}:${label}`);
+  }).length;
+
+  const sportSummary = [...bySport.entries()]
+    .map(([sport, labels]) => `${sport}: ${labels.join(", ")}`)
+    .join(" · ");
+
+  return (
+    <p className="text-[10px] text-muted-foreground/50 mt-1.5">
+      ↑ Ranking boost active — {sportSummary}
+      {boostedCount > 0 && (
+        <> · <span className="text-primary/60">{boostedCount} of {visibleProps.length} props ranked higher</span></>
+      )}
+    </p>
   );
 }
 
@@ -140,6 +277,16 @@ export function TomorrowTab({
   oddsMap: Map<string, GameOddsBundle>;
   loading: boolean;
 }) {
+  // ── Early value boost map ────────────────────────────────────────────────────
+  // Fetches by-sport validation data (React Query — deduplicated if dashboard is open).
+  // Produces a non-empty map only for sports that have reached full ✓ validation.
+  const { data: evBySportData = [] } = useEarlyValueImpactBySport(30);
+
+  const earlyValueBoostMap = useMemo(
+    () => buildEarlyValueBoostMap(evBySportData as EarlyValueImpactBySportRow[]),
+    [evBySportData]
+  );
+
   // ── Tomorrow games ───────────────────────────────────────────────────────────
   const tomorrowGames = useMemo(
     () => allGames.filter((g) => g.gameDate === "tomorrow" && g.status === "upcoming"),
@@ -152,7 +299,8 @@ export function TomorrowTab({
   );
 
   // ── Tomorrow props ───────────────────────────────────────────────────────────
-  // Filter: tomorrow games only + exclude "wait" timing (pregame context)
+  // Filter: tomorrow games only + exclude "wait" timing (pregame context).
+  // Sort: pregame score with optional per-sport validated early-value boost.
   const tomorrowProps = useMemo(
     () =>
       allProps
@@ -161,8 +309,10 @@ export function TomorrowTab({
             tomorrowGameIds.has(p.game_id) &&
             p.timing_urgency !== "wait"
         )
-        .sort((a, b) => propDisplayScore(b) - propDisplayScore(a)),
-    [allProps, tomorrowGameIds]
+        .sort((a, b) =>
+          propDisplayScore(b, earlyValueBoostMap) - propDisplayScore(a, earlyValueBoostMap)
+        ),
+    [allProps, tomorrowGameIds, earlyValueBoostMap]
   );
 
   // ── Loading / empty ──────────────────────────────────────────────────────────
@@ -230,6 +380,12 @@ export function TomorrowTab({
                 ↯ low stab = stability score below pregame threshold (0.58) — role uncertainty higher than ideal.
               </p>
             )}
+
+            {/* Boost status — only visible when at least one sport has validated */}
+            <BoostStatusNote
+              boostMap={earlyValueBoostMap}
+              visibleProps={tomorrowProps.slice(0, 9)}
+            />
           </>
         )}
 

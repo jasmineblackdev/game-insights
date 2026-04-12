@@ -218,6 +218,33 @@ export interface CalibrationImpactRow {
   avg_edge:       number;
 }
 
+export interface EarlyValueImpactRow {
+  /** "LINE VALUE" | "OPENING EDGE" | "EARLY VALUE" | "none" */
+  label:          string;
+  leg_count:      number;
+  parlay_count:   number;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+  avg_edge:       number;
+  avg_stability:  number | null;
+}
+
+export interface EarlyValueImpactBySportRow {
+  sport:          string;
+  label:          string;
+  leg_count:      number;
+  resolved_count: number;
+  win_count:      number;
+  hit_rate_pct:   number | null;
+  roi_pct:        number | null;
+  avg_edge:       number;
+  avg_stability:  number | null;
+  /** Fraction (0–1) of this sport's legs with no early-value label. */
+  no_label_pct:   number;
+}
+
 export interface CalibrationImpactBySportRow {
   sport:          string;
   adj_bucket:     string;
@@ -429,6 +456,24 @@ export function useCalibrationImpactBySport(days = 30) {
   return useQuery({
     queryKey: ["analytics-calibration-impact-by-sport", days],
     queryFn:  () => rpc<CalibrationImpactBySportRow>("analytics_calibration_impact_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useEarlyValueImpact(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-early-value-impact", days],
+    queryFn:  () => rpc<EarlyValueImpactRow>("analytics_early_value_impact", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useEarlyValueImpactBySport(days = 30) {
+  return useQuery({
+    queryKey: ["analytics-early-value-impact-by-sport", days],
+    queryFn:  () => rpc<EarlyValueImpactBySportRow>("analytics_early_value_impact_by_sport", { lookback_days: days }),
     staleTime: STALE,
     gcTime:    GC,
   });

@@ -5,9 +5,26 @@
  * and the ParlayPerformanceDashboard. Never blocks the UI.
  */
 
-import type { ParlayBuildMode, SmartParlayResult } from "@/lib/valueParlay/types";
+import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
 import type { AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
 import { supabase } from "@/lib/supabase";
+
+// ── Early value label ─────────────────────────────────────────────────────────
+
+/**
+ * Computes the same early-value label used in PropCard / earlyValueTag(),
+ * adapted for ValueBetCandidate field names.
+ *
+ * ValueBetCandidate.edge is a decimal fraction (e.g. 0.10 = 10pp edge).
+ * ValueBetCandidate.lineMovementDeltaPp is in percentage points (matching line_delta).
+ */
+function legEarlyValueLabel(l: ValueBetCandidate): string | null {
+  const delta = l.lineMovementDeltaPp;
+  if (delta != null && Math.abs(delta) >= 0.5) return "LINE VALUE";
+  if (l.edge >= 0.10) return "OPENING EDGE";
+  if (l.edge >= 0.06 && (l.stabilityScore ?? 0) >= 0.60) return "EARLY VALUE";
+  return null;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -120,6 +137,7 @@ export async function logParlayBuild(
       conf_cal_adj:         l.confidenceCalibrationAdjustment != null
                               ? Math.round(l.confidenceCalibrationAdjustment * 10000) / 10000
                               : null,
+      early_value_label:    legEarlyValueLabel(l),
     }));
 
     await supabase.from("parlay_build_legs").insert(legRows);

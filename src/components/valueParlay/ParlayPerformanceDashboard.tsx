@@ -15,6 +15,8 @@ import {
   useStabilityEdgeQuality,
   useCalibrationImpact,
   useCalibrationImpactBySport,
+  useEarlyValueImpact,
+  useEarlyValueImpactBySport,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
@@ -22,6 +24,8 @@ import {
   type StabilityEdgeQualityRow,
   type CalibrationImpactRow,
   type CalibrationImpactBySportRow,
+  type EarlyValueImpactRow,
+  type EarlyValueImpactBySportRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -1017,7 +1021,318 @@ function CalibrationImpactPanel({ days }: { days: number }) {
   );
 }
 
-// ── Panel 8: How it works ─────────────────────────────────────────────────────
+// ── Panel 8: Early value label impact ────────────────────────────────────────
+
+const EV_LABEL_COLOR: Record<string, string> = {
+  "LINE VALUE":   "text-blue-500",
+  "OPENING EDGE": "text-violet-500",
+  "EARLY VALUE":  "text-primary",
+  "none":         "text-muted-foreground/50",
+};
+
+const EV_LABEL_DESC: Record<string, string> = {
+  "LINE VALUE":   "|Δline| ≥ 0.5pp — active line movement",
+  "OPENING EDGE": "edge ≥ 10% — strong model vs market gap",
+  "EARLY VALUE":  "edge ≥ 6% + stability ≥ 0.60",
+  "none":         "no early-value signal at build time",
+};
+
+const EV_LABEL_ORDER = ["LINE VALUE", "OPENING EDGE", "EARLY VALUE", "none"] as const;
+
+// ── Early value by sport sub-section ─────────────────────────────────────────
+
+/**
+ * Transposed table: rows = sports, columns = LINE VALUE | OPENING EDGE | EARLY VALUE | No-label%
+ *
+ * Key questions at a glance:
+ *   - Which sports have validated LINE VALUE signal? (often NBA first)
+ *   - Does OPENING EDGE hold up in MLB better than other labels?
+ *   - Combat sports: are they still mostly no-label as expected?
+ */
+function EarlyValueImpactBySportSection({
+  rows,
+  loading,
+}: {
+  rows: EarlyValueImpactBySportRow[];
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="space-y-1.5 pt-3 border-t border-border/50">
+        <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">BY SPORT</p>
+        <LoadingRow />
+      </div>
+    );
+  }
+  if (!rows.length) return null;
+
+  const sports = [...new Set(rows.map((r) => r.sport))].sort();
+
+  function sportLabel(sport: string, label: string): EarlyValueImpactBySportRow | undefined {
+    return rows.find((r) => r.sport === sport && r.label === label);
+  }
+
+  function hitCell(row: EarlyValueImpactBySportRow | undefined) {
+    if (!row) return <td className="text-right py-1.5 pr-2 text-muted-foreground/25">—</td>;
+    const { hit_rate_pct, resolved_count } = row;
+    if (Number(resolved_count) < 5) {
+      return (
+        <td className="text-right py-1.5 pr-2 text-muted-foreground/40">
+          —<span className="text-[8px] ml-0.5">/{resolved_count}</span>
+        </td>
+      );
+    }
+    return (
+      <td className={cn("text-right py-1.5 pr-2 font-semibold", hitColor(hit_rate_pct))}>
+        {pct(hit_rate_pct)}
+        <span className="ml-0.5 text-[8px] text-muted-foreground/50">/{resolved_count}</span>
+      </td>
+    );
+  }
+
+  return (
+    <div className="space-y-2 pt-3 border-t border-border/50">
+      <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">BY SPORT</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[10px] tabular-nums">
+          <thead>
+            <tr className="text-muted-foreground/60 border-b border-border/40">
+              <th className="text-left py-1 pr-3 font-medium">Sport</th>
+              <th className="text-right py-1 pr-2 font-medium text-blue-500/70">Line Value</th>
+              <th className="text-right py-1 pr-2 font-medium text-violet-500/70">Opening Edge</th>
+              <th className="text-right py-1 pr-2 font-medium text-primary/70">Early Value</th>
+              <th className="text-right py-1 font-medium text-muted-foreground/50">No-label</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sports.map((sport) => {
+              const lvRow   = sportLabel(sport, "LINE VALUE");
+              const oeRow   = sportLabel(sport, "OPENING EDGE");
+              const evRow   = sportLabel(sport, "EARLY VALUE");
+              const noneRow = sportLabel(sport, "none");
+
+              const noLabelPct = (lvRow ?? oeRow ?? evRow ?? noneRow)?.no_label_pct ?? null;
+              const isCombat   = COMBAT_SPORTS.has(sport);
+
+              // Per-sport validation: any labeled bucket outperforms none?
+              const lvHit   = Number(lvRow?.resolved_count ?? 0) >= 5  ? lvRow?.hit_rate_pct  ?? null : null;
+              const oeHit   = Number(oeRow?.resolved_count ?? 0) >= 5  ? oeRow?.hit_rate_pct  ?? null : null;
+              const evHit   = Number(evRow?.resolved_count ?? 0) >= 5  ? evRow?.hit_rate_pct  ?? null : null;
+              const noneHit = Number(noneRow?.resolved_count ?? 0) >= 5 ? noneRow?.hit_rate_pct ?? null : null;
+
+              const labeledHits = [lvHit, oeHit, evHit].filter((h): h is number => h !== null);
+              const bestLabeled = labeledHits.length ? Math.max(...labeledHits) : null;
+              const allLabeled  = [lvHit, oeHit, evHit];
+              const hasAllThree = allLabeled.every((h) => h !== null);
+
+              let dirIcon: React.ReactNode = null;
+              if (labeledHits.length >= 2 && noneHit !== null) {
+                const allAboveNone = labeledHits.every((h) => h > noneHit);
+                const descending   = hasAllThree
+                  ? (lvHit! >= oeHit! && oeHit! >= evHit!)
+                  : labeledHits[0] >= labeledHits[labeledHits.length - 1];
+                if (allAboveNone && descending && hasAllThree)
+                  dirIcon = <span className="text-emerald-500 ml-1" title="Signal validated">✓</span>;
+                else if (bestLabeled !== null && noneHit !== null && bestLabeled > noneHit)
+                  dirIcon = <span className="text-yellow-500 ml-1" title="Partial signal">→</span>;
+                else
+                  dirIcon = <span className="text-rose-500 ml-1" title="Signal not confirmed">⚠</span>;
+              }
+
+              return (
+                <tr key={sport} className="border-b border-border/30 last:border-0">
+                  <td className={cn("py-1.5 pr-3 font-semibold", isCombat ? "text-muted-foreground/60" : "text-foreground")}>
+                    {sport}
+                    {dirIcon}
+                    {isCombat && noLabelPct !== null && noLabelPct > 0.7 && (
+                      <span className="ml-1 text-[8px] text-muted-foreground/40" title="Combat sport: low early-value label coverage expected">
+                        ~{Math.round(noLabelPct * 100)}% no-label
+                      </span>
+                    )}
+                  </td>
+                  {hitCell(lvRow)}
+                  {hitCell(oeRow)}
+                  {hitCell(evRow)}
+                  <td className="text-right py-1.5 text-muted-foreground/50">
+                    {noLabelPct !== null ? (
+                      <span className={noLabelPct > 0.6 ? "text-amber-500/70" : "text-muted-foreground/40"}>
+                        {Math.round(noLabelPct * 100)}%
+                        {noneRow && (
+                          <span className="ml-0.5 text-[8px]">/{noneRow.leg_count}</span>
+                        )}
+                      </span>
+                    ) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[9px] text-muted-foreground/40">
+        Hit%/n shown when ≥5 resolved per bucket.
+        ✓ = all three labels validated in order · → = partial · ⚠ = not confirmed
+        · No-label% amber when &gt;60%
+      </p>
+    </div>
+  );
+}
+
+function EarlyValueImpactPanel({ days }: { days: number }) {
+  const { data = [], isLoading }                       = useEarlyValueImpact(days);
+  const { data: bySport = [], isLoading: sportLoading } = useEarlyValueImpactBySport(days);
+  const rows = data as EarlyValueImpactRow[];
+
+  const totalLegs     = rows.reduce((s, r) => s + Number(r.leg_count), 0);
+  const totalResolved = rows.reduce((s, r) => s + Number(r.resolved_count), 0);
+
+  // Signal validation: LINE VALUE > OPENING EDGE > EARLY VALUE > none (where each has ≥5 resolved)
+  function rowByLabel(label: string) { return rows.find((r) => r.label === label); }
+  const lv  = rowByLabel("LINE VALUE");
+  const oe  = rowByLabel("OPENING EDGE");
+  const ev  = rowByLabel("EARLY VALUE");
+  const none = rowByLabel("none");
+
+  const hasEnough = (r: EarlyValueImpactRow | undefined) =>
+    r != null && Number(r.resolved_count) >= 5;
+
+  // Best-effort ordering check on whatever buckets have ≥5 resolved
+  const labeledRows = [lv, oe, ev].filter((r): r is EarlyValueImpactRow => hasEnough(r));
+  const noneRow = hasEnough(none) ? none : undefined;
+
+  let signalVerdict: "validated" | "partial" | "unconfirmed" | null = null;
+  if (labeledRows.length >= 2) {
+    // All labeled > none, and descending among labeled
+    const labeledHits = labeledRows.map((r) => r.hit_rate_pct ?? 0);
+    const allDescending = labeledHits.every((h, i) => i === 0 || h <= labeledHits[i - 1]);
+    const allAboveNone  = noneRow
+      ? labeledHits.every((h) => h > (noneRow.hit_rate_pct ?? 0))
+      : true;
+
+    if (allDescending && allAboveNone && labeledRows.length === 3) signalVerdict = "validated";
+    else if (labeledRows.length >= 2 && labeledHits[0] > labeledHits[labeledHits.length - 1]) signalVerdict = "partial";
+    else signalVerdict = "unconfirmed";
+  } else if (totalResolved >= 10) {
+    signalVerdict = "unconfirmed";
+  }
+
+  return (
+    <SectionCard
+      title="Early value label impact"
+      subtitle="Do LINE VALUE / OPENING EDGE / EARLY VALUE legs outperform unlabeled legs?"
+      sampleSize={totalResolved > 0 ? totalResolved : undefined}
+    >
+      {isLoading ? (
+        <div className="space-y-2"><LoadingRow /><LoadingRow /><LoadingRow /></div>
+      ) : !rows.length ? (
+        <EmptyState label="No parlay build legs logged yet. Auto-build some parlays to populate." />
+      ) : (
+        <div className="space-y-3">
+
+          {/* Signal verdict */}
+          {signalVerdict && (
+            <div className="text-[10px] flex items-center gap-1.5">
+              {signalVerdict === "validated"   && <span className="text-emerald-500 font-semibold">✓ signal validated</span>}
+              {signalVerdict === "partial"     && <span className="text-yellow-500 font-semibold">→ partial signal</span>}
+              {signalVerdict === "unconfirmed" && <span className="text-rose-500 font-semibold">⚠ signal not confirmed</span>}
+              <span className="text-muted-foreground/50">
+                ({totalResolved} resolved legs across {totalLegs} built)
+              </span>
+            </div>
+          )}
+
+          {/* Label table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] tabular-nums">
+              <thead>
+                <tr className="text-muted-foreground/60 border-b border-border/40">
+                  <th className="text-left py-1 pr-3 font-medium">Label</th>
+                  <th className="text-right py-1 pr-2 font-medium">Legs</th>
+                  <th className="text-right py-1 pr-2 font-medium">Hit%</th>
+                  <th className="text-right py-1 pr-2 font-medium">ROI%</th>
+                  <th className="text-right py-1 pr-2 font-medium">Avg edge</th>
+                  <th className="text-right py-1 font-medium">Avg stab</th>
+                </tr>
+              </thead>
+              <tbody>
+                {EV_LABEL_ORDER.map((label) => {
+                  const r = rowByLabel(label);
+                  if (!r) return null;
+                  const legPct = totalLegs > 0
+                    ? `${(Number(r.leg_count) / totalLegs * 100).toFixed(0)}%`
+                    : "";
+                  const thin = Number(r.resolved_count) < 5;
+                  return (
+                    <tr key={label} className="border-b border-border/30 last:border-0">
+                      <td className={cn("py-1.5 pr-3 font-medium whitespace-nowrap", EV_LABEL_COLOR[label])}>
+                        {label}
+                      </td>
+                      <td className="text-right py-1.5 pr-2">
+                        <span className="font-semibold">{r.leg_count}</span>
+                        {legPct && (
+                          <span className="ml-0.5 text-[8px] text-muted-foreground/50">{legPct}</span>
+                        )}
+                      </td>
+                      <td className="text-right py-1.5 pr-2">
+                        {thin ? (
+                          <span className="text-muted-foreground/40">
+                            —<span className="text-[8px] ml-0.5">/{r.resolved_count}</span>
+                          </span>
+                        ) : (
+                          <span className={hitColor(r.hit_rate_pct)}>
+                            {pct(r.hit_rate_pct)}
+                            <span className="ml-0.5 text-[8px] text-muted-foreground/50">
+                              /{r.resolved_count}
+                            </span>
+                          </span>
+                        )}
+                      </td>
+                      <td className={cn("text-right py-1.5 pr-2 font-semibold", roiColor(r.roi_pct))}>
+                        {thin ? "—" : pct(r.roi_pct)}
+                      </td>
+                      <td className="text-right py-1.5 pr-2 text-muted-foreground font-mono">
+                        {r.avg_edge != null
+                          ? `${(Number(r.avg_edge) * 100).toFixed(1)}pp`
+                          : "—"}
+                      </td>
+                      <td className="text-right py-1.5 text-muted-foreground font-mono">
+                        {r.avg_stability != null ? Number(r.avg_stability).toFixed(2) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Label legend */}
+          <div className="space-y-0.5 border-t border-border/30 pt-2">
+            {EV_LABEL_ORDER.map((label) => (
+              rowByLabel(label) ? (
+                <p key={label} className="text-[9px] text-muted-foreground/50">
+                  <span className={cn("font-semibold", EV_LABEL_COLOR[label])}>{label}</span>
+                  {" — "}
+                  {EV_LABEL_DESC[label]}
+                </p>
+              ) : null
+            ))}
+          </div>
+
+          {totalResolved < 10 && (
+            <p className="text-[9px] text-muted-foreground/50">
+              Needs ≥5 resolved per label to show hit rate. Currently {totalResolved} total resolved.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* By-sport breakdown — always shown when data exists */}
+      <EarlyValueImpactBySportSection rows={bySport as EarlyValueImpactBySportRow[]} loading={sportLoading} />
+    </SectionCard>
+  );
+}
+
+// ── Panel 9: How it works ─────────────────────────────────────────────────────
 
 function HowItWorksPanel() {
   return (
@@ -1047,6 +1362,17 @@ function HowItWorksPanel() {
           (alpha) per sport. Alpha grows automatically from resolved outcome volume. Combat sports have
           tighter bounds (0.03–0.18/0.20) to prevent noise overfit from small sample windows.
           The feedback loop adjusts alpha ±0.02 when contribution analytics cross the 2pp threshold.
+        </div>
+        <div>
+          <span className="font-semibold text-foreground">Early value label impact</span> — validates
+          whether the Tomorrow tab&apos;s{" "}
+          <code className="text-blue-500">LINE VALUE</code>,{" "}
+          <code className="text-violet-500">OPENING EDGE</code>, and{" "}
+          <code className="text-primary">EARLY VALUE</code> labels predict better conversion.
+          Signal is validated when hit rate descends LINE VALUE → OPENING EDGE → EARLY VALUE → none.
+          Needs ≥5 resolved per label. Avg stability column answers whether the 0.60 stability
+          threshold is selecting higher-quality legs. The by-sport breakdown identifies which sports
+          have validated signals first — prerequisite for per-sport ranking boosts in Option 1.
         </div>
         <div>
           <span className="font-semibold text-foreground">Calibration impact</span> — validates whether
@@ -1118,6 +1444,9 @@ export function ParlayPerformanceDashboard() {
 
       {/* Calibration impact — full width, separate from cross-tab grid */}
       <CalibrationImpactPanel days={days} />
+
+      {/* Early value label impact — answers do LINE VALUE > EARLY VALUE? */}
+      <EarlyValueImpactPanel days={days} />
 
       {/* Full-width how-it-works */}
       <HowItWorksPanel />
