@@ -16,7 +16,7 @@ export type PlayerEdgeStatFilter =
   // MLB
   | "strikeouts" | "hits" | "total_bases"
   // Combat sports
-  | "fight_winner" | "ko_tko" | "decision" | "total_rounds" | "goes_distance";
+  | "fight_winner" | "ko_tko" | "submission" | "decision" | "draw" | "total_rounds" | "goes_distance";
 
 export type PlayerRiskTier = "safe" | "balanced" | "high_upside" | "longshot";
 
@@ -58,7 +58,9 @@ export function statFilterLabel(f: PlayerEdgeStatFilter): string {
     total_bases: "Total Bases",
     fight_winner: "Fight Winner",
     ko_tko: "KO/TKO",
+    submission: "Submission",
     decision: "Decision",
+    draw: "Draw",
     total_rounds: "Total Rounds",
     goes_distance: "Goes Distance",
   };

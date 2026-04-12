@@ -31,7 +31,7 @@ const STAT_FILTERS: PlayerEdgeStatFilter[] = [
   "points", "rebounds", "assists",
   "passing_yards", "rushing_yards", "receiving_yards",
   "strikeouts", "hits", "total_bases",
-  "fight_winner", "ko_tko", "total_rounds",
+  "fight_winner", "ko_tko", "submission", "decision", "draw", "total_rounds",
 ];
 
 // ── Confidence / risk colour helpers ─────────────────────────────────────────
@@ -72,9 +72,11 @@ function riskLabel(t: PlayerRiskTier): string {
 
 function betHeadline(p: PlayerEdgePrediction): string {
   const stat = statFilterLabel(p.stat_type as PlayerEdgeStatFilter) || p.stat_type.replace(/_/g, " ");
-  if (p.stat_type === "fight_winner") return "To Win";
-  if (p.stat_type === "ko_tko")       return "Win by KO/TKO";
-  if (p.stat_type === "decision")     return "Win by Decision";
+  if (p.stat_type === "fight_winner")  return "To Win";
+  if (p.stat_type === "ko_tko")        return "Win by KO/TKO";
+  if (p.stat_type === "submission")    return "Win by Submission";
+  if (p.stat_type === "decision")      return "Win by Decision";
+  if (p.stat_type === "draw")          return "Fight Ends in Draw";
   if (p.stat_type === "goes_distance") return "Goes Distance";
   if (p.stat_type === "total_rounds")
     return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} Rounds`;

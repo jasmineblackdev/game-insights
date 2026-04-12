@@ -24,7 +24,9 @@ function betHeadline(row: PickLogRow): string {
   const st = row.stat_type.replace(/_/g, " ");
   if (row.stat_type === "fight_winner")  return "To Win";
   if (row.stat_type === "ko_tko")        return "Win by KO/TKO";
+  if (row.stat_type === "submission")    return "Win by Submission";
   if (row.stat_type === "decision")      return "Win by Decision";
+  if (row.stat_type === "draw")          return "Fight Ends in Draw";
   if (row.stat_type === "total_rounds")
     return `${row.direction === "MORE" ? "Over" : "Under"} ${row.line_value} Rounds`;
   return `${row.direction === "MORE" ? "Over" : "Under"} ${row.line_value} ${st}`;

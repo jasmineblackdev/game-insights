@@ -102,72 +102,225 @@ function buildWinnerProp(
   };
 }
 
-// ── Method prop (KO/TKO or Decision) ──────────────────────────────────────────
+// ── Method props (KO/TKO · Submission · Decision · Draw) ──────────────────────
 
-function buildMethodProp(
-  game: GamePrediction,
-  sport: "Boxing" | "MMA",
-  sortBase: number
-): PlayerEdgePrediction | null {
-  // Get method probabilities from boxing/MMA intel
+interface MethodContext {
+  koProb: number;
+  subProb: number;
+  decProb: number;
+  drawProb: number;
+  hasRealStats: boolean;
+  homeFighter: import("@/data/mockGames").MmaFighterProfile | undefined;
+  awayFighter: import("@/data/mockGames").MmaFighterProfile | undefined;
+  favFighter: { name: string; abbreviation: string };
+  undFighter: { name: string; abbreviation: string };
+}
+
+function getMethodContext(game: GamePrediction): MethodContext | null {
   const boxing = game.boxing;
-  const mma = game.mma;
-  const method =
-    boxing?.modelOutput?.methodProbabilities ??
-    mma?.modelOutput?.methodProbabilities;
-
+  const mma    = game.mma;
+  const method = boxing?.modelOutput?.methodProbabilities ?? mma?.modelOutput?.methodProbabilities;
   if (!method) return null;
 
-  // Skip method props when fighter profiles are minimal (no real stats).
-  // All minimal profiles produce identical defaults (decision≈67%, ko_tko≈20%),
-  // so the prop would be noise rather than signal.
-  const homeFighter = game.mma?.homeFighter ?? game.boxing?.homeFighter;
-  const awayFighter = game.mma?.awayFighter ?? game.boxing?.awayFighter;
-  const hasRealStats = homeFighter?.koTkoPct != null || awayFighter?.koTkoPct != null;
-  if (!hasRealStats) return null;
+  const homeFighter = mma?.homeFighter ?? boxing?.homeFighter;
+  const awayFighter = mma?.awayFighter ?? boxing?.awayFighter;
+  const hasRealStats = homeFighter?.koTkoPct != null || awayFighter?.koTkoPct != null
+    || homeFighter?.subPct != null || awayFighter?.subPct != null;
 
-  const koProb = ("ko_tko" in method ? method.ko_tko : 0) as number;
-  const decProb = ("decision" in method ? method.decision : 0) as number;
+  const koProb  = (method as Record<string, number>).ko_tko   ?? 0;
+  const subProb = (method as Record<string, number>).submission ?? 0;
+  const decProb = (method as Record<string, number>).decision  ?? 0;
+  const drawProb = Math.max(0, 1 - koProb - subProb - decProb);
 
-  // Pick the more likely method with >40% probability
-  const useKo = koProb > decProb && koProb > 0.35;
-  const useDecision = !useKo && decProb > 0.40;
-  if (!useKo && !useDecision) return null;
+  const favHome = game.winProbability.home >= game.winProbability.away;
+  return {
+    koProb, subProb, decProb, drawProb,
+    hasRealStats,
+    homeFighter,
+    awayFighter,
+    favFighter: favHome ? game.homeTeam : game.awayTeam,
+    undFighter: favHome ? game.awayTeam : game.homeTeam,
+  };
+}
 
-  const favFighter = game.winProbability.home >= game.winProbability.away
-    ? game.homeTeam : game.awayTeam;
-  const undFighter = game.winProbability.home >= game.winProbability.away
-    ? game.awayTeam : game.homeTeam;
+/** KO/TKO — attributed to the fighter with the higher KO rate (or favored if no stats). */
+function buildKoTkoProp(
+  game: GamePrediction,
+  sport: "Boxing" | "MMA",
+  ctx: MethodContext,
+  sortBase: number
+): PlayerEdgePrediction | null {
+  if (!ctx.hasRealStats) return null;
+  if (ctx.koProb < 0.20) return null;
 
-  const methodProb = useKo ? koProb : decProb;
-  const methodType = useKo ? "ko_tko" : "decision";
-  const edgeAmt = methodProb - 0.5;  // vs 50/50 base
-  const confidence = methodProb >= 0.60 ? "HIGH" : methodProb >= 0.45 ? "MED" : "LOW";
+  // Which fighter is more likely to score the KO?
+  const homeKoPct = ctx.homeFighter?.koTkoPct ?? 0;
+  const awayKoPct = ctx.awayFighter?.koTkoPct ?? 0;
+  const koFighter = homeKoPct >= awayKoPct ? game.homeTeam : game.awayTeam;
+  const oppFighter = homeKoPct >= awayKoPct ? game.awayTeam : game.homeTeam;
+  const koFighterPct = Math.max(homeKoPct, awayKoPct);
+
+  const edgeAmt = ctx.koProb - 0.33; // vs 1-in-3 baseline for three-outcome market
+  const confidence: "HIGH" | "MED" | "LOW" = ctx.koProb >= 0.50 ? "HIGH" : ctx.koProb >= 0.30 ? "MED" : "LOW";
 
   return {
-    id: `${sport.toLowerCase()}-method-${game.id}`,
+    id: `${sport.toLowerCase()}-ko-${game.id}`,
     game_id: game.id,
-    player_id: `${sport.toLowerCase()}-method-${game.id}`,
-    player_name: favFighter.name,
+    player_id: `${sport.toLowerCase()}-ko-${game.id}`,
+    player_name: koFighter.name,
     sport,
-    team: favFighter.abbreviation,
-    opponent: undFighter.name,
+    team: koFighter.abbreviation,
+    opponent: oppFighter.name,
     game_time: game.gameTime,
-    stat_type: methodType,
-    line_value: 50,  // baseline 50%
-    projected_value: Math.round(methodProb * 1000) / 10,
+    stat_type: "ko_tko",
+    line_value: 33,
+    projected_value: Math.round(ctx.koProb * 1000) / 10,
     prediction_direction: edgeAmt >= 0 ? "MORE" : "LESS",
     edge: Math.round(edgeAmt * 1000) / 10,
     confidence,
-    reason_1: useKo
-      ? `Model projects ${Math.round(koProb * 100)}% KO/TKO probability based on style matchup`
-      : `Model projects ${Math.round(decProb * 100)}% decision probability — defensive styles clash`,
-    reason_2: game.keyMatchup,
-    risk_factor: "Method markets carry extra variance — late stoppages can shift outcomes unpredictably.",
+    reason_1: `Model projects ${Math.round(ctx.koProb * 100)}% KO/TKO probability — style matchup favors early finish`,
+    reason_2: koFighterPct > 0
+      ? `${koFighter.name} finishes ${Math.round(koFighterPct * 100)}% of wins by KO/TKO. ${game.keyMatchup}`
+      : game.keyMatchup,
+    risk_factor: "KO timing is unpredictable — a single takedown or clinch can nullify striking output.",
     game_sort: sortBase + 1,
     confidence_score_0_100: confidence === "HIGH" ? 68 : confidence === "MED" ? 55 : 42,
     risk_tier: riskTier(confidence),
-    consistency_label: confidence === "HIGH" ? "medium" : "volatile",
+    consistency_label: "medium",
+    timing_note: timingNote(sport),
+  };
+}
+
+/** Submission — only shown when real grappling stats exist. */
+function buildSubmissionProp(
+  game: GamePrediction,
+  sport: "Boxing" | "MMA",
+  ctx: MethodContext,
+  sortBase: number
+): PlayerEdgePrediction | null {
+  if (!ctx.hasRealStats) return null;
+  if (ctx.subProb < 0.12) return null; // submissions are rarer — lower threshold
+
+  const homeSubPct = ctx.homeFighter?.subPct ?? 0;
+  const awaySubPct = ctx.awayFighter?.subPct ?? 0;
+  const subFighter = homeSubPct >= awaySubPct ? game.homeTeam : game.awayTeam;
+  const oppFighter = homeSubPct >= awaySubPct ? game.awayTeam : game.homeTeam;
+  const subFighterPct = Math.max(homeSubPct, awaySubPct);
+
+  // Avg sub attempts per 15 min
+  const homeSub15 = ctx.homeFighter?.avgSubAttemptsPer15 ?? 0;
+  const awaySub15 = ctx.awayFighter?.avgSubAttemptsPer15 ?? 0;
+  const subAttempts = Math.max(homeSub15, awaySub15);
+
+  const edgeAmt = ctx.subProb - 0.20; // baseline ~20%
+  const confidence: "HIGH" | "MED" | "LOW" = ctx.subProb >= 0.35 ? "HIGH" : ctx.subProb >= 0.20 ? "MED" : "LOW";
+
+  return {
+    id: `${sport.toLowerCase()}-sub-${game.id}`,
+    game_id: game.id,
+    player_id: `${sport.toLowerCase()}-sub-${game.id}`,
+    player_name: subFighter.name,
+    sport,
+    team: subFighter.abbreviation,
+    opponent: oppFighter.name,
+    game_time: game.gameTime,
+    stat_type: "submission",
+    line_value: 20,
+    projected_value: Math.round(ctx.subProb * 1000) / 10,
+    prediction_direction: edgeAmt >= 0 ? "MORE" : "LESS",
+    edge: Math.round(edgeAmt * 1000) / 10,
+    confidence,
+    reason_1: `Model projects ${Math.round(ctx.subProb * 100)}% submission probability — grappling style matchup`,
+    reason_2: subFighterPct > 0
+      ? `${subFighter.name} finishes ${Math.round(subFighterPct * 100)}% of wins by submission${subAttempts > 0 ? `, avg ${subAttempts.toFixed(1)} attempts/15 min` : ""}. ${game.keyMatchup}`
+      : game.keyMatchup,
+    risk_factor: "Submission odds swing sharply when fighters are taken down or clinch early.",
+    game_sort: sortBase + 2,
+    confidence_score_0_100: confidence === "HIGH" ? 65 : confidence === "MED" ? 52 : 40,
+    risk_tier: riskTier(confidence),
+    consistency_label: "medium",
+    timing_note: timingNote(sport),
+  };
+}
+
+/** Decision — shown when fight is projected to go to the judges. */
+function buildDecisionProp(
+  game: GamePrediction,
+  sport: "Boxing" | "MMA",
+  ctx: MethodContext,
+  sortBase: number
+): PlayerEdgePrediction | null {
+  if (!ctx.hasRealStats) return null;
+  if (ctx.decProb < 0.40) return null;
+
+  const fightLabel = `${ctx.favFighter.name} vs ${ctx.undFighter.name}`;
+  const edgeAmt = ctx.decProb - 0.40; // baseline ~40% for decision
+  const confidence: "HIGH" | "MED" | "LOW" = ctx.decProb >= 0.60 ? "HIGH" : ctx.decProb >= 0.45 ? "MED" : "LOW";
+
+  return {
+    id: `${sport.toLowerCase()}-dec-${game.id}`,
+    game_id: game.id,
+    player_id: `${sport.toLowerCase()}-dec-${game.id}`,
+    player_name: fightLabel,
+    sport,
+    team: ctx.favFighter.abbreviation,
+    opponent: ctx.undFighter.abbreviation,
+    game_time: game.gameTime,
+    stat_type: "decision",
+    line_value: 40,
+    projected_value: Math.round(ctx.decProb * 1000) / 10,
+    prediction_direction: edgeAmt >= 0 ? "MORE" : "LESS",
+    edge: Math.round(edgeAmt * 1000) / 10,
+    confidence,
+    reason_1: `Model projects ${Math.round(ctx.decProb * 100)}% probability fight goes to decision — defensive styles clash`,
+    reason_2: game.keyMatchup,
+    risk_factor: "A single big punch or takedown can turn a projected points fight into an early finish.",
+    game_sort: sortBase + 3,
+    confidence_score_0_100: confidence === "HIGH" ? 66 : confidence === "MED" ? 53 : 41,
+    risk_tier: riskTier(confidence),
+    consistency_label: confidence === "HIGH" ? "stable" : "medium",
+    timing_note: timingNote(sport),
+  };
+}
+
+/** Draw — only shown when draw probability > 4% (rare but high value when it hits). */
+function buildDrawProp(
+  game: GamePrediction,
+  sport: "Boxing" | "MMA",
+  ctx: MethodContext,
+  sortBase: number
+): PlayerEdgePrediction | null {
+  // Draws are very rare in MMA — only surface when probability is meaningful
+  if (ctx.drawProb < 0.04) return null;
+  // Require at least some real stats so we're not showing noise from default model
+  if (!ctx.hasRealStats) return null;
+
+  const fightLabel = `${ctx.favFighter.name} vs ${ctx.undFighter.name}`;
+  const edgeAmt = ctx.drawProb - 0.02; // baseline ~2% for draws
+  const confidence: "HIGH" | "MED" | "LOW" = ctx.drawProb >= 0.08 ? "MED" : "LOW";
+
+  return {
+    id: `${sport.toLowerCase()}-draw-${game.id}`,
+    game_id: game.id,
+    player_id: `${sport.toLowerCase()}-draw-${game.id}`,
+    player_name: fightLabel,
+    sport,
+    team: ctx.favFighter.abbreviation,
+    opponent: ctx.undFighter.abbreviation,
+    game_time: game.gameTime,
+    stat_type: "draw",
+    line_value: 2,
+    projected_value: Math.round(ctx.drawProb * 1000) / 10,
+    prediction_direction: "MORE",
+    edge: Math.round(edgeAmt * 1000) / 10,
+    confidence,
+    reason_1: `Draw probability at ${Math.round(ctx.drawProb * 100)}% — evenly matched styles, potential scorecards split`,
+    reason_2: game.keyMatchup,
+    risk_factor: "Draws require judges to score identically — exact round-by-round breakdowns matter.",
+    game_sort: sortBase + 4,
+    confidence_score_0_100: confidence === "MED" ? 50 : 38,
+    risk_tier: "longshot",
+    consistency_label: "volatile",
     timing_note: timingNote(sport),
   };
 }
@@ -252,8 +405,17 @@ export async function fetchCombatPlayerEdgePredictions(): Promise<PlayerEdgePred
     if (game.status === "final") continue;
     const winner = buildWinnerProp(game, "Boxing", boxSort);
     if (winner) results.push(winner);
-    const method = buildMethodProp(game, "Boxing", boxSort);
-    if (method) results.push(method);
+    const ctx = getMethodContext(game);
+    if (ctx) {
+      const ko  = buildKoTkoProp(game, "Boxing", ctx, boxSort);
+      if (ko) results.push(ko);
+      const sub = buildSubmissionProp(game, "Boxing", ctx, boxSort);
+      if (sub) results.push(sub);
+      const dec = buildDecisionProp(game, "Boxing", ctx, boxSort);
+      if (dec) results.push(dec);
+      const draw = buildDrawProp(game, "Boxing", ctx, boxSort);
+      if (draw) results.push(draw);
+    }
     const rounds = buildRoundsProp(game, "Boxing", boxSort);
     if (rounds) results.push(rounds);
     boxSort += 10;
@@ -265,8 +427,17 @@ export async function fetchCombatPlayerEdgePredictions(): Promise<PlayerEdgePred
     if (game.status === "final") continue;
     const winner = buildWinnerProp(game, "MMA", mmaSort);
     if (winner) results.push(winner);
-    const method = buildMethodProp(game, "MMA", mmaSort);
-    if (method) results.push(method);
+    const ctx = getMethodContext(game);
+    if (ctx) {
+      const ko  = buildKoTkoProp(game, "MMA", ctx, mmaSort);
+      if (ko) results.push(ko);
+      const sub = buildSubmissionProp(game, "MMA", ctx, mmaSort);
+      if (sub) results.push(sub);
+      const dec = buildDecisionProp(game, "MMA", ctx, mmaSort);
+      if (dec) results.push(dec);
+      const draw = buildDrawProp(game, "MMA", ctx, mmaSort);
+      if (draw) results.push(draw);
+    }
     const rounds = buildRoundsProp(game, "MMA", mmaSort);
     if (rounds) results.push(rounds);
     mmaSort += 10;
