@@ -334,6 +334,17 @@ const Index = () => {
     }
   }, [leagueGamesWithIntel, selectedGame]);
 
+  // Auto-advance to "week" if no today fights exist (non-fight nights)
+  useEffect(() => {
+    const isCombat = league === "mma" || league === "boxing";
+    if (!isCombat) return;
+    if (activeQuery.isPending) return;
+    if (dateFilter !== "today") return;
+    if (leagueGamesWithIntel.length === 0) return;
+    const hasToday = leagueGamesWithIntel.some((g) => g.gameDate === "today");
+    if (!hasToday) setDateFilter("week");
+  }, [league, leagueGamesWithIntel, dateFilter, activeQuery.isPending]);
+
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -359,10 +370,10 @@ const Index = () => {
     const isCombat = l === "boxing" || l === "mma";
     const wasCombat = league === "boxing" || league === "mma";
     if (isCombat) {
-      // Combat sports: fights are weekly events — default to "week" to show upcoming card
-      setDateFilter("week");
+      // Start on "today" — tonight's card shows as gameDate="today".
+      // A useEffect below advances to "week" automatically if no today fights load.
+      setDateFilter("today");
     } else if (wasCombat || dateFilter === "week") {
-      // Switching away from combat to a daily sport — reset to today
       setDateFilter("today");
     }
   };
