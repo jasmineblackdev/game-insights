@@ -28,6 +28,7 @@ import {
   useResolutionCompleteness,
   useConfidenceCalibration,
   useConfidenceCalibrationBySport,
+  useConfidenceCalibrationByMarket,
 } from "@/hooks/useAnalyticsDashboard";
 import type {
   TimingBucketRow,
@@ -43,6 +44,7 @@ import type {
   ResolutionCompletenessRow,
   ConfidenceCalibrationRow,
   ConfidenceCalibrationBySportRow,
+  ConfidenceCalibrationByMarketRow,
 } from "@/hooks/useAnalyticsDashboard";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -926,16 +928,20 @@ const CONF_ORDER = ["HIGH", "MED", "LOW"];
 function ConfCalibrationPanel({
   overall,
   bySport,
+  byMarket = [],
   overallLoading,
   bySportLoading,
+  byMarketLoading = false,
   lowResolutionSports = new Set<string>(),
   overall7 = [],
   overall30 = [],
 }: {
   overall: ConfidenceCalibrationRow[];
   bySport: ConfidenceCalibrationBySportRow[];
+  byMarket?: ConfidenceCalibrationByMarketRow[];
   overallLoading: boolean;
   bySportLoading: boolean;
+  byMarketLoading?: boolean;
   lowResolutionSports?: Set<string>;
   overall7?: ConfidenceCalibrationRow[];
   overall30?: ConfidenceCalibrationRow[];
@@ -1092,6 +1098,172 @@ function ConfCalibrationPanel({
           })}
         </div>
       )}
+
+      {/* By-market breakdown */}
+      {(byMarketLoading || byMarket.filter(r => r.resolved_count > 0).length > 0) && (
+        <ConfCalibrationByMarketSection
+          rows={byMarket}
+          loading={byMarketLoading}
+          lowResolutionSports={lowResolutionSports}
+          confBadge={confBadge}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Confidence calibration by market type section ─────────────────────────────
+
+/**
+ * Answers: are HIGH/MED/LOW labels actually predictive within each sport's
+ * specific market types? This is the most granular calibration check.
+ *
+ * A well-calibrated market: HIGH hit% > MED hit% > LOW hit% (✓)
+ * Partial:                  HIGH > MED only                   (→)
+ * Uncalibrated:             ordering wrong                    (⚠)
+ * Insufficient:             <5 resolved per tier              (shown dimmed)
+ */
+function ConfCalibrationByMarketSection({
+  rows,
+  loading,
+  lowResolutionSports,
+  confBadge,
+}: {
+  rows: ConfidenceCalibrationByMarketRow[];
+  loading: boolean;
+  lowResolutionSports: Set<string>;
+  confBadge: (conf: string) => React.ReactNode;
+}) {
+  const resolved = rows.filter((r) => r.resolved_count > 0);
+  const totalN   = resolved.reduce((s, r) => s + r.resolved_count, 0);
+
+  // Group by sport → stat_type
+  const bySportMarket = resolved.reduce<Record<string, Record<string, ConfidenceCalibrationByMarketRow[]>>>(
+    (acc, r) => {
+      (acc[r.sport] ??= {})[r.stat_type] ??= [];
+      acc[r.sport][r.stat_type].push(r);
+      return acc;
+    },
+    {}
+  );
+
+  const sortedSports = Object.keys(bySportMarket).sort();
+
+  /** Calibration verdict for a set of rows (all same sport+market). */
+  function marketVerdict(marketRows: ConfidenceCalibrationByMarketRow[]): "calibrated" | "partial" | "inverted" | "insufficient" {
+    const sorted = [...marketRows].sort((a, b) => CONF_ORDER.indexOf(a.confidence) - CONF_ORDER.indexOf(b.confidence));
+    const high = sorted.find((r) => r.confidence === "HIGH");
+    const med  = sorted.find((r) => r.confidence === "MED");
+    const low  = sorted.find((r) => r.confidence === "LOW");
+    if (!high?.hit_rate_pct && !med?.hit_rate_pct) return "insufficient";
+    if (high?.hit_rate_pct != null && med?.hit_rate_pct != null && low?.hit_rate_pct != null) {
+      if (high.hit_rate_pct > med.hit_rate_pct && med.hit_rate_pct > low.hit_rate_pct) return "calibrated";
+      if (high.hit_rate_pct > med.hit_rate_pct) return "partial";
+      return "inverted";
+    }
+    if (high?.hit_rate_pct != null && med?.hit_rate_pct != null) {
+      return high.hit_rate_pct > med.hit_rate_pct ? "partial" : "inverted";
+    }
+    return "insufficient";
+  }
+
+  const VERDICT_LABEL: Record<string, string> = {
+    calibrated:   "✓",
+    partial:      "→",
+    inverted:     "⚠",
+    insufficient: "?",
+  };
+  const VERDICT_COLOR: Record<string, string> = {
+    calibrated:   "text-emerald-500",
+    partial:      "text-yellow-500",
+    inverted:     "text-rose-500",
+    insufficient: "text-muted-foreground/40",
+  };
+
+  return (
+    <div className="space-y-3 pt-1 border-t border-border/50">
+      <div className="flex items-center gap-2 pt-1">
+        <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">BY MARKET TYPE</p>
+        {!loading && totalN > 0 && <PanelNBadge n={totalN} />}
+      </div>
+
+      {loading ? (
+        <LoadingRows n={3} />
+      ) : !resolved.length ? (
+        <NoDataNote label="market calibration (need ≥5 resolved per sport/market/confidence tier)" />
+      ) : (
+        <div className="space-y-4">
+          {sortedSports.map((sport) => {
+            const markets = bySportMarket[sport];
+            const sortedMarkets = Object.keys(markets).sort();
+            const lowCoverage = lowResolutionSports.has(sport);
+
+            return (
+              <div key={sport}>
+                <p className="text-[9px] font-bold tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1">
+                  {sport}
+                  {lowCoverage && <LowCoverageNote sport={sport} />}
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[10px] tabular-nums">
+                    <thead>
+                      <tr className="text-muted-foreground/60 border-b border-border/40">
+                        <th className="text-left py-1 pr-3 font-medium">Market</th>
+                        <th className="text-right py-1 pr-2 font-medium">HIGH</th>
+                        <th className="text-right py-1 pr-2 font-medium">MED</th>
+                        <th className="text-right py-1 pr-3 font-medium">LOW</th>
+                        <th className="text-center py-1 font-medium">Cal.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedMarkets.map((market) => {
+                        const marketRows = markets[market]
+                          .sort((a, b) => CONF_ORDER.indexOf(a.confidence) - CONF_ORDER.indexOf(b.confidence));
+                        const verdict = marketVerdict(marketRows);
+                        const marketTotalN = marketRows.reduce((s, r) => s + r.resolved_count, 0);
+
+                        function cellFor(conf: string) {
+                          const r = marketRows.find((x) => x.confidence === conf);
+                          if (!r) return <td key={conf} className="text-right py-1.5 pr-2 text-muted-foreground/30">—</td>;
+                          const n = r.resolved_count;
+                          return (
+                            <td key={conf} className="text-right py-1.5 pr-2">
+                              <span className={cn("font-semibold", n < MIN_NOISY ? "text-muted-foreground/40" : pctColor(r.hit_rate_pct))}>
+                                {fmt(r.hit_rate_pct)}
+                              </span>
+                              <span className={cn("ml-0.5 text-[8px]", sampleSizeClass(n))}>
+                                /{n}
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        return (
+                          <tr key={market} className="border-b border-border/30 last:border-0">
+                            <td className="py-1.5 pr-3 font-medium text-foreground">
+                              {market.replace(/_/g, " ")}
+                              <span className="ml-1 text-[8px] text-muted-foreground/40">n={marketTotalN}</span>
+                            </td>
+                            {cellFor("HIGH")}
+                            {cellFor("MED")}
+                            {cellFor("LOW")}
+                            <td className={cn("text-center py-1.5 font-bold text-xs", VERDICT_COLOR[verdict])}>
+                              <span title={verdict}>{VERDICT_LABEL[verdict]}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          <p className="text-[9px] text-muted-foreground/50">
+            ✓ calibrated (HIGH&gt;MED&gt;LOW) · → partial (HIGH&gt;MED only) · ⚠ inverted · ? insufficient data
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1113,8 +1285,9 @@ export function PerformanceDashboard() {
   const recVsExclSportQ  = useRecommendedVsExcludedBySport(days);
   const roiMarketQ       = useRoiByMarketType(days);
   const resolutionQ      = useResolutionCompleteness(days);
-  const confidenceCalibQ = useConfidenceCalibration(days);
-  const confCalibBySportQ = useConfidenceCalibrationBySport(days);
+  const confidenceCalibQ      = useConfidenceCalibration(days);
+  const confCalibBySportQ     = useConfidenceCalibrationBySport(days);
+  const confCalibByMarketQ    = useConfidenceCalibrationByMarket(days);
 
   // Always fetch both windows so trend comparison is always available.
   // React Query dedupes against the window-driven hooks above when days matches.
@@ -1132,6 +1305,12 @@ export function PerformanceDashboard() {
   const trendLoading =
     roiSportQ7.isLoading || roiSportQ30.isLoading ||
     recVsExclQ7.isLoading || recVsExclQ30.isLoading;
+
+  // Confidence calibration section total resolved
+  const confCalibTotalN = useMemo(
+    () => (confidenceCalibQ.data ?? []).reduce((s, r) => s + (r.resolved_count ?? 0), 0),
+    [confidenceCalibQ.data]
+  );
 
   // Panel-level total resolved counts for overreaction-risk panels.
   // Shown as header badges so it's obvious at a glance if a panel is low-N.
@@ -1290,12 +1469,14 @@ export function PerformanceDashboard() {
 
           {/* 12. Confidence calibration */}
           <section className="space-y-2">
-            <SectionHeader title="CONFIDENCE CALIBRATION (HIGH > MED > LOW)" />
+            <SectionHeader title="CONFIDENCE CALIBRATION (HIGH > MED > LOW)" totalN={confidenceCalibQ.isLoading ? undefined : confCalibTotalN} />
             <ConfCalibrationPanel
               overall={confidenceCalibQ.data ?? []}
               bySport={confCalibBySportQ.data ?? []}
+              byMarket={confCalibByMarketQ.data ?? []}
               overallLoading={confidenceCalibQ.isLoading}
               bySportLoading={confCalibBySportQ.isLoading}
+              byMarketLoading={confCalibByMarketQ.isLoading}
               lowResolutionSports={lowResolutionSports}
               overall7={confidenceCalibQ7.data ?? []}
               overall30={confidenceCalibQ30.data ?? []}

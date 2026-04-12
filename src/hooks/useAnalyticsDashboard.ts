@@ -143,6 +143,18 @@ export interface ConfidenceCalibrationBySportRow {
   avg_edge:         number;
 }
 
+export interface ConfidenceCalibrationByMarketRow {
+  sport:             string;
+  stat_type:         string;
+  confidence:        string;
+  total_predictions: number;
+  resolved_count:    number;
+  win_count:         number;
+  hit_rate_pct:      number | null;
+  roi_pct:           number | null;
+  avg_edge:          number;
+}
+
 export interface ModelContributionRow {
   model_variant:    string;
   resolved_count:   number;
@@ -318,6 +330,15 @@ export function useConfidenceCalibrationBySport(days = 30) {
   return useQuery({
     queryKey: ["analytics-confidence-calibration-by-sport", days],
     queryFn:  () => rpc<ConfidenceCalibrationBySportRow>("analytics_confidence_calibration_by_sport", { lookback_days: days }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
+
+export function useConfidenceCalibrationByMarket(days = 30, minResolved = 5) {
+  return useQuery({
+    queryKey: ["analytics-confidence-calibration-by-market", days, minResolved],
+    queryFn:  () => rpc<ConfidenceCalibrationByMarketRow>("analytics_confidence_calibration_by_market", { lookback_days: days, min_resolved: minResolved }),
     staleTime: STALE,
     gcTime:    GC,
   });
