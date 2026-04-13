@@ -32,6 +32,7 @@ import {
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
 import { readAlphaAdjustmentLog, type AlphaAdjustmentLog } from "@/lib/ml/feedbackLoop";
+import { getAllCalibrationEntries } from "@/lib/ml/confidenceCalibrationMap";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -522,6 +523,243 @@ function TierSummaryPanel({ days }: { days: number }) {
               </div>
             );
           })}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Signal activation monitor ────────────────────────────────────────────────
+
+/**
+ * Lightweight observation panel for the first activation wave.
+ *
+ * No new RPCs — composes from:
+ *   useResolutionCompleteness  → resolved counts + completeness per sport
+ *   useEarlyValueImpactBySport → EV label validation state
+ *   getAllCalibrationEntries   → localStorage cal adjustment map (sync read)
+ *   readAlphaAdjustmentLog     → localStorage alpha movement log (sync read)
+ *
+ * Shows: milestone activation status + per-sport signal state table.
+ * Read-only display only. No thresholds changed here.
+ */
+function SignalActivationPanel() {
+  const { data: compRaw = [], isLoading: compLoading } = useResolutionCompleteness(90);
+  const { data: evRaw  = [], isLoading: evLoading   } = useEarlyValueImpactBySport(90);
+
+  const compRows = compRaw as ResolutionCompletenessRow[];
+  const evRows   = evRaw   as EarlyValueImpactBySportRow[];
+
+  // Sync reads from localStorage — loaded once on mount
+  const [calEntries, setCalEntries] = useState<ReturnType<typeof getAllCalibrationEntries>>({});
+  const [alphaLogs, setAlphaLogs]   = useState<Record<string, AlphaAdjustmentLog | null>>({});
+
+  useEffect(() => {
+    setCalEntries(getAllCalibrationEntries());
+    const logs: Record<string, AlphaAdjustmentLog | null> = {};
+    for (const { key } of ALPHA_SPORTS) logs[key] = readAlphaAdjustmentLog(key);
+    setAlphaLogs(logs);
+  }, []);
+
+  // ── Milestone derivations ───────────────────────────────────────────────────
+
+  // First sport(s) to cross 50 resolved outcomes
+  const at50 = compRows.filter((r) => Number(r.resolved_count) >= 50)
+    .sort((a, b) => Number(b.resolved_count) - Number(a.resolved_count));
+
+  // First alpha log showing a direction other than "unchanged"
+  const alphaMovedEntries = Object.entries(alphaLogs)
+    .filter(([, log]) => log && log.direction !== "unchanged") as [string, AlphaAdjustmentLog][];
+
+  // Any non-zero calibration adjustment (absolute value > floating-point noise)
+  const nonZeroCal = Object.entries(calEntries)
+    .filter(([, e]) => Math.abs(e.adjustment) > 0.001)
+    .sort((a, b) => Math.abs(b[1].adjustment) - Math.abs(a[1].adjustment));
+
+  // EV boost active: sport has ✓ validation (all 3 labels ≥5 resolved, LINE VALUE
+  // descending, all > none baseline) — mirrors buildEarlyValueBoostMap logic
+  const evActiveSports: string[] = [];
+  const evSports = [...new Set(evRows.map((r) => r.sport))];
+  for (const sport of evSports) {
+    const lv   = evRows.find((r) => r.sport === sport && r.label === "LINE VALUE");
+    const oe   = evRows.find((r) => r.sport === sport && r.label === "OPENING EDGE");
+    const ev   = evRows.find((r) => r.sport === sport && r.label === "EARLY VALUE");
+    const none = evRows.find((r) => r.sport === sport && r.label === "none");
+    const hasFive = (r: EarlyValueImpactBySportRow | undefined) =>
+      r != null && Number(r.resolved_count) >= 5;
+    if (!hasFive(lv) || !hasFive(oe) || !hasFive(ev) || !hasFive(none)) continue;
+    const lvH = lv!.hit_rate_pct ?? 0;
+    const oeH = oe!.hit_rate_pct ?? 0;
+    const evH = ev!.hit_rate_pct ?? 0;
+    const nH  = none!.hit_rate_pct ?? 0;
+    if (lvH >= oeH && oeH >= evH && lvH > nH && oeH > nH && evH > nH) {
+      evActiveSports.push(sport);
+    }
+  }
+
+  // Sports below 85% resolution completeness
+  const belowAlert = compRows.filter((r) => Number(r.resolution_pct) < 85);
+
+  const isLoading = compLoading || evLoading;
+
+  // ── Milestone row helper ───────────────────────────────────────────────────
+
+  function Milestone({
+    label,
+    active,
+    detail,
+  }: {
+    label: string;
+    active: boolean;
+    detail?: string;
+  }) {
+    return (
+      <div className="flex items-start gap-2 text-[11px]">
+        <span className={cn("font-bold shrink-0 mt-px", active ? "text-emerald-500" : "text-muted-foreground/30")}>
+          {active ? "✓" : "○"}
+        </span>
+        <div className="min-w-0">
+          <span className={active ? "text-foreground" : "text-muted-foreground/50"}>{label}</span>
+          {detail && (
+            <span className="ml-1.5 text-[10px] text-muted-foreground/60">{detail}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <SectionCard
+      title="Signal activation status"
+      subtitle="First-wave observation — read-only. No thresholds adjusted here."
+    >
+      {isLoading ? (
+        <div className="space-y-1.5">{[0, 1, 2, 3, 4].map((i) => <LoadingRow key={i} />)}</div>
+      ) : (
+        <div className="space-y-4">
+
+          {/* Milestone checklist */}
+          <div className="space-y-1.5">
+            <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">MILESTONES</p>
+            <Milestone
+              label="First sport to 50 resolved outcomes"
+              active={at50.length > 0}
+              detail={at50.length > 0
+                ? at50.map((r) => `${r.sport} (${r.resolved_count})`).join(", ")
+                : "waiting — recalibration threshold not yet reached"}
+            />
+            <Milestone
+              label="First alpha movement above sport minimum"
+              active={alphaMovedEntries.length > 0}
+              detail={alphaMovedEntries.length > 0
+                ? alphaMovedEntries
+                    .map(([s, l]) => `${s.toUpperCase()} ${l.direction === "up" ? "↑" : "↓"} ${l.alpha_before.toFixed(3)}→${l.alpha_after.toFixed(3)}`)
+                    .join(", ")
+                : "all sports at minimum — no contribution delta >2pp yet"}
+            />
+            <Milestone
+              label="First non-zero confidence calibration adjustment"
+              active={nonZeroCal.length > 0}
+              detail={nonZeroCal.length > 0
+                ? nonZeroCal.slice(0, 3).map(([k, e]) => `${k} (${e.adjustment > 0 ? "+" : ""}${e.adjustment.toFixed(3)})`).join(", ")
+                : "all adjustments at 0.000 — waiting for ≥40 resolved per market"}
+            />
+            <Milestone
+              label="First validated early-value boost by sport"
+              active={evActiveSports.length > 0}
+              detail={evActiveSports.length > 0
+                ? evActiveSports.join(", ")
+                : "no sport has full ✓ validation across all 3 EV labels yet"}
+            />
+            <Milestone
+              label="Resolution completeness ≥85% across all sports"
+              active={belowAlert.length === 0 && compRows.length > 0}
+              detail={belowAlert.length > 0
+                ? `${belowAlert.map((r) => `${r.sport} ${Number(r.resolution_pct).toFixed(0)}%`).join(", ")} — calibration paused for these`
+                : compRows.length === 0 ? "no data yet" : "all clear"}
+            />
+          </div>
+
+          {/* Per-sport state table */}
+          {compRows.length > 0 && (
+            <div className="space-y-1.5 border-t border-border/40 pt-3">
+              <p className="text-[9px] font-semibold tracking-wider text-muted-foreground">PER-SPORT SIGNAL STATE</p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px] tabular-nums">
+                  <thead>
+                    <tr className="text-muted-foreground/60 border-b border-border/40">
+                      <th className="text-left py-1 pr-3 font-medium">Sport</th>
+                      <th className="text-right py-1 pr-2 font-medium">Resolved</th>
+                      <th className="text-right py-1 pr-2 font-medium">Alpha</th>
+                      <th className="text-right py-1 pr-2 font-medium">Cal adj</th>
+                      <th className="text-right py-1 pr-2 font-medium">EV</th>
+                      <th className="text-right py-1 font-medium">Res%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ALPHA_SPORTS.map(({ key, label }) => {
+                      const comp   = compRows.find((r) => r.sport.toLowerCase() === key);
+                      const resolved = comp ? Number(comp.resolved_count) : 0;
+                      const resPct   = comp ? Number(comp.resolution_pct) : null;
+                      const resLow   = resPct !== null && resPct < 85;
+
+                      // Alpha
+                      const log   = alphaLogs[key];
+                      const range = ALPHA_RANGES[key];
+                      const alphaMoved = log && log.direction !== "unchanged";
+
+                      // Calibration: any non-zero entry for this sport
+                      const sportCalEntries = Object.entries(calEntries)
+                        .filter(([k, e]) => k.startsWith(key.toUpperCase() + ":") && Math.abs(e.adjustment) > 0.001);
+                      const hasCalAdj = sportCalEntries.length > 0;
+                      const maxCalAdj = hasCalAdj
+                        ? sportCalEntries.reduce((m, [, e]) => Math.abs(e.adjustment) > Math.abs(m) ? e.adjustment : m, 0)
+                        : 0;
+
+                      // EV boost
+                      const evActive = evActiveSports.includes(key.toUpperCase()) || evActiveSports.includes(key);
+
+                      return (
+                        <tr key={key} className="border-b border-border/30 last:border-0">
+                          <td className="py-1.5 pr-3 font-semibold text-foreground">{label}</td>
+                          <td className={cn("text-right py-1.5 pr-2 font-semibold", resolved >= 50 ? "text-emerald-500" : "text-muted-foreground")}>
+                            {resolved > 0 ? resolved : "—"}
+                            {resolved >= 50 && <span className="ml-0.5 text-[8px]">✓</span>}
+                          </td>
+                          <td className={cn("text-right py-1.5 pr-2", alphaMoved ? "text-emerald-500 font-semibold" : "text-muted-foreground/40")}>
+                            {alphaMoved
+                              ? `${log!.direction === "up" ? "↑" : "↓"} ${log!.alpha_after.toFixed(3)}`
+                              : range ? `${range.min.toFixed(2)} min` : "—"}
+                          </td>
+                          <td className={cn("text-right py-1.5 pr-2", hasCalAdj ? (maxCalAdj > 0 ? "text-emerald-500" : "text-rose-400") : "text-muted-foreground/40")}>
+                            {hasCalAdj
+                              ? `${maxCalAdj > 0 ? "+" : ""}${maxCalAdj.toFixed(3)}`
+                              : "0.000"}
+                          </td>
+                          <td className={cn("text-right py-1.5 pr-2", evActive ? "text-emerald-500 font-semibold" : "text-muted-foreground/40")}>
+                            {evActive ? "✓ active" : "—"}
+                          </td>
+                          <td className={cn("text-right py-1.5", resLow ? "text-amber-500 font-semibold" : resPct !== null ? "text-emerald-500/70" : "text-muted-foreground/30")}>
+                            {resPct !== null ? `${Number(resPct).toFixed(0)}%` : "—"}
+                            {resLow && <span className="ml-0.5 text-[8px]">⚠</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[9px] text-muted-foreground/40">
+                Resolved ✓ = crossed 50 threshold · Alpha = first logged movement from minimum ·
+                Cal adj = largest stored adjustment for this sport · EV = full ✓ validation active ·
+                Res% amber when &lt;85% (calibration paused)
+              </p>
+            </div>
+          )}
+
+          {compRows.length === 0 && (
+            <EmptyState label="No resolved predictions yet — check back after first game slate resolves" />
+          )}
         </div>
       )}
     </SectionCard>
@@ -1512,6 +1750,9 @@ export function ParlayPerformanceDashboard() {
           ))}
         </div>
       </div>
+
+      {/* Signal activation monitor — observation mode, read-only */}
+      <SignalActivationPanel />
 
       {/* Alpha status — always visible, not affected by day toggle */}
       <AlphaStatusPanel />
