@@ -18,6 +18,11 @@ import {
 } from "@/lib/valueParlay/riskScore";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { getConfidenceAdjustment } from "@/lib/ml/confidenceCalibrationMap";
+import {
+  mlbPropCategory,
+  mlbStatVolatilityFloor,
+  mlbCorrelationGroup,
+} from "@/lib/valueParlay/mlbPropRanking";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
@@ -509,7 +514,23 @@ export function buildEnrichedPropCandidates(
       : pred.consistency_label === "medium"  ? 40
       : 24;
     const volatilityAdj = pred.volatility_flag ? +15 : 0;
-    const volatilityScore = Math.max(0, Math.min(100, consistencyBase + volatilityAdj));
+    let volatilityScore = Math.max(0, Math.min(100, consistencyBase + volatilityAdj));
+
+    // MLB player intelligence: apply stat-type-specific volatility floors.
+    // Predictable stats (strikeouts, total_bases) are capped low; volatile
+    // stats (HR, SB) are floored high regardless of consistency_label.
+    if (pred.sport === "MLB") {
+      const floor = mlbStatVolatilityFloor(pred.stat_type);
+      if (floor !== null) {
+        if (floor >= 55) {
+          // High-volatility stat — enforce minimum floor (at least this noisy)
+          volatilityScore = Math.max(volatilityScore, floor);
+        } else {
+          // Predictable stat — cap at floor + 10 to prevent over-penalising good props
+          volatilityScore = Math.min(volatilityScore, floor + 10);
+        }
+      }
+    }
 
     // ── timingScore = first-class timing dimension (0–1) ──────────────────
     const timingUrgency = pred.timing_urgency as "now" | "wait" | "monitor" | undefined;
@@ -590,7 +611,15 @@ export function buildEnrichedPropCandidates(
       stabilityScore:      pred.ml_debug?.stability_score ?? 0.5,
       modelVariant:                 pred.ml_active ? "ml_blended" : "rules",
       confidenceCalibrationAdjustment: getConfidenceAdjustment(pred.sport, pred.stat_type),
-      correlationGroupId:  `ml-prop-${pred.game_id}-${pred.stat_type}`,
+      // MLB: separate pitcher vs hitter correlation groups so pitcher K +
+      // hitter TB from the same game don't incur the same-group penalty.
+      correlationGroupId:  pred.sport === "MLB"
+        ? mlbCorrelationGroup(
+            pred.game_id,
+            pred.stat_type,
+            mlbPropCategory(pred.stat_type, "player_prop"),
+          )
+        : `ml-prop-${pred.game_id}-${pred.stat_type}`,
       valueScore:          vsCore,
       valueGrade:          valueGrade(vsCore),
       riskScore:           risk,

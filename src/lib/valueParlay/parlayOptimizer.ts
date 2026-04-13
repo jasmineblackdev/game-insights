@@ -6,6 +6,7 @@ import {
   payoutMultiplierFromAmerican,
 } from "@/lib/valueParlay/oddsMath";
 import type { ParlayBuildMode, ParlayTriple, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
+import { mlbPropCategory, mlbPropPriorityAdjustment } from "@/lib/valueParlay/mlbPropRanking";
 
 // ── Analytics weights ─────────────────────────────────────────────────────────
 
@@ -140,6 +141,15 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   const rawMarketW = (weights.marketWeights ?? {})[marketKey] ?? 1.0;
   const marketAdj  = Math.min(0.05, Math.max(-0.05, rawMarketW - 1.0));
 
+  // MLB player intelligence: additive priority adjustment for MLB market types.
+  // Allows strong pitcher/hitter props to outrank weak full-game team bets.
+  // Range: −0.04 to +0.05. No effect on non-MLB legs.
+  let mlbPropAdj = 0;
+  if ((c.sport ?? "").toLowerCase() === "mlb") {
+    const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
+    mlbPropAdj = mlbPropPriorityAdjustment(cat, edge01);
+  }
+
   return (
     edge01         * 0.32 +
     hitProb01      * 0.22 +
@@ -147,7 +157,8 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
     timing01       * 0.12 +
     stability01    * 0.08 +
     marketAdj      * 0.05 +
-    sportAdj       * 0.03
+    sportAdj       * 0.03 +
+    mlbPropAdj            // additive; bounded by mlbPropPriorityAdjustment()
   );
 }
 

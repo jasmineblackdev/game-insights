@@ -33,6 +33,7 @@ import {
   type EarlyValueImpactBySportRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { cn } from "@/lib/utils";
+import { mlbPropCategory, mlbPropPriorityAdjustment } from "@/lib/valueParlay/mlbPropRanking";
 
 // ── Supported sports ─────────────────────────────────────────────────────────
 //
@@ -141,16 +142,25 @@ function propDisplayScore(
 
   const base = (hitProb * 0.35 + edgeNorm * 0.25 + confScore * 0.25 + stabScore * 0.15) * timingMult;
 
+  // MLB player intelligence: boost predictable prop types, lightly penalise
+  // weak full-game team bets. p.edge is in percentage points (pp) here;
+  // mlbPropPriorityAdjustment expects decimal → divide by 100.
+  let mlbAdj = 0;
+  if (String(p.sport).toUpperCase() === "MLB") {
+    const cat = mlbPropCategory(p.stat_type, "player_prop");
+    mlbAdj = mlbPropPriorityAdjustment(cat, p.edge / 100);
+  }
+
   if (boostMap?.size) {
     const sport = String(p.sport).toUpperCase();
     const label = earlyValueTag(p);
     if (label) {
       const boost = boostMap.get(`${sport}:${label}`) ?? 0;
-      return Math.min(1, base + boost);
+      return Math.min(1, base + mlbAdj + boost);
     }
   }
 
-  return base;
+  return Math.min(1, base + mlbAdj);
 }
 
 // ── Stability threshold note ──────────────────────────────────────────────────
