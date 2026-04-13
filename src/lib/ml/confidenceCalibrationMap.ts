@@ -80,15 +80,29 @@ function writeMap(map: CalibrationMap): void {
 /**
  * Upsert calibration entries for one or more sport × market combinations.
  * Called from feedbackLoop.maybeAdjustConfidenceFromCalibration().
+ *
+ * Adjustments move toward the target value gradually — at most ±0.02 per
+ * adjustment cycle — to prevent oscillation and avoid reacting to short-term
+ * variance. Verdict and trend are always written immediately for display.
  */
+const MAX_NUDGE_PER_CYCLE = 0.02;
+
 export function setCalibrationEntries(
   entries: Array<{ sport: string; statType: string } & CalibrationEntry>,
 ): void {
   const map = readMap();
   for (const e of entries) {
     const key = `${e.sport.toUpperCase()}:${e.statType.toLowerCase()}`;
+    const current = map[key]?.adjustment ?? 0;
+    const target  = e.adjustment;
+
+    // Nudge toward target by at most MAX_NUDGE_PER_CYCLE
+    const delta    = target - current;
+    const nudge    = Math.sign(delta) * Math.min(Math.abs(delta), MAX_NUDGE_PER_CYCLE);
+    const newAdj   = Math.round((current + nudge) * 1000) / 1000;
+
     map[key] = {
-      adjustment: e.adjustment,
+      adjustment: newAdj,
       verdict:    e.verdict,
       trend:      e.trend,
       updatedAt:  e.updatedAt,

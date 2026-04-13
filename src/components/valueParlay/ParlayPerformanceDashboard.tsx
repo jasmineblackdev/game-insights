@@ -17,6 +17,7 @@ import {
   useCalibrationImpactBySport,
   useEarlyValueImpact,
   useEarlyValueImpactBySport,
+  useResolutionCompleteness,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
@@ -26,6 +27,7 @@ import {
   type CalibrationImpactBySportRow,
   type EarlyValueImpactRow,
   type EarlyValueImpactBySportRow,
+  type ResolutionCompletenessRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -1332,7 +1334,83 @@ function EarlyValueImpactPanel({ days }: { days: number }) {
   );
 }
 
-// ── Panel 9: How it works ─────────────────────────────────────────────────────
+// ── Panel 9: Resolution completeness ─────────────────────────────────────────
+
+function ResolutionCompletenessPanel({ days }: { days: number }) {
+  const { data = [], isLoading } = useResolutionCompleteness(days);
+  const rows = data as ResolutionCompletenessRow[];
+
+  const totalSurfaced = rows.reduce((s, r) => s + Number(r.total_surfaced), 0);
+  const alertSports = rows.filter((r) => Number(r.resolution_pct) < 85);
+
+  return (
+    <SectionCard
+      title="Resolution completeness"
+      subtitle={`Last ${days} days · per-sport prediction resolution rate (target ≥85%)`}
+      sampleSize={isLoading ? undefined : totalSurfaced > 0 ? totalSurfaced : undefined}
+    >
+      {isLoading ? (
+        <div className="space-y-1.5">
+          {[0, 1, 2].map((i) => <LoadingRow key={i} />)}
+        </div>
+      ) : !rows.length ? (
+        <EmptyState label="No prediction history yet" />
+      ) : (
+        <div className="space-y-3">
+          {alertSports.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                ⚠ Low resolution rate: {alertSports.map((r) => r.sport).join(", ")} — check resolution pipeline
+              </p>
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs tabular-nums">
+              <thead>
+                <tr className="text-muted-foreground/60 border-b border-border/40">
+                  <th className="text-left py-1 pr-3 font-medium">Sport</th>
+                  <th className="text-right py-1 pr-2 font-medium">Surfaced</th>
+                  <th className="text-right py-1 pr-2 font-medium">Resolved</th>
+                  <th className="text-right py-1 pr-2 font-medium">Pending</th>
+                  <th className="text-right py-1 pr-2 font-medium">Res%</th>
+                  <th className="text-right py-1 font-medium">Stale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const resPct  = Number(r.resolution_pct);
+                  const isLow   = resPct < 85;
+                  const isStale = Number(r.stale_pending) > 0;
+                  return (
+                    <tr key={r.sport} className="border-b border-border/30 last:border-0">
+                      <td className="py-1.5 pr-3 font-semibold text-foreground">{r.sport}</td>
+                      <td className="text-right py-1.5 pr-2 text-muted-foreground">{r.total_surfaced}</td>
+                      <td className="text-right py-1.5 pr-2 text-emerald-500/80">{r.resolved_count}</td>
+                      <td className="text-right py-1.5 pr-2 text-muted-foreground">{r.pending_count}</td>
+                      <td className={cn("text-right py-1.5 pr-2 font-semibold", isLow ? "text-amber-500" : "text-emerald-500")}>
+                        {resPct.toFixed(0)}%{isLow && <span className="ml-0.5 text-[9px]">⚠</span>}
+                      </td>
+                      <td className={cn("text-right py-1.5", isStale ? "text-amber-500 font-semibold" : "text-muted-foreground/30")}>
+                        {isStale ? r.stale_pending : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[9px] text-muted-foreground/40">
+            Stale = pending predictions &gt;3 days with no result logged. Res% amber when &lt;85%.
+          </p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Panel 10: How it works ────────────────────────────────────────────────────
 
 function HowItWorksPanel() {
   return (
@@ -1381,6 +1459,12 @@ function HowItWorksPanel() {
           <code className="text-muted-foreground">neutral</code> (±0.02), and{" "}
           <code className="text-rose-500">penalized</code> (&lt;−0.02). Signal is validated when boosted
           hit rate &gt; neutral &gt; penalized. Needs ≥10 resolved per bucket to be meaningful.
+        </div>
+        <div>
+          <span className="font-semibold text-foreground">Resolution completeness</span> — tracks what
+          fraction of surfaced predictions have been resolved per sport. Target is ≥85%. Amber when below
+          that threshold — check the resolution pipeline. Stale count flags predictions pending for
+          &gt;3 days with no result logged; high stale counts indicate a data feed gap.
         </div>
         <div className="pt-1 text-[10px] text-muted-foreground/60">
           All data is read-only. Parlay builds are logged automatically on auto-build.
@@ -1447,6 +1531,9 @@ export function ParlayPerformanceDashboard() {
 
       {/* Early value label impact — answers do LINE VALUE > EARLY VALUE? */}
       <EarlyValueImpactPanel days={days} />
+
+      {/* Resolution completeness — per-sport pipeline health check */}
+      <ResolutionCompletenessPanel days={days} />
 
       {/* Full-width how-it-works */}
       <HowItWorksPanel />

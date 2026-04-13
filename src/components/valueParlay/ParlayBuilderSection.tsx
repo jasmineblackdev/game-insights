@@ -10,9 +10,10 @@ import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting"
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
+import { parlayReasons } from "@/lib/valueParlay/parlayReasons";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
-import { useRoiBySport, useRoiByMarketType } from "@/hooks/useAnalyticsDashboard";
+import { useRoiBySport, useRoiByMarketType, useParlayModelMix, type ParlayModelMixRow } from "@/hooks/useAnalyticsDashboard";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (3–5 legs)",
@@ -21,6 +22,53 @@ const MODE_LABEL: Record<ParlayBuildMode, string> = {
 };
 
 const HISTORY_KEY = "gamelens-value-parlay-history-v1";
+
+// ── 7-day tier hit rate strip ─────────────────────────────────────────────────
+
+function TierPerformanceStrip() {
+  const { data = [] } = useParlayModelMix(7);
+  const rows = data as ParlayModelMixRow[];
+  if (!rows.length) return null;
+
+  const TIERS = ["safe", "balanced", "aggressive"] as const;
+  const TIER_COLOR: Record<string, string> = {
+    safe:       "text-emerald-500",
+    balanced:   "text-yellow-500",
+    aggressive: "text-orange-500",
+  };
+
+  const byTier = rows.reduce<Record<string, { resolved: number; hits: number }>>((acc, r) => {
+    if (!acc[r.tier]) acc[r.tier] = { resolved: 0, hits: 0 };
+    acc[r.tier].resolved += Number(r.resolved_count);
+    if (r.hit_rate_pct != null) {
+      acc[r.tier].hits += Math.round((Number(r.hit_rate_pct) / 100) * Number(r.resolved_count));
+    }
+    return acc;
+  }, {});
+
+  const chips = TIERS.flatMap((tier) => {
+    const t = byTier[tier];
+    if (!t || t.resolved < 3) return [];
+    const hitRate = ((t.hits / t.resolved) * 100).toFixed(0);
+    return [{ tier, hitRate, resolved: t.resolved }];
+  });
+
+  if (!chips.length) return null;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap text-[10px] px-1">
+      <span className="text-muted-foreground/60 font-medium">7d hit rates:</span>
+      {chips.map(({ tier, hitRate, resolved }, i) => (
+        <span key={tier}>
+          <span className={cn("font-semibold capitalize", TIER_COLOR[tier])}>{tier}</span>
+          <span className="text-muted-foreground"> {hitRate}%</span>
+          <span className="text-muted-foreground/40 text-[8px] ml-0.5">/{resolved}</span>
+          {i < chips.length - 1 && <span className="text-muted-foreground/30 ml-1">·</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 function leagueShort(l: League) {
   return l === "soccer" ? "EPL" : l.toUpperCase();
@@ -201,6 +249,8 @@ export function ParlayBuilderSection({
         </div>
       </div>
 
+      <TierPerformanceStrip />
+
       <RankedLiveParlayPresets games={games} oddsMap={oddsMap} candidates={candidates} gamesLoading={gamesLoading} />
 
       {bookOddsLoading && !gamesLoading ? (
@@ -362,16 +412,25 @@ export function ParlayBuilderSection({
                 <p className="text-muted-foreground">{triple.bestValue.legs.length} legs</p>
                 <p className="tabular-nums font-semibold">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
                 <p className="tabular-nums text-muted-foreground">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
+                {parlayReasons(triple.bestValue).map((r) => (
+                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                ))}
               </div>
               <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
                 <p className="font-display font-bold text-foreground">Safer alternative</p>
                 <p className="text-muted-foreground">{triple.safer.legs.length} legs</p>
                 <p className="tabular-nums font-semibold">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
+                {parlayReasons(triple.safer).map((r) => (
+                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                ))}
               </div>
               <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
                 <p className="font-display font-bold text-foreground">Higher payout</p>
                 <p className="text-muted-foreground">{triple.higherPayout.legs.length} legs</p>
                 <p className="tabular-nums font-semibold">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
+                {parlayReasons(triple.higherPayout).map((r) => (
+                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                ))}
               </div>
             </div>
           ) : null}

@@ -12,7 +12,7 @@ import type { ParlayBuildMode, ParlayTriple, SmartParlayResult, ValueBetCandidat
 /**
  * Optional analytics-derived multipliers injected from Supabase RPCs.
  * Values come from analytics_roi_by_sport and analytics_roi_by_market_type.
- * Clamped to [0.92, 1.08] inside computeLegScore so they never overpower live signals.
+ * Clamped to ±0.05 influence on legScore so they never overpower live signals.
  */
 export interface AnalyticsWeights {
   /** sport.toUpperCase() → multiplier  e.g. { NBA: 1.06, MMA: 0.97 } */
@@ -124,18 +124,21 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   const stability01 = c.stabilityScore ?? 0.5;
 
   // Calibration adjustment: additive offset to conf01 derived from historical
-  // calibration data for this sport × market. Clamped to ±0.08.
+  // calibration data for this sport × market. Clamped to ±0.02 (max per-cycle
+  // nudge) × multiple cycles, bounded overall to ±0.08.
   const rawCalAdj  = c.confidenceCalibrationAdjustment ?? 0;
   const calAdj     = Math.min(0.08, Math.max(-0.08, rawCalAdj));
   const confAdjusted = Math.min(1, Math.max(0, conf01 + calAdj));
 
+  // Sport and market ROI multipliers are clamped to ±0.05 max influence on
+  // legScore. Spec: "sport ROI multiplier: max ±0.05 influence on legScore".
   const sportKey  = (c.sport ?? "").toUpperCase();
   const rawSportW = (weights.sportWeights ?? {})[sportKey] ?? 1.0;
-  const sportAdj  = Math.min(0.08, Math.max(-0.08, rawSportW - 1.0));
+  const sportAdj  = Math.min(0.05, Math.max(-0.05, rawSportW - 1.0));
 
   const marketKey  = `${sportKey}:${(c.statType ?? c.marketType ?? "").toLowerCase()}`;
   const rawMarketW = (weights.marketWeights ?? {})[marketKey] ?? 1.0;
-  const marketAdj  = Math.min(0.08, Math.max(-0.08, rawMarketW - 1.0));
+  const marketAdj  = Math.min(0.05, Math.max(-0.05, rawMarketW - 1.0));
 
   return (
     edge01         * 0.32 +

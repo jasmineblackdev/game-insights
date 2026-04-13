@@ -12,6 +12,7 @@ import {
   legSwapHints,
   rankedLiveOptimizedCombos,
 } from "@/lib/valueParlay/rankedLiveParlayCombos";
+import { legReason, parlayReasons } from "@/lib/valueParlay/parlayReasons";
 
 function cardConfLabel(c: SmartParlayResult["cardConfidence"]): string {
   if (c === "high") return "High";
@@ -69,6 +70,21 @@ function ComboBlock({
         </div>
       </div>
 
+      {/* Parlay-level reasons */}
+      {(() => {
+        const reasons = parlayReasons(result);
+        if (!reasons.length) return null;
+        return (
+          <div className="flex flex-wrap gap-1.5 border-t border-border/60 pt-3">
+            {reasons.map((r) => (
+              <span key={r} className="text-[9px] font-medium text-muted-foreground bg-muted/50 border border-border/60 rounded-full px-2 py-0.5">
+                {r}
+              </span>
+            ))}
+          </div>
+        );
+      })()}
+
       <ul className="space-y-2 text-xs border-t border-border/60 pt-3">
         {result.legs.map((leg) => {
           const hints = legSwapHints(leg, candidates);
@@ -79,6 +95,7 @@ function ComboBlock({
                 <span className="font-semibold text-foreground">{leg.selectionLabel}</span>
                 <span className="text-[10px] text-muted-foreground tabular-nums">{leg.matchupLabel}</span>
               </div>
+              <p className="text-[9px] text-muted-foreground/70 italic">{legReason(leg)}</p>
               <div className="flex flex-wrap gap-1.5">
                 {hints.lowerRiskAlternative ? (
                   <Button

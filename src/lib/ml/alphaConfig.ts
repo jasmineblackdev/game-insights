@@ -17,8 +17,8 @@ export interface AlphaRange {
 
 export const ALPHA_RANGES: Record<string, AlphaRange> = {
   nba:    { min: 0.08, max: 0.35, step: 0.02 },
-  nfl:    { min: 0.06, max: 0.28, step: 0.02 },
-  mlb:    { min: 0.05, max: 0.25, step: 0.02 },
+  nfl:    { min: 0.08, max: 0.30, step: 0.02 },
+  mlb:    { min: 0.06, max: 0.28, step: 0.02 },
   boxing: { min: 0.03, max: 0.18, step: 0.02 },
   mma:    { min: 0.03, max: 0.20, step: 0.02 },
 };

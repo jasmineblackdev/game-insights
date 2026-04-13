@@ -56,8 +56,12 @@ export function readAlphaAdjustmentLog(sport: string): AlphaAdjustmentLog | null
   }
 }
 
-/** Minimum outcomes before triggering weight recalibration for a sport. */
-const RECALIBRATION_THRESHOLD = 25;
+/**
+ * Minimum resolved outcomes before triggering weight recalibration for a sport.
+ * Raised to 50 to match the spec's "sport ROI adjustments: ≥50 resolved per sport"
+ * threshold — prevents premature weight updates from small samples.
+ */
+const RECALIBRATION_THRESHOLD = 50;
 const PLATT_CALIBRATION_THRESHOLD = 100;
 
 // ── Outcome recording ─────────────────────────────────────────────────────────
@@ -377,19 +381,28 @@ function computeTrend(
   return "flat";
 }
 
+/** Resolution completeness below this threshold → sport excluded from calibration updates. */
+const RESOLUTION_TRUST_MIN = 0.70;
+
 /**
  * Reads 7d + 30d confidence calibration data from Supabase, computes
  * per-market verdict + trend, then writes adjusted values to localStorage.
  *
- * Called: after each batch recalibration cycle (every 25 resolved outcomes).
+ * Called: after each batch recalibration cycle (every 50 resolved outcomes).
  * Fire-and-forget — never throws.
  */
+
 export async function maybeAdjustConfidenceFromCalibration(): Promise<void> {
   if (!supabase) return;
   try {
-    const MIN_RESOLVED = 5;
+    /**
+     * Minimum resolved outcomes per sport × market before we trust calibration
+     * data enough to adjust. Spec: "confidence calibration tuning: ≥40 resolved
+     * predictions per sport × market".
+     */
+    const MIN_RESOLVED = 40;
 
-    const [res7, res30] = await Promise.all([
+    const [res7, res30, resComp] = await Promise.all([
       supabase.rpc("analytics_confidence_calibration_by_market", {
         lookback_days: 7,
         min_resolved: MIN_RESOLVED,
@@ -398,12 +411,26 @@ export async function maybeAdjustConfidenceFromCalibration(): Promise<void> {
         lookback_days: 30,
         min_resolved: MIN_RESOLVED,
       }),
+      // Fetch resolution completeness to gate low-trust sports
+      supabase.rpc("analytics_resolution_completeness", { lookback_days: 30 }),
     ]);
 
     if (res30.error || !res30.data) return;
 
     const rows30 = res30.data as CalibrationMarketRow[];
     const rows7  = (res7.data  ?? []) as CalibrationMarketRow[];
+
+    // Build set of sports with insufficient resolution completeness.
+    // Any sport below RESOLUTION_TRUST_MIN (70%) is excluded from calibration
+    // updates — its outcomes are too incomplete to trust for weight adjustments.
+    const lowTrustSports = new Set<string>();
+    if (!resComp.error && resComp.data) {
+      for (const row of resComp.data as Array<{ sport: string; resolution_pct: number }>) {
+        if (Number(row.resolution_pct) < RESOLUTION_TRUST_MIN * 100) {
+          lowTrustSports.add(row.sport.toUpperCase());
+        }
+      }
+    }
 
     // Group rows by "SPORT:stat_type"
     type MarketKey = string;
@@ -427,6 +454,11 @@ export async function maybeAdjustConfidenceFromCalibration(): Promise<void> {
 
     for (const [key, conf30] of map30) {
       const [sport, statType] = key.split(":");
+
+      // Skip sports with insufficient resolution completeness — their outcome
+      // data is too incomplete to trust for calibration adjustments.
+      if (lowTrustSports.has(sport.toUpperCase())) continue;
+
       const conf7 = map7.get(key) ?? {};
 
       const highRate30 = conf30["HIGH"] ?? null;
