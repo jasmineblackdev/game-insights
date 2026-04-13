@@ -481,11 +481,12 @@ const Index = () => {
     refetchIntervalInBackground: false,
   });
 
-  // NFL is offseason Apr–Aug — only fetch when the user explicitly selects it
+  // NFL is offseason Apr–Aug — fetch when selected OR when Tomorrow tab is open
+  // (Tomorrow scans all supported sports; users shouldn't need to visit NFL first)
   const nflQuery = useQuery({
     queryKey: ["nfl-espn-scoreboard", easternYmd()],
     queryFn: fetchNflGamePredictions,
-    enabled: league === "nfl",
+    enabled: league === "nfl" || viewMode === "tomorrow",
     staleTime: 2 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchInterval: league === "nfl" ? 2 * 60 * 1000 : false,
@@ -518,11 +519,14 @@ const Index = () => {
     gcTime: 10 * 60 * 1000,
   });
 
-  // Combat sports: only fetch when selected — these hit The Odds API (rate-limited)
+  // Combat sports: fetch when selected OR when Tomorrow tab is open.
+  // Tomorrow scans boxing + MMA for early fight-week value, so we can't wait
+  // for the user to visit the pill first. staleTime is generous (5 min) to
+  // avoid hammering The Odds API on every Tomorrow tab visit.
   const boxingQuery = useQuery({
     queryKey: ["boxing-predictions"],
     queryFn: fetchBoxingPredictions,
-    enabled: league === "boxing",
+    enabled: league === "boxing" || viewMode === "tomorrow",
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: league === "boxing" ? 5 * 60 * 1000 : false,
@@ -532,7 +536,7 @@ const Index = () => {
   const mmaQuery = useQuery({
     queryKey: ["mma-predictions"],
     queryFn: fetchMmaPredictions,
-    enabled: league === "mma",
+    enabled: league === "mma" || viewMode === "tomorrow",
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: league === "mma" ? 5 * 60 * 1000 : false,

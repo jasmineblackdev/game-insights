@@ -255,8 +255,11 @@ function TomorrowEmptyState() {
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <Calendar className="w-10 h-10 text-muted-foreground/30 mb-4" />
       <p className="text-muted-foreground text-sm max-w-sm">
-        No games on tomorrow&apos;s slate yet. Check back later today — schedules
-        typically post 12–24 hours in advance.
+        No NBA, NFL, MLB, Boxing, or UFC/MMA games scheduled for tomorrow yet.
+      </p>
+      <p className="text-xs text-muted-foreground/60 mt-2 max-w-xs">
+        Schedules typically post 12–24 hours in advance. Tomorrow tab scans
+        supported sports only.
       </p>
     </div>
   );
@@ -359,7 +362,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={TrendingUp}
           title="AI best picks tomorrow"
-          subtitle="Top-ranked edges across spreads, totals, and moneylines. Scored by the same edge model used today."
+          subtitle="Top-ranked edges across NBA, NFL, MLB, Boxing, and UFC/MMA — spreads, totals, and moneylines scored by the same edge model used today."
           count={tomorrowGames.length}
         />
         <BestValuePicksSection
@@ -374,7 +377,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={Sparkles}
           title="AI player props tomorrow"
-          subtitle="Pregame ranking: stability weighted higher than intraday. Excludes 'wait' timing. Low stability flagged."
+          subtitle="Top props across NBA, NFL, MLB, Boxing, and UFC/MMA. Pregame ranking: stability weighted higher than intraday. Excludes 'wait' timing."
         />
 
         {!tomorrowProps.length ? (
@@ -432,7 +435,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={Wrench}
           title="AI parlays tomorrow"
-          subtitle="Safe, Balanced, and Aggressive parlays built from tomorrow's slate. Same optimizer, pregame context."
+          subtitle="Safe, Balanced, and Aggressive parlays built from tomorrow's NBA, NFL, MLB, Boxing, and UFC/MMA slate. Same optimizer, pregame context."
         />
         <ParlayBuilderSection
           games={tomorrowGames}
