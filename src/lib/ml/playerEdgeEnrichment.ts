@@ -236,6 +236,18 @@ export async function logSurfacedPredictions(preds: PlayerEdgePrediction[]): Pro
       alpha_at_prediction:              pred.ml_debug?.alpha ?? 0.05,
       actual_value:                     null,
       outcome:                          null,
+      // NFL injury position multiplier: derive a simplified adj from has_injury_flag
+      // + stat_type for enriched props (full positional context is only available for
+      // game-level candidates which have a separate build path).
+      // Role-sensitive stats (rushing, receiving) with injury flag → +0.02 timing boost.
+      // All other cases → 0. Negative adjustments (QB out → WR props hurt) are not
+      // derivable here and will populate once game-level candidate logging is added.
+      injury_impact_adj: (() => {
+        if (pred.sport !== "NFL" || !pred.has_injury_flag) return 0;
+        const s = pred.stat_type.toLowerCase();
+        const isRoleSensitive = s.includes("rush") || s.includes("receiv") || s === "receptions" || s === "targets";
+        return isRoleSensitive ? 0.02 : 0;
+      })(),
       feature_snapshot: {
         line_value:              pred.line_value,
         projected_value:         pred.projected_value,

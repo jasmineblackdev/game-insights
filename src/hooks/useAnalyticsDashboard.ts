@@ -512,3 +512,34 @@ export function useMlbMarketMix(days = 90) {
     gcTime:    GC,
   });
 }
+
+// ── NFL Injury Impact ─────────────────────────────────────────────────────────
+
+export interface NflInjuryImpactRow {
+  /** 'positive' | 'neutral' | 'negative' */
+  bucket:          string;
+  market_type:     string;
+  resolved_count:  number;
+  win_count:       number;
+  hit_rate_pct:    number | null;
+  roi_pct:         number | null;
+  avg_edge:        number;
+  avg_injury_adj:  number;
+}
+
+/**
+ * NFL injury impact performance by bucket (positive/neutral/negative adj)
+ * and market_type. Validates whether the injury position multiplier
+ * produces better hit rates on positively-adjusted legs.
+ */
+export function useNflInjuryImpact(days = 90) {
+  return useQuery({
+    queryKey: ["analytics-nfl-injury-impact", days],
+    queryFn:  () => rpc<NflInjuryImpactRow>("analytics_nfl_injury_impact", {
+      lookback_days: days,
+      min_resolved:  1,
+    }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}

@@ -19,6 +19,7 @@ import {
   useEarlyValueImpactBySport,
   useResolutionCompleteness,
   useMlbMarketMix,
+  useNflInjuryImpact,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
@@ -30,6 +31,7 @@ import {
   type EarlyValueImpactBySportRow,
   type ResolutionCompletenessRow,
   type MlbMarketMixRow,
+  type NflInjuryImpactRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -1811,7 +1813,169 @@ function MlbMarketMixPanel() {
   );
 }
 
-// ── Panel 11: How it works ────────────────────────────────────────────────────
+// ── Panel 12: NFL Injury Impact Validation ────────────────────────────────────
+
+const NFL_BUCKET_LABEL: Record<string, string> = {
+  positive: "Positive adj",
+  neutral:  "Neutral",
+  negative: "Negative adj",
+};
+
+const NFL_BUCKET_COLOR: Record<string, string> = {
+  positive: "text-emerald-600 dark:text-emerald-400",
+  neutral:  "text-muted-foreground",
+  negative: "text-red-500 dark:text-red-400",
+};
+
+const NFL_MARKET_LABEL: Record<string, string> = {
+  prop:        "Prop",
+  player_prop: "Prop",
+  moneyline:   "ML",
+  spread:      "Spread",
+  total:       "Total",
+};
+
+function NflInjuryImpactPanel() {
+  const { data = [], isLoading } = useNflInjuryImpact(90);
+  const rows = data as NflInjuryImpactRow[];
+
+  const totalResolved = rows.reduce((s, r) => s + Number(r.resolved_count), 0);
+
+  // Derive per-bucket rollup for the verdict (aggregate across market types)
+  const bucketTotals: Record<string, { resolved: number; wins: number }> = {};
+  for (const r of rows) {
+    const b = r.bucket;
+    if (!bucketTotals[b]) bucketTotals[b] = { resolved: 0, wins: 0 };
+    bucketTotals[b].resolved += Number(r.resolved_count);
+    bucketTotals[b].wins     += Number(r.win_count);
+  }
+
+  const hitRate = (b: string) => {
+    const t = bucketTotals[b];
+    if (!t || t.resolved < 5) return null;
+    return (t.wins / t.resolved) * 100;
+  };
+
+  const posHR  = hitRate("positive");
+  const neutHR = hitRate("neutral");
+  const negHR  = hitRate("negative");
+
+  type InjuryVerdict = "uplift" | "marginal" | "no_signal" | "underperforming" | null;
+  let verdict: InjuryVerdict = null;
+
+  if (posHR !== null && neutHR !== null) {
+    const delta = posHR - neutHR;
+    if (delta >= 5)       verdict = "uplift";
+    else if (delta >= 2)  verdict = "marginal";
+    else if (delta >= -2) verdict = "no_signal";
+    else                  verdict = "underperforming";
+  } else if (totalResolved >= 5) {
+    verdict = "no_signal";
+  }
+
+  return (
+    <SectionCard
+      title="NFL injury impact validation"
+      subtitle="Do positively-adjusted injury legs outperform neutral legs? — 90-day window"
+      sampleSize={totalResolved > 0 ? totalResolved : undefined}
+    >
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => <LoadingRow key={i} />)}
+        </div>
+      ) : !rows.length ? (
+        <EmptyState label="No resolved NFL predictions yet — check back after first NFL slate resolves" />
+      ) : (
+        <div className="space-y-3">
+
+          {/* Verdict */}
+          {verdict && (
+            <div className="text-[10px] flex items-center gap-1.5 flex-wrap">
+              {verdict === "uplift"         && <span className="text-emerald-500 font-semibold">✓ positive legs showing uplift</span>}
+              {verdict === "marginal"       && <span className="text-yellow-500 font-semibold">→ marginal uplift — accumulating data</span>}
+              {verdict === "no_signal"      && <span className="text-muted-foreground font-semibold">○ no clear signal yet — more data needed</span>}
+              {verdict === "underperforming"&& <span className="text-red-500 font-semibold">⚠ positive adj legs underperforming — investigate</span>}
+              {posHR !== null && neutHR !== null && (
+                <span className="text-muted-foreground/50">
+                  (+adj {posHR.toFixed(1)}% vs neutral {neutHR.toFixed(1)}%
+                  {negHR !== null ? ` vs −adj ${negHR.toFixed(1)}%` : ""})
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Table by bucket × market_type */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] tabular-nums">
+              <thead>
+                <tr className="text-muted-foreground/60 border-b border-border/40">
+                  <th className="text-left py-1 pr-3 font-medium">Bucket</th>
+                  <th className="text-left py-1 pr-3 font-medium">Market</th>
+                  <th className="text-right py-1 pr-2 font-medium">n</th>
+                  <th className="text-right py-1 pr-2 font-medium">Hit%</th>
+                  <th className="text-right py-1 pr-2 font-medium">ROI%</th>
+                  <th className="text-right py-1 font-medium">Avg adj</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(["positive", "neutral", "negative"] as const).map((bucket) => {
+                  const bucketRows = rows.filter((r) => r.bucket === bucket);
+                  if (!bucketRows.length) return null;
+                  return bucketRows.map((r, idx) => {
+                    const thin = Number(r.resolved_count) < 5;
+                    return (
+                      <tr key={`${bucket}-${r.market_type}`} className="border-b border-border/30 last:border-0">
+                        <td className={cn(
+                          "py-1.5 pr-3 font-medium whitespace-nowrap",
+                          NFL_BUCKET_COLOR[bucket],
+                          idx > 0 && "text-muted-foreground/30"
+                        )}>
+                          {idx === 0 ? (NFL_BUCKET_LABEL[bucket] ?? bucket) : ""}
+                        </td>
+                        <td className="py-1.5 pr-3 text-muted-foreground whitespace-nowrap">
+                          {NFL_MARKET_LABEL[r.market_type] ?? r.market_type}
+                        </td>
+                        <td className="text-right py-1.5 pr-2">
+                          <SampleBadge n={Number(r.resolved_count)} />
+                        </td>
+                        <td className="text-right py-1.5 pr-2">
+                          {thin ? (
+                            <span className="text-muted-foreground/40">—</span>
+                          ) : (
+                            <span className={hitColor(r.hit_rate_pct)}>
+                              {pct(r.hit_rate_pct)}
+                            </span>
+                          )}
+                        </td>
+                        <td className={cn("text-right py-1.5 pr-2 font-semibold", roiColor(r.roi_pct))}>
+                          {thin ? "—" : pct(r.roi_pct)}
+                        </td>
+                        <td className="text-right py-1.5 font-mono text-muted-foreground">
+                          {r.avg_injury_adj != null
+                            ? `${Number(r.avg_injury_adj) >= 0 ? "+" : ""}${(Number(r.avg_injury_adj) * 100).toFixed(1)}pp`
+                            : "—"}
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[9px] text-muted-foreground/40">
+            Hit%/ROI shown when ≥5 resolved per row. Positive bucket = legs where an NFL injury
+            created opportunity (RB1 out → RB2 rushing, CB1 out → WR receiving). Negative bucket
+            = legs weakened by injury (OL cluster → QB passing). Negative adj rows accumulate
+            once game-level candidate logging is added.
+          </p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Panel 13: How it works ────────────────────────────────────────────────────
 
 function HowItWorksPanel() {
   return (
@@ -1948,6 +2112,9 @@ export function ParlayPerformanceDashboard() {
 
       {/* MLB market mix — validates prop priority order vs full-game team bets */}
       <MlbMarketMixPanel />
+
+      {/* NFL injury impact — validates whether positive-adj legs outperform neutral */}
+      <NflInjuryImpactPanel />
 
       {/* Full-width how-it-works */}
       <HowItWorksPanel />
