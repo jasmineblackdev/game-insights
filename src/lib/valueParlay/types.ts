@@ -81,6 +81,16 @@ export interface ValueBetCandidate {
   sportsbookKey?: string;
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;
+  /**
+   * NFL-only: pre-computed injury position multiplier.
+   * Populated by buildCandidates when game.league === "nfl" and injury data
+   * is present. Positive = injuries create opportunity; negative = injuries
+   * weaken expected performance. Clamped to ±0.08 at source.
+   * Consumed by computeLegScore as a direct additive term.
+   * Undefined (treated as 0) for all non-NFL candidates and when no
+   * OUT-status injuries affect the relevant positions.
+   */
+  injuryImpactAdj?: number;
 }
 
 export interface PlayerPropModelRow {

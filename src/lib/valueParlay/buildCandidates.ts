@@ -23,6 +23,12 @@ import {
   mlbStatVolatilityFloor,
   mlbCorrelationGroup,
 } from "@/lib/valueParlay/mlbPropRanking";
+import {
+  computeNflPropInjuryAdj,
+  computeNflTeamInjuryAdj,
+  computeNflTotalInjuryAdj,
+  nflInjuryTimingBoost,
+} from "@/lib/valueParlay/nflInjuryImpact";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
@@ -99,6 +105,12 @@ function moneylineCandidate(
     marketDisagreementRisk: marketDisagreement(game),
   });
 
+  const ownInj = side === "home" ? game.injuries.home : game.injuries.away;
+  const oppInj = side === "home" ? game.injuries.away : game.injuries.home;
+  const injuryImpactAdj = game.league === "nfl"
+    ? computeNflTeamInjuryAdj(ownInj, oppInj)
+    : undefined;
+
   const id = `vp-${game.id}-ml-${side}`;
   return {
     id,
@@ -130,6 +142,7 @@ function moneylineCandidate(
     sportsbookKey: meta.sportsbookKey,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
     lineMovementDeltaPp: lineDelta,
+    injuryImpactAdj,
   };
 }
 
@@ -197,6 +210,10 @@ function totalCandidate(
     vol < 62 &&
     (american > -400 || eliteValue);
 
+  const injuryImpactAdj = game.league === "nfl"
+    ? computeNflTotalInjuryAdj(game.injuries.home, game.injuries.away, side)
+    : undefined;
+
   const id = `vp-${game.id}-tot-${side}`;
   return {
     id,
@@ -222,6 +239,7 @@ function totalCandidate(
     riskNote: buildRiskNote(game, flags, risk),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    injuryImpactAdj,
   };
 }
 
@@ -278,6 +296,12 @@ function spreadCandidate(
     vol < 65 &&
     (american > -400 || eliteValue);
 
+  const ownInjSpr = coverSide === "home" ? game.injuries.home : game.injuries.away;
+  const oppInjSpr = coverSide === "home" ? game.injuries.away : game.injuries.home;
+  const injuryImpactAdj = game.league === "nfl"
+    ? computeNflTeamInjuryAdj(ownInjSpr, oppInjSpr)
+    : undefined;
+
   return {
     id: `vp-${game.id}-spr-${coverSide}`,
     sport: game.league,
@@ -303,6 +327,7 @@ function spreadCandidate(
     riskNote: buildRiskNote(game, flags, risk),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    injuryImpactAdj,
   };
 }
 
@@ -349,6 +374,13 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
 
   const label = `${row.playerName} ${row.recommendedSide} ${row.lineValue} ${row.statType.replace(/_/g, " ")}`;
 
+  const isHomePlayer = row.teamAbbr === game.homeTeam.abbreviation;
+  const ownInjProp = isHomePlayer ? game.injuries.home : game.injuries.away;
+  const oppInjProp = isHomePlayer ? game.injuries.away : game.injuries.home;
+  const injuryImpactAdj = game.league === "nfl"
+    ? computeNflPropInjuryAdj(row.statType, ownInjProp, oppInjProp)
+    : undefined;
+
   return {
     id: `vp-${game.id}-prop-${row.playerId}-${row.statType}`,
     sport: game.league,
@@ -376,6 +408,7 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     riskNote: [row.riskFactor, riskBandLabel(riskBand(risk))].join(" · "),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    injuryImpactAdj,
   };
 }
 
@@ -534,7 +567,15 @@ export function buildEnrichedPropCandidates(
 
     // ── timingScore = first-class timing dimension (0–1) ──────────────────
     const timingUrgency = pred.timing_urgency as "now" | "wait" | "monitor" | undefined;
-    const timingScore = urgencyToTimingScore(timingUrgency);
+    let timingScore = urgencyToTimingScore(timingUrgency);
+
+    // NFL: when injury flag is set and stat type is role-sensitive (rushing /
+    // receiving), apply a small timing boost to capture late injury → opportunity
+    // windows. Positional context is unavailable for enriched props, so
+    // injuryImpactAdj remains 0 — only timing is adjusted here.
+    if (pred.sport === "NFL" && pred.has_injury_flag) {
+      timingScore = Math.min(1, timingScore + nflInjuryTimingBoost(pred.stat_type));
+    }
 
     // ── Uncertainty from confidence + injury ──────────────────────────────
     const uncertaintyScore = Math.min(100,

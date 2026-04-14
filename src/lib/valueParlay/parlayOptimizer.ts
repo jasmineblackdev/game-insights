@@ -150,6 +150,12 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
     mlbPropAdj = mlbPropPriorityAdjustment(cat, edge01);
   }
 
+  // NFL injury position multiplier: adjusts legScore when OUT-status injuries
+  // structurally affect expected opportunity or matchup quality.
+  // Pre-computed in buildCandidates for NFL only; 0 for all other sports.
+  // Clamped to ±0.08 at source; never overrides edge/ML/confidence.
+  const injuryAdj = Math.min(0.08, Math.max(-0.08, c.injuryImpactAdj ?? 0));
+
   return (
     edge01         * 0.32 +
     hitProb01      * 0.22 +
@@ -158,7 +164,8 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
     stability01    * 0.08 +
     marketAdj      * 0.05 +
     sportAdj       * 0.03 +
-    mlbPropAdj            // additive; bounded by mlbPropPriorityAdjustment()
+    mlbPropAdj            + // additive; bounded by mlbPropPriorityAdjustment()
+    injuryAdj               // additive; bounded to ±0.08; NFL only
   );
 }
 
