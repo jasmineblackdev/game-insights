@@ -18,6 +18,7 @@ import {
   useEarlyValueImpact,
   useEarlyValueImpactBySport,
   useResolutionCompleteness,
+  useMlbMarketMix,
   type ModelContributionRow,
   type ParlayModelMixRow,
   type EdgeBucketPerformanceRow,
@@ -28,6 +29,7 @@ import {
   type EarlyValueImpactRow,
   type EarlyValueImpactBySportRow,
   type ResolutionCompletenessRow,
+  type MlbMarketMixRow,
 } from "@/hooks/useAnalyticsDashboard";
 import { getAdaptiveWeightsSync, computeAlpha } from "@/lib/ml/weights";
 import { ALPHA_RANGES, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -1648,7 +1650,168 @@ function ResolutionCompletenessPanel({ days }: { days: number }) {
   );
 }
 
-// ── Panel 10: How it works ────────────────────────────────────────────────────
+// ── Panel 10: MLB market mix ──────────────────────────────────────────────────
+
+const MLB_CAT_LABEL: Record<string, string> = {
+  pitcher_strikeouts: "Pitcher strikeouts",
+  hitter_total_bases: "Hitter total bases",
+  hitter_hits:        "Hitter hits",
+  fullgame_team:      "Full-game team bet",
+  hitter_high_vol:    "High-vol (HR/SB/RBI)",
+  other:              "Other",
+};
+
+const MLB_CAT_COLOR: Record<string, string> = {
+  pitcher_strikeouts: "text-blue-500",
+  hitter_total_bases: "text-violet-500",
+  hitter_hits:        "text-primary",
+  fullgame_team:      "text-muted-foreground",
+  hitter_high_vol:    "text-amber-500/80",
+  other:              "text-muted-foreground/40",
+};
+
+const MLB_CAT_ORDER = [
+  "pitcher_strikeouts",
+  "hitter_total_bases",
+  "hitter_hits",
+  "fullgame_team",
+  "hitter_high_vol",
+  "other",
+] as const;
+
+/**
+ * Validates whether the MLB Player Intelligence priority ordering holds in data:
+ *   pitcher_strikeouts > hitter_total_bases > hitter_hits > fullgame_team
+ *
+ * Uses a 90-day window (widest available) since MLB props need more time to
+ * accumulate sufficient resolved outcomes than other analytics panels.
+ */
+function MlbMarketMixPanel() {
+  // Always use 90d for this panel — MLB needs the widest window
+  const { data = [], isLoading } = useMlbMarketMix(90);
+  const rows = data as MlbMarketMixRow[];
+
+  const totalResolved = rows.reduce((s, r) => s + Number(r.resolved_count), 0);
+
+  // Priority validation: do pitcher Ks > TB > hits in hit rate?
+  function rowByCat(cat: string) { return rows.find((r) => r.category === cat); }
+  const kRow   = rowByCat("pitcher_strikeouts");
+  const tbRow  = rowByCat("hitter_total_bases");
+  const hitRow = rowByCat("hitter_hits");
+  const tmRow  = rowByCat("fullgame_team");
+
+  const enough = (r: MlbMarketMixRow | undefined) =>
+    r != null && Number(r.resolved_count) >= 10;
+
+  type PriorityVerdict = "validated" | "partial" | "inconclusive" | null;
+  let priorityVerdict: PriorityVerdict = null;
+
+  if (enough(kRow) && enough(tbRow) && enough(hitRow)) {
+    const kH  = kRow!.hit_rate_pct  ?? 0;
+    const tbH = tbRow!.hit_rate_pct ?? 0;
+    const hiH = hitRow!.hit_rate_pct ?? 0;
+    const tmH = tmRow && enough(tmRow) ? (tmRow.hit_rate_pct ?? 0) : null;
+    const topOrderHolds = kH >= tbH && tbH >= hiH;
+    const propsAboveTeam = tmH !== null ? (kH > tmH && tbH > tmH) : true;
+    if (topOrderHolds && propsAboveTeam) priorityVerdict = "validated";
+    else if (kH >= tbH || tbH >= hiH) priorityVerdict = "partial";
+    else priorityVerdict = "inconclusive";
+  } else if (totalResolved >= 5) {
+    priorityVerdict = "inconclusive";
+  }
+
+  return (
+    <SectionCard
+      title="MLB market mix performance"
+      subtitle="Does pitcher K > total bases > hits > full-game team hold in resolved outcomes? — 90-day window"
+      sampleSize={totalResolved > 0 ? totalResolved : undefined}
+    >
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1, 2, 3].map((i) => <LoadingRow key={i} />)}
+        </div>
+      ) : !rows.length ? (
+        <EmptyState label="No resolved MLB predictions yet — check back after first MLB slate resolves" />
+      ) : (
+        <div className="space-y-3">
+
+          {/* Priority verdict */}
+          {priorityVerdict && (
+            <div className="text-[10px] flex items-center gap-1.5">
+              {priorityVerdict === "validated"    && <span className="text-emerald-500 font-semibold">✓ priority order validated</span>}
+              {priorityVerdict === "partial"      && <span className="text-yellow-500 font-semibold">→ partial validation</span>}
+              {priorityVerdict === "inconclusive" && <span className="text-muted-foreground font-semibold">○ inconclusive — accumulating data</span>}
+              <span className="text-muted-foreground/50">({totalResolved} resolved)</span>
+            </div>
+          )}
+
+          {/* Category table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] tabular-nums">
+              <thead>
+                <tr className="text-muted-foreground/60 border-b border-border/40">
+                  <th className="text-left py-1 pr-3 font-medium">Category</th>
+                  <th className="text-right py-1 pr-2 font-medium">n</th>
+                  <th className="text-right py-1 pr-2 font-medium">Hit%</th>
+                  <th className="text-right py-1 pr-2 font-medium">ROI%</th>
+                  <th className="text-right py-1 pr-2 font-medium">Avg edge</th>
+                  <th className="text-right py-1 font-medium text-muted-foreground/50">Stat types</th>
+                </tr>
+              </thead>
+              <tbody>
+                {MLB_CAT_ORDER.map((cat) => {
+                  const r = rowByCat(cat);
+                  if (!r) return null;
+                  const thin = Number(r.resolved_count) < 10;
+                  return (
+                    <tr key={cat} className="border-b border-border/30 last:border-0">
+                      <td className={cn("py-1.5 pr-3 font-medium whitespace-nowrap", MLB_CAT_COLOR[cat])}>
+                        {MLB_CAT_LABEL[cat] ?? cat}
+                      </td>
+                      <td className="text-right py-1.5 pr-2">
+                        <SampleBadge n={Number(r.resolved_count)} />
+                      </td>
+                      <td className="text-right py-1.5 pr-2">
+                        {thin ? (
+                          <span className="text-muted-foreground/40">
+                            —<span className="text-[8px] ml-0.5">/{r.resolved_count}</span>
+                          </span>
+                        ) : (
+                          <span className={hitColor(r.hit_rate_pct)}>
+                            {pct(r.hit_rate_pct)}
+                          </span>
+                        )}
+                      </td>
+                      <td className={cn("text-right py-1.5 pr-2 font-semibold", roiColor(r.roi_pct))}>
+                        {thin ? "—" : pct(r.roi_pct)}
+                      </td>
+                      <td className="text-right py-1.5 pr-2 text-muted-foreground font-mono">
+                        {r.avg_edge != null
+                          ? `${(Number(r.avg_edge) * 100).toFixed(1)}pp`
+                          : "—"}
+                      </td>
+                      <td className="text-right py-1.5 text-muted-foreground/40 text-[9px] max-w-[8rem] truncate">
+                        {r.stat_types || "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-[9px] text-muted-foreground/40">
+            Hit%/ROI shown when ≥10 resolved per category. Uses 90-day window — MLB props need
+            wider lookback. Priority order validated when pitcher K ≥ total bases ≥ hits and
+            both prop types beat full-game team hit rate.
+          </p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ── Panel 11: How it works ────────────────────────────────────────────────────
 
 function HowItWorksPanel() {
   return (
@@ -1697,6 +1860,13 @@ function HowItWorksPanel() {
           <code className="text-muted-foreground">neutral</code> (±0.02), and{" "}
           <code className="text-rose-500">penalized</code> (&lt;−0.02). Signal is validated when boosted
           hit rate &gt; neutral &gt; penalized. Needs ≥10 resolved per bucket to be meaningful.
+        </div>
+        <div>
+          <span className="font-semibold text-foreground">MLB market mix</span> — validates whether
+          the MLB Player Intelligence priority ordering (pitcher strikeouts → hitter total bases →
+          hitter hits → full-game team bets) holds in resolved outcomes. Uses a 90-day window since
+          MLB prop samples are smaller. Priority is &ldquo;validated&rdquo; when K ≥ TB ≥ hits in
+          hit rate and both prop types beat full-game team hit rate (≥10 resolved per category).
         </div>
         <div>
           <span className="font-semibold text-foreground">Resolution completeness</span> — tracks what
@@ -1775,6 +1945,9 @@ export function ParlayPerformanceDashboard() {
 
       {/* Resolution completeness — per-sport pipeline health check */}
       <ResolutionCompletenessPanel days={days} />
+
+      {/* MLB market mix — validates prop priority order vs full-game team bets */}
+      <MlbMarketMixPanel />
 
       {/* Full-width how-it-works */}
       <HowItWorksPanel />

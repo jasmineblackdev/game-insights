@@ -478,3 +478,37 @@ export function useEarlyValueImpactBySport(days = 30) {
     gcTime:    GC,
   });
 }
+
+// ── MLB market mix ────────────────────────────────────────────────────────────
+
+export interface MlbMarketMixRow {
+  /** mlbPropCategory() key: pitcher_strikeouts | hitter_total_bases | hitter_hits |
+   *  hitter_high_vol | fullgame_team | other */
+  category:      string;
+  /** Comma-joined list of stat_type values in this bucket */
+  stat_types:    string;
+  leg_count:     number;
+  resolved_count: number;
+  win_count:     number;
+  hit_rate_pct:  number | null;
+  roi_pct:       number | null;
+  avg_edge:      number;
+  avg_hit_prob:  number | null;
+}
+
+/**
+ * MLB market mix performance by prop category.
+ * Validates whether pitcher_strikeouts > hitter_total_bases > hits > team bets
+ * priority ordering holds in resolved outcomes.
+ */
+export function useMlbMarketMix(days = 90) {
+  return useQuery({
+    queryKey: ["analytics-mlb-market-mix", days],
+    queryFn:  () => rpc<MlbMarketMixRow>("analytics_mlb_market_mix", {
+      lookback_days: days,
+      min_resolved:  1,
+    }),
+    staleTime: STALE,
+    gcTime:    GC,
+  });
+}
