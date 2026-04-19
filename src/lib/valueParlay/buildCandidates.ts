@@ -20,6 +20,7 @@ import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { getConfidenceAdjustment } from "@/lib/ml/confidenceCalibrationMap";
 import {
   mlbPropCategory,
+  mlbPropPriorityAdjustment,
   mlbStatVolatilityFloor,
   mlbCorrelationGroup,
 } from "@/lib/valueParlay/mlbPropRanking";
@@ -388,6 +389,7 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     pickType: "player_prop",
     marketType: "player_prop",
     selectionLabel: label,
+    teamId: row.teamAbbr,
     playerId: row.playerId,
     playerName: row.playerName,
     statType: row.statType,
@@ -457,8 +459,14 @@ export function safestConfirmed(candidates: ValueBetCandidate[], n = 5): ValueBe
 }
 
 export function bestPropValues(candidates: ValueBetCandidate[], n = 5): ValueBetCandidate[] {
+  const displayScore = (c: ValueBetCandidate): number => {
+    if ((c.sport ?? "").toLowerCase() !== "mlb") return c.valueScore;
+    const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
+    return c.valueScore + mlbPropPriorityAdjustment(cat, c.edge);
+  };
   return candidates
     .filter((c) => c.pickType === "player_prop" && c.isRecommended)
+    .sort((a, b) => displayScore(b) - displayScore(a))
     .slice(0, n);
 }
 

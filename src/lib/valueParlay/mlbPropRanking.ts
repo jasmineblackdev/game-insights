@@ -202,3 +202,67 @@ export function mlbCorrelationGroup(
     : "hitter";
   return `mlb-${catKey}-${gameId}-${statType ?? "prop"}`;
 }
+
+// ── Same-team hitter stacking penalty ─────────────────────────────────────────
+
+/**
+ * Parlay-time dampener for stacking multiple MLB hitters from the same team.
+ *
+ * Orthogonal to `mlbPropPriorityAdjustment` (which is per-leg and stateless):
+ * this penalty depends on which legs have already been picked, so it lives in
+ * the greedy selector and is applied at the same additive scale as the
+ * priority adjustment (±0.05 range). Pitcher strikeouts and opposing-team
+ * hitters are exempt — only same-team hitter stacks pay.
+ */
+export type HitterStackContext = {
+  hitterCountByTeam: Map<string, number>;
+};
+
+export function newHitterStackContext(): HitterStackContext {
+  return { hitterCountByTeam: new Map() };
+}
+
+const SAME_TEAM_HITTER_STEP = -0.02;
+
+function isMlbHitterCategory(cat: MlbPropCategory): boolean {
+  return (
+    cat === "hitter_total_bases" ||
+    cat === "hitter_hits" ||
+    cat === "hitter_high_vol"
+  );
+}
+
+/**
+ * Returns a negative adjustment when this candidate would add another hitter
+ * from a team that is already represented on the slip. First hitter from a
+ * team pays 0; each subsequent hitter from the same team pays the step
+ * multiplied by the prior count (1 prior → −0.02, 2 priors → −0.04, …).
+ */
+export function sameTeamHitterPenaltyFor(
+  candidate: ValueBetCandidate,
+  ctx: HitterStackContext,
+): number {
+  if ((candidate.sport ?? "").toLowerCase() !== "mlb") return 0;
+  if (candidate.pickType !== "player_prop") return 0;
+  const cat = mlbPropCategory(candidate.statType, candidate.pickType, candidate.matchupLabel ?? "");
+  if (!isMlbHitterCategory(cat)) return 0;
+  const team = candidate.teamId;
+  if (!team) return 0;
+  const prior = ctx.hitterCountByTeam.get(team) ?? 0;
+  if (prior < 1) return 0;
+  return SAME_TEAM_HITTER_STEP * prior;
+}
+
+/** Record a selected MLB hitter so subsequent legs see the stack-penalty growth. */
+export function recordHitterPick(
+  candidate: ValueBetCandidate,
+  ctx: HitterStackContext,
+): void {
+  if ((candidate.sport ?? "").toLowerCase() !== "mlb") return;
+  if (candidate.pickType !== "player_prop") return;
+  const cat = mlbPropCategory(candidate.statType, candidate.pickType, candidate.matchupLabel ?? "");
+  if (!isMlbHitterCategory(cat)) return;
+  const team = candidate.teamId;
+  if (!team) return;
+  ctx.hitterCountByTeam.set(team, (ctx.hitterCountByTeam.get(team) ?? 0) + 1);
+}

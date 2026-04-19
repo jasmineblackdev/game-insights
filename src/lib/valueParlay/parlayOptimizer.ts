@@ -6,7 +6,13 @@ import {
   payoutMultiplierFromAmerican,
 } from "@/lib/valueParlay/oddsMath";
 import type { ParlayBuildMode, ParlayTriple, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
-import { mlbPropCategory, mlbPropPriorityAdjustment } from "@/lib/valueParlay/mlbPropRanking";
+import {
+  mlbPropCategory,
+  mlbPropPriorityAdjustment,
+  newHitterStackContext,
+  recordHitterPick,
+  sameTeamHitterPenaltyFor,
+} from "@/lib/valueParlay/mlbPropRanking";
 
 // ── Analytics weights ─────────────────────────────────────────────────────────
 
@@ -327,7 +333,14 @@ function greedyBuild(
   const maxCombatLegs = opts.maxCombatLegs ?? (opts.mode === "aggressive" ? 2 : 1);
   const maxPerGame    = opts.maxPerGame    ?? (opts.mode === "safe" ? 1 : 2);
 
-  const sorted = [...pool].sort((a, b) => {
+  // Stack context is built up as MLB hitters are picked, adding a small
+  // correlation dampener (±0.02/step) on top of the stateless computeLegScore.
+  // Does not modify edge/ML/calibration — only nudges greedy ordering.
+  const stackCtx = newHitterStackContext();
+  const keyFor = (c: ValueBetCandidate): number =>
+    computeLegScore(c, weights) + sameTeamHitterPenaltyFor(c, stackCtx);
+
+  const compare = (a: ValueBetCandidate, b: ValueBetCandidate): number => {
     if (opts.preferSafer) {
       const rd = a.riskScore - b.riskScore;
       if (Math.abs(rd) > 3) return rd;
@@ -336,15 +349,17 @@ function greedyBuild(
       const ad = b.americanOdds - a.americanOdds;
       if (Math.abs(ad) > 20) return ad;
     }
-    return computeLegScore(b, weights) - computeLegScore(a, weights);
-  });
+    return keyFor(b) - keyFor(a);
+  };
 
+  const remaining = [...pool];
   const picked: ValueBetCandidate[] = [];
   const gameCounts = new Map<string, number>();
   const sportC: Record<string, number> = {};
   let combatCount = 0;
 
-  const tryAdd = (c: ValueBetCandidate): boolean => {
+  const accept = (idx: number): boolean => {
+    const c = remaining[idx];
     const gc = (gameCounts.get(c.gameId) ?? 0) + 1;
     if (gc > maxPerGame) return false;
     const sc = (sportC[c.sport] ?? 0) + 1;
@@ -354,26 +369,37 @@ function greedyBuild(
     gameCounts.set(c.gameId, gc);
     sportC[c.sport] = sc;
     if (isCombatSport(c.sport)) combatCount++;
+    recordHitterPick(c, stackCtx);
+    remaining.splice(idx, 1);
     return true;
   };
 
+  const pickOne = (fallback: boolean): boolean => {
+    remaining.sort(compare);
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i];
+      if (!fallback) {
+        if (!opts.skipRecommendedFilter && !c.isRecommended) continue;
+      } else {
+        if (c.confidence === "low") continue;
+        if (c.edge <= 0) continue;
+        if (c.edge < MIN_EDGE_RECOMMEND) continue;
+        if (!legPassesParlayBuildFilters(c, opts.mode)) continue;
+      }
+      if (accept(i)) return true;
+    }
+    return false;
+  };
+
   // Pass 1: recommended-only (or skipRecommendedFilter)
-  for (const c of sorted) {
-    if (picked.length >= targetLegs) break;
-    if (!opts.skipRecommendedFilter && !c.isRecommended) continue;
-    tryAdd(c);
+  while (picked.length < targetLegs) {
+    if (!pickOne(false)) break;
   }
 
   // Pass 2: fallback — relax isRecommended when pool is thin
   if (picked.length < Math.min(3, targetLegs)) {
-    for (const c of sorted) {
-      if (picked.length >= targetLegs) break;
-      if (picked.some((p) => p.id === c.id)) continue;
-      if (c.confidence === "low") continue;
-      if (c.edge <= 0) continue;
-      if (c.edge < MIN_EDGE_RECOMMEND) continue;
-      if (!legPassesParlayBuildFilters(c, opts.mode)) continue;
-      tryAdd(c);
+    while (picked.length < targetLegs) {
+      if (!pickOne(true)) break;
     }
   }
 
