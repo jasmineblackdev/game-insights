@@ -258,35 +258,43 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
  * AGGRESSIVE: minimal hard filters — still blocks structurally bad legs
  */
 function legPassesParlayBuildFilters(c: ValueBetCandidate, mode: ParlayBuildMode = "balanced"): boolean {
-  if (c.edge <= 0) return false;
-  if (c.americanOdds <= -350 && c.edge < 0.07) return false;
+  return diagnoseLegRejection(c, mode) === null;
+}
+
+/**
+ * Same gating as legPassesParlayBuildFilters, but returns the reason a leg
+ * was rejected (or null when it passes). Exposed so ML logging can attribute
+ * each exclusion to a specific rule.
+ */
+export function diagnoseLegRejection(
+  c: ValueBetCandidate,
+  mode: ParlayBuildMode = "balanced",
+): string | null {
+  if (c.edge <= 0) return "non_positive_edge";
+  if (c.americanOdds <= -350 && c.edge < 0.07) return "heavy_favorite_low_edge";
 
   const floors = tierFloors(mode);
 
-  if (c.volatilityScore >= floors.maxVolatility) return false;
-  if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return false;
-  if ((c.modelProbability ?? 0) < floors.minHitProb) return false;
+  if (c.volatilityScore >= floors.maxVolatility) return "tier_floor_volatility";
+  if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return "tier_floor_stability";
+  if ((c.modelProbability ?? 0) < floors.minHitProb) return "tier_floor_hit_prob";
 
-  // High-vol underdog with insufficient edge — noise trap (applies broadly)
-  if (c.americanOdds > 0 && c.volatilityScore >= 55 && c.edge <= 0.08) return false;
+  if (c.americanOdds > 0 && c.volatilityScore >= 55 && c.edge <= 0.08) return "underdog_volatility_trap";
 
-  // Timing gating
   const timing = c.timingUrgency;
   if (timing === "wait") {
-    if (!floors.allowWait) return false;
-    if (c.edge < floors.waitMinEdge) return false;
+    if (!floors.allowWait) return "timing_wait_blocked";
+    if (c.edge < floors.waitMinEdge) return "timing_wait_edge_insufficient";
   }
 
-  // SAFE and CASHOUT: extra MLB guardrail — avoid HR/SB/RBI as hard picks.
-  // These stats remain available in balanced/aggressive pools.
   if ((mode === "safe" || mode === "cashout")
       && (c.sport ?? "").toLowerCase() === "mlb"
       && c.pickType === "player_prop") {
     const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
-    if (cat === "hitter_high_vol") return false;
+    if (cat === "hitter_high_vol") return "mlb_hitter_high_vol_safe_gate";
   }
 
-  return true;
+  return null;
 }
 
 // ── Preferred odds ranges per tier ────────────────────────────────────────────

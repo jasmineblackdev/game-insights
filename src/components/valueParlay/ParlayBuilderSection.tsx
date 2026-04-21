@@ -15,6 +15,11 @@ import { parlayReasons } from "@/lib/valueParlay/parlayReasons";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 import { useRoiBySport, useRoiByMarketType, useParlayModelMix, type ParlayModelMixRow } from "@/hooks/useAnalyticsDashboard";
+import {
+  logPropImpressions,
+  logParlayLegRejections,
+  logGamePredictionSnapshots,
+} from "@/lib/ml/impressionLogger";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -305,6 +310,20 @@ export function ParlayBuilderSection({
     );
     return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
   }, [games, oddsMap, propData]);
+
+  // ML training coverage: log every prop impression, every rejected candidate
+  // for the current mode, and every pre-game team pick. Fire-and-forget —
+  // dedup happens both client-side (per session) and server-side (unique keys).
+  useEffect(() => {
+    if (!candidates.length) return;
+    const rawProps = (propData?.items ?? []);
+    const filteredProps = filterPropsByGameIds
+      ? rawProps.filter((p) => filterPropsByGameIds.has(p.game_id))
+      : rawProps;
+    logPropImpressions(filteredProps).catch(() => {});
+    logGamePredictionSnapshots(candidates).catch(() => {});
+    logParlayLegRejections(candidates, parlayMode).catch(() => {});
+  }, [candidates, parlayMode, propData, filterPropsByGameIds]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
 
   const shareText = useMemo(
