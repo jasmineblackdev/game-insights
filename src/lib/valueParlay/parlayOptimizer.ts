@@ -466,7 +466,7 @@ function scoreParlay(
   const legOddsInRange  = legs.filter((l) => oddsInRangePerLeg(mode, l.americanOdds)).length / legs.length;
 
   // Cash-out structure bonus — reward: staggered start times, ordered by
-  // hit probability descending, varied stat types.
+  // hit probability descending, varied stat types, and cross-sport mix.
   let cashoutStructure = 0;
   if (mode === "cashout" && legs.length >= 2) {
     const stagger = staggerDiversity(legs);
@@ -475,7 +475,10 @@ function scoreParlay(
     const lastProb  = legs[legs.length - 1].modelProbability;
     const orderedBonus = firstProb > lastProb ? 1 : firstProb === lastProb ? 0.5 : 0;
     const statDiv = new Set(legs.map((l) => l.statType ?? l.marketType ?? "")).size / legs.length;
-    cashoutStructure = stagger * 0.45 + orderedBonus * 0.35 + statDiv * 0.20;
+    // Sport diversity: max credit when every leg is from a different sport.
+    const sportDiv = new Set(legs.map((l) => l.sport)).size / legs.length;
+    cashoutStructure =
+      stagger * 0.30 + orderedBonus * 0.25 + statDiv * 0.15 + sportDiv * 0.30;
   }
 
   // diversificationBoost shifts weight from timing → sport diversity.
@@ -724,14 +727,43 @@ export function optimizeSmartParlays(
     pool = candidates.filter((c) => c.edge > 0 && c.confidence !== "low" && c.edge >= 0.03);
   }
 
+  // Cash-Out mode: require cross-sport diversity — prefer 1 leg per sport.
+  // If the pool can't support that many distinct sports, fall back to 2/sport.
+  // This prevents "all MLB" cash-out parlays on MLB-heavy slates.
+  const buildCashoutLegs = (
+    legCount: number,
+    preferSafer: boolean,
+    preferPayout: boolean,
+    maxPerSportRelaxed: number,
+  ): ValueBetCandidate[] => {
+    const strict = greedyBuild(pool, legCount, {
+      maxPerSport: 1,
+      preferSafer,
+      preferPayout,
+      mode,
+      weights,
+    });
+    if (strict.length >= legCount) return strict;
+    // Fallback: relax to allow 2 per sport, still ordered for cash-out
+    return greedyBuild(pool, legCount, {
+      maxPerSport: maxPerSportRelaxed,
+      preferSafer,
+      preferPayout,
+      mode,
+      weights,
+    });
+  };
+
   // ── Best value: target legs, ML-ranked ───────────────────────────────────
-  let legsBest = greedyBuild(pool, target, {
-    maxPerSport,
-    preferSafer: mode === "cashout", // cashout leans safer in selection
-    preferPayout: false,
-    mode,
-    weights,
-  });
+  let legsBest = mode === "cashout"
+    ? buildCashoutLegs(target, /*preferSafer*/ true, false, maxPerSport)
+    : greedyBuild(pool, target, {
+        maxPerSport,
+        preferSafer: false,
+        preferPayout: false,
+        mode,
+        weights,
+      });
   while (legsBest.length > 2 && !passesHardRules(legsBest, maxPerSport)) {
     legsBest = legsBest.slice(0, -1);
   }
@@ -746,24 +778,28 @@ export function optimizeSmartParlays(
   );
 
   // ── Safer: min legs, prioritise hit probability ───────────────────────────
-  let legsSafe = greedyBuild(pool, min, {
-    maxPerSport,
-    preferSafer: true,
-    preferPayout: false,
-    mode,
-    weights,
-  });
+  let legsSafe = mode === "cashout"
+    ? buildCashoutLegs(min, true, false, maxPerSport)
+    : greedyBuild(pool, min, {
+        maxPerSport,
+        preferSafer: true,
+        preferPayout: false,
+        mode,
+        weights,
+      });
   if (mode === "cashout") legsSafe = orderLegsForCashout(legsSafe);
   const safer = scoreParlay(legsSafe, mode, weights);
 
   // ── Higher payout: max legs, more underdogs ───────────────────────────────
-  let legsPay = greedyBuild(pool, max, {
-    maxPerSport: maxPerSport + 1,
-    preferSafer: false,
-    preferPayout: true,
-    mode,
-    weights,
-  });
+  let legsPay = mode === "cashout"
+    ? buildCashoutLegs(max, false, true, maxPerSport + 1)
+    : greedyBuild(pool, max, {
+        maxPerSport: maxPerSport + 1,
+        preferSafer: false,
+        preferPayout: true,
+        mode,
+        weights,
+      });
   if (mode === "cashout") legsPay = orderLegsForCashout(legsPay);
   const higherPayout = scoreParlay(legsPay, mode, weights);
 
