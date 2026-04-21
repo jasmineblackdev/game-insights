@@ -403,6 +403,66 @@ function staggerDiversity(legs: ValueBetCandidate[]): number {
   return unique.size / legs.length;
 }
 
+// ── Stat dependency chain ─────────────────────────────────────────────────────
+
+/**
+ * Classifies a leg by its outcome driver so we can block two legs that
+ * depend on the same underlying event from sharing a single-sport parlay.
+ *
+ * Two legs with the same key + same gameId share a dependency chain (e.g.
+ * two hitters on the same team in the same game). Two legs with the same
+ * key but different gameIds are acceptable (e.g. two NFL rushing props
+ * from different games).
+ *
+ * Key format:
+ *   - MLB player prop → "mlb:pitcher" | "mlb:hitter"
+ *   - NFL player prop → "nfl:pass" | "nfl:rush" | "nfl:receive" | "nfl:{stat}"
+ *   - NBA player prop → "nba:score" | "nba:reb" | "nba:ast" | "nba:{stat}"
+ *   - other player_prop → "{sport}:{statType}"
+ *   - team bet → "{sport}:{pickType}"
+ */
+function dependencyChainKey(c: ValueBetCandidate): string {
+  const sport = String(c.sport).toLowerCase();
+  if (c.pickType !== "player_prop") {
+    return `${sport}:${c.pickType}`;
+  }
+  const stat = (c.statType ?? "").toLowerCase();
+  if (sport === "mlb") {
+    const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
+    if (cat === "pitcher_strikeouts" || cat === "pitcher_other") return "mlb:pitcher";
+    return "mlb:hitter";
+  }
+  if (sport === "nfl") {
+    if (stat.includes("pass"))    return "nfl:pass";
+    if (stat.includes("rush"))    return "nfl:rush";
+    if (stat.includes("recept") || stat.includes("receiv")) return "nfl:receive";
+    return `nfl:${stat}`;
+  }
+  if (sport === "nba") {
+    if (stat.includes("point") || stat === "threes") return "nba:score";
+    if (stat.includes("reb"))    return "nba:reb";
+    if (stat.includes("assist")) return "nba:ast";
+    if (stat === "pra")          return "nba:pra";
+    return `nba:${stat}`;
+  }
+  return `${sport}:${stat || "prop"}`;
+}
+
+/**
+ * True when two legs share the *same dependency chain AND the same game*.
+ * That's the combo we need to block in single-sport fallback builds:
+ *   - same game + same chain (e.g. two same-team hitters) → blocked
+ *   - same game + different chain (pitcher K + hitter TB) → allowed
+ *   - different game + same chain (rushing in two games)  → allowed
+ */
+function legsShareDependencyChainSameGame(
+  a: ValueBetCandidate,
+  b: ValueBetCandidate,
+): boolean {
+  if (a.gameId !== b.gameId) return false;
+  return dependencyChainKey(a) === dependencyChainKey(b);
+}
+
 // ── Parlay scorer ─────────────────────────────────────────────────────────────
 
 /**
@@ -572,6 +632,12 @@ function greedyBuild(
     maxSameTeamProps?: number;
     /** Max medium-confidence legs total. Default: from tierFloors.maxMediumConfidenceLegs. */
     maxMediumConfLegs?: number;
+    /**
+     * When true, reject a candidate if it shares the same (gameId, dependencyChain)
+     * as an already-picked leg. Loosens cross-sport requirement for single-sport
+     * fallbacks while still blocking multiple same-team-same-game hitters, etc.
+     */
+    enforceDependencyChainDiversity?: boolean;
   }
 ): ValueBetCandidate[] {
   const weights       = opts.weights ?? {};
@@ -641,6 +707,14 @@ function greedyBuild(
     if (isMlbHitterProp(c) && c.teamId) {
       const h = (hittersByTeam.get(c.teamId) ?? 0) + 1;
       if (h > maxHittersPerTeam) return false;
+    }
+
+    // Dependency-chain diversity (single-sport fallback guard): block if the
+    // candidate shares both gameId AND dependency chain with any picked leg.
+    if (opts.enforceDependencyChainDiversity) {
+      for (const p of picked) {
+        if (legsShareDependencyChainSameGame(c, p)) return false;
+      }
     }
 
     picked.push(c);
@@ -774,9 +848,13 @@ export function optimizeSmartParlays(
     return current;
   };
 
-  // Cash-Out mode: require cross-sport diversity — prefer 1 leg per sport.
-  // If the pool can't support that many distinct sports, fall back to 2/sport.
-  // This prevents "all MLB" cash-out parlays on MLB-heavy slates.
+  // Cash-Out mode: prefer cross-sport diversity, but never return an empty
+  // parlay on a single-sport slate. Three-stage fallback:
+  //   1. Strict:   1 leg per sport (true multi-sport)
+  //   2. Medium:   maxPerSportRelaxed per sport (usually 2)
+  //   3. Loose:    single-sport allowed, but require either different games
+  //                OR different dependency chains (no two hitters from the
+  //                same team in the same game, etc.)
   const buildCashoutLegs = (
     legCount: number,
     preferSafer: boolean,
@@ -791,14 +869,32 @@ export function optimizeSmartParlays(
       weights,
     });
     if (strict.length >= legCount) return strict;
-    // Fallback: relax to allow 2 per sport, still ordered for cash-out
-    return greedyBuild(pool, legCount, {
+
+    const medium = greedyBuild(pool, legCount, {
       maxPerSport: maxPerSportRelaxed,
       preferSafer,
       preferPayout,
       mode,
       weights,
     });
+    if (medium.length >= legCount) return medium;
+
+    // Loose fallback: allow all legs from one sport but enforce different
+    // games OR different dependency chains. Also lift maxPerGame to legCount
+    // so legs from the same game pass only when chains differ.
+    const loose = greedyBuild(pool, legCount, {
+      maxPerSport: legCount,
+      maxPerGame: legCount,
+      preferSafer,
+      preferPayout,
+      mode,
+      weights,
+      enforceDependencyChainDiversity: true,
+    });
+    // Return whichever fallback has the most legs (loose should win when the
+    // pool is single-sport, medium may win when distinct-sport candidates
+    // existed but not enough for strict).
+    return loose.length > medium.length ? loose : medium;
   };
 
   // ── Best value: target legs, ML-ranked ───────────────────────────────────
