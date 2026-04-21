@@ -19,6 +19,7 @@ const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (3–5 legs)",
   balanced: "Balanced (4–8)",
   aggressive: "Aggressive (6–12)",
+  cashout: "Cash-Out (3 legs, staggered)",
 };
 
 const HISTORY_KEY = "gamelens-value-parlay-history-v1";
@@ -30,11 +31,12 @@ function TierPerformanceStrip() {
   const rows = data as ParlayModelMixRow[];
   if (!rows.length) return null;
 
-  const TIERS = ["safe", "balanced", "aggressive"] as const;
+  const TIERS = ["safe", "balanced", "aggressive", "cashout"] as const;
   const TIER_COLOR: Record<string, string> = {
     safe:       "text-emerald-500",
     balanced:   "text-yellow-500",
     aggressive: "text-orange-500",
+    cashout:    "text-sky-500",
   };
 
   const byTier = rows.reduce<Record<string, { resolved: number; hits: number }>>((acc, r) => {
@@ -284,7 +286,7 @@ export function ParlayBuilderSection({
             <div className="lg:col-span-5 rounded-xl border border-border bg-card/70 p-4 sm:p-5 space-y-3 shadow-sm">
               <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">BUILD MODE</p>
               <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 w-full sm:w-auto">
-                {(["safe", "balanced", "aggressive"] as const).map((m) => (
+                {(["safe", "balanced", "aggressive", "cashout"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"

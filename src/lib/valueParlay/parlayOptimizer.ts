@@ -178,39 +178,145 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
 // ── Tier-aware leg filter ─────────────────────────────────────────────────────
 
 /**
+ * Per-tier minimum floors for individual legs.
+ * A leg below any of these is rejected before it can enter the parlay pool.
+ *
+ * SAFE is the most selective — weakest-leg quality matters more than average
+ * card quality, and tight floors prevent one fragile leg from contaminating
+ * an otherwise strong card.
+ *
+ * Cash-Out uses safe-grade leg quality because early legs must resolve reliably
+ * for cash-out offers to appear; the cash-out *structure* layer then re-orders.
+ */
+interface TierFloors {
+  maxVolatility: number;
+  minStability: number;     // requires c.stabilityScore when present
+  minHitProb:   number;     // ml_hit_probability / modelProbability
+  minLegScore:  number;     // target floor for computeLegScore
+  allowWait:    boolean;
+  waitMinEdge:  number;     // when allowWait=true and leg is wait-timing
+  maxMediumConfidenceLegs: number;
+}
+
+function tierFloors(mode: ParlayBuildMode): TierFloors {
+  if (mode === "safe") {
+    return {
+      maxVolatility: 50,
+      minStability:  0.58,
+      minHitProb:    0.54,
+      minLegScore:   0.58,
+      allowWait:     false,
+      waitMinEdge:   999,
+      maxMediumConfidenceLegs: 1,
+    };
+  }
+  if (mode === "balanced") {
+    return {
+      maxVolatility: 65,
+      minStability:  0.50,
+      minHitProb:    0.50,
+      minLegScore:   0.52,
+      allowWait:     true,
+      waitMinEdge:   0.09,
+      maxMediumConfidenceLegs: 2,
+    };
+  }
+  if (mode === "cashout") {
+    // Cash-out uses slightly looser ML-prob floor than safe because we also
+    // want at least one upside leg; structural ordering does the heavy lifting.
+    return {
+      maxVolatility: 55,
+      minStability:  0.55,
+      minHitProb:    0.53,
+      minLegScore:   0.55,
+      allowWait:     false,
+      waitMinEdge:   999,
+      maxMediumConfidenceLegs: 1,
+    };
+  }
+  // aggressive
+  return {
+    maxVolatility: 100,
+    minStability:  0,
+    minHitProb:    0,
+    minLegScore:   0,
+    allowWait:     true,
+    waitMinEdge:   0,
+    maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
+  };
+}
+
+/**
  * Mode-aware leg gating.
  *
- * SAFE:       exclude wait-timing, volatility ≥ 55, stability < 0.55
- * BALANCED:   exclude volatility ≥ 70, stability < 0.45; wait allowed at edge ≥ 0.09
+ * SAFE:       exclude wait-timing, volatility ≥ 50, stability < 0.58, hitProb < 0.54
+ * BALANCED:   exclude volatility ≥ 65, stability < 0.50; wait allowed at edge ≥ 0.09
+ * CASHOUT:    safe-grade gates; leg ordering handled separately
  * AGGRESSIVE: minimal hard filters — still blocks structurally bad legs
  */
 function legPassesParlayBuildFilters(c: ValueBetCandidate, mode: ParlayBuildMode = "balanced"): boolean {
   if (c.edge <= 0) return false;
   if (c.americanOdds <= -350 && c.edge < 0.07) return false;
 
-  // Tier-specific volatility + stability gates
-  if (mode === "safe") {
-    if (c.volatilityScore >= 55) return false;
-    const stab = c.stabilityScore;
-    if (stab !== undefined && stab < 0.55) return false;
-  } else if (mode === "balanced") {
-    if (c.volatilityScore >= 70) return false;
-    const stab = c.stabilityScore;
-    if (stab !== undefined && stab < 0.45) return false;
-  }
+  const floors = tierFloors(mode);
 
-  // High-vol underdog with insufficient edge — noise trap
+  if (c.volatilityScore >= floors.maxVolatility) return false;
+  if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return false;
+  if ((c.modelProbability ?? 0) < floors.minHitProb) return false;
+
+  // High-vol underdog with insufficient edge — noise trap (applies broadly)
   if (c.americanOdds > 0 && c.volatilityScore >= 55 && c.edge <= 0.08) return false;
 
   // Timing gating
   const timing = c.timingUrgency;
   if (timing === "wait") {
-    if (mode === "safe") return false;
-    if (mode === "balanced" && c.edge < 0.09) return false;
-    // aggressive: all timing states allowed
+    if (!floors.allowWait) return false;
+    if (c.edge < floors.waitMinEdge) return false;
+  }
+
+  // SAFE and CASHOUT: extra MLB guardrail — avoid HR/SB/RBI as hard picks.
+  // These stats remain available in balanced/aggressive pools.
+  if ((mode === "safe" || mode === "cashout")
+      && (c.sport ?? "").toLowerCase() === "mlb"
+      && c.pickType === "player_prop") {
+    const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
+    if (cat === "hitter_high_vol") return false;
   }
 
   return true;
+}
+
+// ── Preferred odds ranges per tier ────────────────────────────────────────────
+// Soft preference — parlays with combined odds in the target range get a small
+// structure bonus. Never blocks other payouts; just nudges ranking.
+
+function targetParlayOddsRange(mode: ParlayBuildMode): { lo: number; hi: number } | null {
+  if (mode === "safe")     return { lo: 120, hi: 320 };
+  if (mode === "balanced") return { lo: 250, hi: 550 };
+  if (mode === "cashout")  return { lo: 180, hi: 420 };
+  return null; // aggressive: no preference
+}
+
+function oddsInRangeBonus(combinedAmerican: number, mode: ParlayBuildMode): number {
+  const r = targetParlayOddsRange(mode);
+  if (!r) return 0;
+  if (combinedAmerican >= r.lo && combinedAmerican <= r.hi) return 1;
+  // Soft roll-off: half credit within 20% outside the range
+  const slack = (r.hi - r.lo) * 0.2;
+  if (combinedAmerican >= r.lo - slack && combinedAmerican <= r.hi + slack) return 0.5;
+  return 0;
+}
+
+function oddsInRangePerLeg(mode: ParlayBuildMode, odds: number): number {
+  if (mode === "safe") {
+    if (odds >= -180 && odds <= 130) return 1;
+    return 0;
+  }
+  if (mode === "balanced" || mode === "cashout") {
+    if (odds >= -160 && odds <= 180) return 1;
+    return 0;
+  }
+  return 1;
 }
 
 function buildWarnings(legs: ValueBetCandidate[]): string[] {
@@ -231,6 +337,61 @@ function buildWarnings(legs: ValueBetCandidate[]): string[] {
   return w;
 }
 
+// ── Fragility score ───────────────────────────────────────────────────────────
+
+/**
+ * Composite fragility 0–100. Drivers:
+ *   - weakest leg quality vs tier floor (40%)
+ *   - medium-confidence density (20%)
+ *   - same-game exposure (20%)
+ *   - volatility concentration (20%)
+ */
+function fragilityScore(
+  legs: ValueBetCandidate[],
+  mode: ParlayBuildMode,
+  weights: AnalyticsWeights = {},
+): { score: number; weakestLegScore: number } {
+  if (!legs.length) return { score: 0, weakestLegScore: 0 };
+  const floors = tierFloors(mode);
+  const perLegScores = legs.map((l) => computeLegScore(l, weights));
+  const weakest = Math.min(...perLegScores);
+
+  // Weakest leg component — how far below the floor are we? 0 when at or above.
+  const weakestDeficit = Math.max(0, floors.minLegScore - weakest);
+  const weakestComponent = Math.min(1, weakestDeficit / 0.15) * 40;
+
+  const mediumCount = legs.filter((l) => l.confidence === "medium").length;
+  const mediumOver  = Math.max(0, mediumCount - floors.maxMediumConfidenceLegs);
+  const mediumComponent = Math.min(1, mediumOver / 2) * 20;
+
+  const gameCounts = new Map<string, number>();
+  for (const l of legs) gameCounts.set(l.gameId, (gameCounts.get(l.gameId) ?? 0) + 1);
+  let sameGameExcess = 0;
+  for (const n of gameCounts.values()) if (n > 1) sameGameExcess += (n - 1);
+  const sameGameComponent = Math.min(1, sameGameExcess / 2) * 20;
+
+  const highVolCount = legs.filter((l) => l.volatilityScore >= 58).length;
+  const volComponent = Math.min(1, highVolCount / 2) * 20;
+
+  return {
+    score: Math.round(weakestComponent + mediumComponent + sameGameComponent + volComponent),
+    weakestLegScore: Math.round(weakest * 1000) / 1000,
+  };
+}
+
+// ── Stagger score (cash-out helper) ───────────────────────────────────────────
+
+/**
+ * 0–1 diversity of start times across legs.
+ * Uses gameTimeLabel when present; falls back to gameId distinctness.
+ */
+function staggerDiversity(legs: ValueBetCandidate[]): number {
+  if (!legs.length) return 0;
+  const labels = legs.map((l) => l.gameTimeLabel ?? `g:${l.gameId}`);
+  const unique = new Set(labels);
+  return unique.size / legs.length;
+}
+
 // ── Parlay scorer ─────────────────────────────────────────────────────────────
 
 /**
@@ -238,11 +399,17 @@ function buildWarnings(legs: ValueBetCandidate[]): string[] {
  *
  * parlayScore = avg_legScore*0.55 + timingQScore*0.12 + sportDivScore*0.08
  *             + marketStrScore*0.07 + confSpreadScore*0.06
- *             - corrPen*0.07 - volPen*0.05
+ *             - corrPen*0.07 - volPen*0.05 - weakestLegPen*0.10 - fragPen*0.08
+ *             + targetOddsBonus*0.03 + cashoutStructure*0.04  (cashout only)
+ *
+ * Weakest-leg and fragility penalties are tier-aware — stronger in safe/cashout,
+ * milder in balanced, tolerated in aggressive. Stability and volatility get a
+ * slight bump in safe/balanced via the penalty layer (not the leg-score layer)
+ * to keep the leg-score API stable for callers.
  */
 function scoreParlay(
   legs: ValueBetCandidate[],
-  _mode: ParlayBuildMode = "balanced",
+  mode: ParlayBuildMode = "balanced",
   weights: AnalyticsWeights = {}
 ): SmartParlayResult {
   const odds     = legs.map((l) => l.americanOdds);
@@ -251,8 +418,10 @@ function scoreParlay(
   const hit      = parlayHitProbability(probs);
   const mult     = payoutMultiplierFromAmerican(combined);
 
-  // Average ML-aware leg quality (0–1)
-  const avgLegScore = legs.reduce((s, l) => s + computeLegScore(l, weights), 0) / legs.length;
+  // Per-leg scores (reused across multiple components)
+  const perLegScores = legs.map((l) => computeLegScore(l, weights));
+  const avgLegScore  = perLegScores.reduce((s, x) => s + x, 0) / legs.length;
+  const weakestLeg   = Math.min(...perLegScores);
 
   // Timing quality — avg timingScore across legs (0–1, neutral = 0.55)
   const timingQScore = legs.reduce((s, l) => s + (l.timingScore ?? 0.55), 0) / legs.length;
@@ -277,6 +446,38 @@ function scoreParlay(
   const volPen01  = legs.reduce((s, l) => s + l.volatilityScore, 0) / legs.length / 100;
   const uncPen01  = legs.reduce((s, l) => s + l.uncertaintyScore, 0) / legs.length / 100;
 
+  // Weakest-leg penalty: max(0, tierFloor − minLegScore). Matters most in safe/cashout.
+  const floors = tierFloors(mode);
+  const weakestDeficit   = Math.max(0, floors.minLegScore - weakestLeg);
+  const weakestPenWeight = (mode === "safe" || mode === "cashout") ? 0.10
+                         : (mode === "balanced") ? 0.06
+                         : 0.02;
+
+  // Fragility
+  const frag = fragilityScore(legs, mode, weights);
+  const fragPen01 = frag.score / 100;
+  const fragPenWeight = (mode === "safe") ? 0.08
+                      : (mode === "cashout") ? 0.07
+                      : (mode === "balanced") ? 0.04
+                      : 0.01;
+
+  // Target-odds soft preference
+  const targetOddsBonus = oddsInRangeBonus(combined, mode); // 0, 0.5, or 1
+  const legOddsInRange  = legs.filter((l) => oddsInRangePerLeg(mode, l.americanOdds)).length / legs.length;
+
+  // Cash-out structure bonus — reward: staggered start times, ordered by
+  // hit probability descending, varied stat types.
+  let cashoutStructure = 0;
+  if (mode === "cashout" && legs.length >= 2) {
+    const stagger = staggerDiversity(legs);
+    // Check ordering: first leg should have higher hit prob than last
+    const firstProb = legs[0].modelProbability;
+    const lastProb  = legs[legs.length - 1].modelProbability;
+    const orderedBonus = firstProb > lastProb ? 1 : firstProb === lastProb ? 0.5 : 0;
+    const statDiv = new Set(legs.map((l) => l.statType ?? l.marketType ?? "")).size / legs.length;
+    cashoutStructure = stagger * 0.45 + orderedBonus * 0.35 + statDiv * 0.20;
+  }
+
   // diversificationBoost shifts weight from timing → sport diversity.
   // Rationale: tomorrow's full slate makes cross-sport mixes more achievable,
   // while timing urgency matters less for pregame-only builds.
@@ -288,7 +489,14 @@ function scoreParlay(
     marketStrScore  * 0.07 +
     confSpreadScore * 0.06 -
     corrPen01       * 0.07 -
-    volPen01        * 0.05;
+    volPen01        * 0.05 -
+    // Weakest-leg penalty: normalized deficit scaled by tier weight.
+    // Max effect at ~0.15 deficit (full floor miss) → weakestPenWeight*1.0
+    Math.min(1, weakestDeficit / 0.15) * weakestPenWeight -
+    fragPen01       * fragPenWeight +
+    targetOddsBonus * 0.03 +
+    legOddsInRange  * 0.02 +
+    cashoutStructure * 0.04;
 
   // Card confidence
   const avgConf = confSpreadScore;
@@ -307,6 +515,8 @@ function scoreParlay(
     uncertaintyPenalty:        Math.round(uncPen01 * 100),
     smartParlayScore:          Math.round(smartParlayScore * 1000) / 1000,
     warnings:                  buildWarnings(legs),
+    fragilityScore:            frag.score,
+    weakestLegScore:           frag.weakestLegScore,
   };
 }
 
@@ -325,13 +535,25 @@ function greedyBuild(
     skipRecommendedFilter?: boolean;
     /** Max combat (boxing + MMA/UFC) legs total. Defaults: safe=1, balanced=1, aggressive=2. */
     maxCombatLegs?: number;
-    /** Max legs from the same game/event. Defaults: safe=1, balanced=2, aggressive=2. */
+    /** Max legs from the same game/event. Defaults: safe=1, balanced=2, aggressive=2, cashout=1. */
     maxPerGame?: number;
+    /** Max hitters from the same MLB team. Default: safe/cashout=1, balanced=2, aggressive=3. */
+    maxHittersPerTeam?: number;
+    /** Max player-prop legs for the same team. Default: safe/cashout=1, balanced=2, aggressive=3. */
+    maxSameTeamProps?: number;
+    /** Max medium-confidence legs total. Default: from tierFloors.maxMediumConfidenceLegs. */
+    maxMediumConfLegs?: number;
   }
 ): ValueBetCandidate[] {
   const weights       = opts.weights ?? {};
+  const isSafeLike    = opts.mode === "safe" || opts.mode === "cashout";
   const maxCombatLegs = opts.maxCombatLegs ?? (opts.mode === "aggressive" ? 2 : 1);
-  const maxPerGame    = opts.maxPerGame    ?? (opts.mode === "safe" ? 1 : 2);
+  const maxPerGame    = opts.maxPerGame    ?? (isSafeLike ? 1 : 2);
+  const maxHittersPerTeam = opts.maxHittersPerTeam
+    ?? (isSafeLike ? 1 : opts.mode === "balanced" ? 2 : 3);
+  const maxSameTeamProps  = opts.maxSameTeamProps
+    ?? (isSafeLike ? 1 : opts.mode === "balanced" ? 2 : 3);
+  const maxMediumConfLegs = opts.maxMediumConfLegs ?? tierFloors(opts.mode).maxMediumConfidenceLegs;
 
   // Stack context is built up as MLB hitters are picked, adding a small
   // correlation dampener (±0.02/step) on top of the stateless computeLegScore.
@@ -356,7 +578,17 @@ function greedyBuild(
   const picked: ValueBetCandidate[] = [];
   const gameCounts = new Map<string, number>();
   const sportC: Record<string, number> = {};
+  const hittersByTeam = new Map<string, number>();
+  const propsByTeam = new Map<string, number>();
   let combatCount = 0;
+  let mediumConfCount = 0;
+
+  const isMlbHitterProp = (c: ValueBetCandidate): boolean => {
+    if ((c.sport ?? "").toLowerCase() !== "mlb") return false;
+    if (c.pickType !== "player_prop") return false;
+    const cat = mlbPropCategory(c.statType, c.pickType, c.matchupLabel ?? "");
+    return cat === "hitter_total_bases" || cat === "hitter_hits" || cat === "hitter_high_vol";
+  };
 
   const accept = (idx: number): boolean => {
     const c = remaining[idx];
@@ -365,10 +597,35 @@ function greedyBuild(
     const sc = (sportC[c.sport] ?? 0) + 1;
     if (sc > opts.maxPerSport) return false;
     if (isCombatSport(c.sport) && combatCount >= maxCombatLegs) return false;
+    if (c.confidence === "medium" && mediumConfCount >= maxMediumConfLegs) return false;
+
+    // Same-team player-prop cap — all sports
+    if (c.pickType === "player_prop" && c.teamId) {
+      const teamKey = `${c.sport}:${c.teamId}`;
+      const tp = (propsByTeam.get(teamKey) ?? 0) + 1;
+      if (tp > maxSameTeamProps) return false;
+    }
+
+    // MLB hitter-per-team cap — separate from generic same-team-props.
+    // Enforces max 1 hitter per team in SAFE/CASHOUT even if other same-team
+    // props (e.g. pitcher K) also exist.
+    if (isMlbHitterProp(c) && c.teamId) {
+      const h = (hittersByTeam.get(c.teamId) ?? 0) + 1;
+      if (h > maxHittersPerTeam) return false;
+    }
+
     picked.push(c);
     gameCounts.set(c.gameId, gc);
     sportC[c.sport] = sc;
     if (isCombatSport(c.sport)) combatCount++;
+    if (c.confidence === "medium") mediumConfCount++;
+    if (c.pickType === "player_prop" && c.teamId) {
+      const teamKey = `${c.sport}:${c.teamId}`;
+      propsByTeam.set(teamKey, (propsByTeam.get(teamKey) ?? 0) + 1);
+    }
+    if (isMlbHitterProp(c) && c.teamId) {
+      hittersByTeam.set(c.teamId, (hittersByTeam.get(c.teamId) ?? 0) + 1);
+    }
     recordHitterPick(c, stackCtx);
     remaining.splice(idx, 1);
     return true;
@@ -406,6 +663,35 @@ function greedyBuild(
   return picked;
 }
 
+/**
+ * Reorder picked legs for cash-out friendliness:
+ * highest hit probability first, highest payout leg last when possible.
+ * Does not change which legs are included — only their order.
+ */
+function orderLegsForCashout(legs: ValueBetCandidate[]): ValueBetCandidate[] {
+  if (legs.length <= 2) return [...legs];
+  // Sort by hit prob desc, then odds asc (favorites first). Then move the
+  // single biggest-payout leg to the end as the upside capper.
+  const sorted = [...legs].sort((a, b) => {
+    const ap = a.modelProbability ?? 0;
+    const bp = b.modelProbability ?? 0;
+    if (Math.abs(ap - bp) > 0.01) return bp - ap;
+    return a.americanOdds - b.americanOdds;
+  });
+  // If the last leg is not already the biggest payout (largest american odds),
+  // swap it with the leg that has the biggest payout, but only if moving keeps
+  // first-leg hit probability high.
+  let maxOddsIdx = 0;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].americanOdds > sorted[maxOddsIdx].americanOdds) maxOddsIdx = i;
+  }
+  if (maxOddsIdx !== sorted.length - 1 && maxOddsIdx !== 0) {
+    const big = sorted.splice(maxOddsIdx, 1)[0];
+    sorted.push(big);
+  }
+  return sorted;
+}
+
 // ── Tier configuration ────────────────────────────────────────────────────────
 
 function tierConfig(mode: ParlayBuildMode): {
@@ -414,6 +700,7 @@ function tierConfig(mode: ParlayBuildMode): {
 } {
   if (mode === "safe")       return { min: 2, target: 3, max: 4,  maxPerSport: 2 };
   if (mode === "balanced")   return { min: 3, target: 4, max: 5,  maxPerSport: 3 };
+  if (mode === "cashout")    return { min: 3, target: 3, max: 4,  maxPerSport: 2 };
   return                            { min: 4, target: 5, max: 6,  maxPerSport: 4 };
 }
 
@@ -440,7 +727,7 @@ export function optimizeSmartParlays(
   // ── Best value: target legs, ML-ranked ───────────────────────────────────
   let legsBest = greedyBuild(pool, target, {
     maxPerSport,
-    preferSafer: false,
+    preferSafer: mode === "cashout", // cashout leans safer in selection
     preferPayout: false,
     mode,
     weights,
@@ -451,6 +738,7 @@ export function optimizeSmartParlays(
   if (legsBest.length < 2) {
     legsBest = pool.filter((c) => c.confidence !== "low").slice(0, Math.min(target, Math.max(2, pool.length)));
   }
+  if (mode === "cashout") legsBest = orderLegsForCashout(legsBest);
   const bestValue = scoreParlay(
     legsBest.length ? legsBest : pool.slice(0, Math.min(3, pool.length)),
     mode,
@@ -458,23 +746,25 @@ export function optimizeSmartParlays(
   );
 
   // ── Safer: min legs, prioritise hit probability ───────────────────────────
-  const legsSafe = greedyBuild(pool, min, {
+  let legsSafe = greedyBuild(pool, min, {
     maxPerSport,
     preferSafer: true,
     preferPayout: false,
     mode,
     weights,
   });
+  if (mode === "cashout") legsSafe = orderLegsForCashout(legsSafe);
   const safer = scoreParlay(legsSafe, mode, weights);
 
   // ── Higher payout: max legs, more underdogs ───────────────────────────────
-  const legsPay = greedyBuild(pool, max, {
+  let legsPay = greedyBuild(pool, max, {
     maxPerSport: maxPerSport + 1,
     preferSafer: false,
     preferPayout: true,
     mode,
     weights,
   });
+  if (mode === "cashout") legsPay = orderLegsForCashout(legsPay);
   const higherPayout = scoreParlay(legsPay, mode, weights);
 
   return { bestValue, safer, higherPayout };

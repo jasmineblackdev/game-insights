@@ -1,6 +1,6 @@
 import type { ConfidenceLevel, GamePrediction, League } from "@/data/mockGames";
 
-export type ParlayBuildMode = "safe" | "balanced" | "aggressive";
+export type ParlayBuildMode = "safe" | "balanced" | "aggressive" | "cashout";
 
 export type ValuePickType = "team_pick" | "spread" | "total" | "player_prop";
 
@@ -82,6 +82,12 @@ export interface ValueBetCandidate {
   matchupLabel: string;
   lineMovementDeltaPp?: number | null;
   /**
+   * Human-readable local start label (e.g. "7:30 PM ET"). Optional.
+   * Used as a proxy for start-time diversity in the Cash-Out parlay mode.
+   * When absent, cash-out stagger scoring falls back to gameId distinctness.
+   */
+  gameTimeLabel?: string;
+  /**
    * NFL-only: pre-computed injury position multiplier.
    * Populated by buildCandidates when game.league === "nfl" and injury data
    * is present. Positive = injuries create opportunity; negative = injuries
@@ -126,6 +132,15 @@ export interface SmartParlayResult {
   uncertaintyPenalty: number;
   smartParlayScore: number;
   warnings: string[];
+  /**
+   * Composite fragility score 0–100 (higher = more fragile).
+   * Derived from weakest leg quality, medium-confidence density,
+   * same-game exposure, and volatility concentration.
+   * Safe tier rejects parlays with fragilityScore ≥ 55; balanced penalises.
+   */
+  fragilityScore?: number;
+  /** Lowest per-leg score in the parlay (0–1). */
+  weakestLegScore?: number;
 }
 
 export interface ParlayTriple {

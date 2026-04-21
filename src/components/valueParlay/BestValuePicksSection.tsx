@@ -227,6 +227,7 @@ export function BestValuePicksSection({
     if (leagueFilter !== "all") list = list.filter((c) => c.sport === leagueFilter);
     if (riskPreset === "safe") list = list.filter((c) => c.riskBand === "low" || c.riskBand === "moderate");
     if (riskPreset === "balanced") list = list.filter((c) => c.riskBand !== "high");
+    if (riskPreset === "cashout") list = list.filter((c) => c.riskBand === "low" || c.riskBand === "moderate");
     return list;
   }, [candidates, pickKind, leagueFilter, riskPreset]);
 
@@ -303,7 +304,7 @@ export function BestValuePicksSection({
         </div>
         <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">MODE PRESET (PARLAY)</p>
         <div className="flex flex-wrap gap-2">
-          {(["all", "safe", "balanced", "aggressive"] as const).map((k) => (
+          {(["all", "safe", "balanced", "aggressive", "cashout"] as const).map((k) => (
             <button
               key={k}
               type="button"

@@ -143,6 +143,7 @@ function moneylineCandidate(
     sportsbookKey: meta.sportsbookKey,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
     lineMovementDeltaPp: lineDelta,
+    gameTimeLabel: game.gameTime,
     injuryImpactAdj,
   };
 }
@@ -240,6 +241,7 @@ function totalCandidate(
     riskNote: buildRiskNote(game, flags, risk),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    gameTimeLabel: game.gameTime,
     injuryImpactAdj,
   };
 }
@@ -328,6 +330,7 @@ function spreadCandidate(
     riskNote: buildRiskNote(game, flags, risk),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    gameTimeLabel: game.gameTime,
     injuryImpactAdj,
   };
 }
@@ -410,6 +413,7 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     riskNote: [row.riskFactor, riskBandLabel(riskBand(risk))].join(" · "),
     isRecommended: recommended,
     matchupLabel: `${game.awayTeam.abbreviation} @ ${game.homeTeam.abbreviation}`,
+    gameTimeLabel: game.gameTime,
     injuryImpactAdj,
   };
 }
@@ -678,6 +682,7 @@ export function buildEnrichedPropCandidates(
       exclusionReason,
       matchupLabel:        `${pred.team} vs ${pred.opponent}`,
       lineMovementDeltaPp: pred.line_delta ?? null,
+      gameTimeLabel:       pred.game_time,
     });
   }
 

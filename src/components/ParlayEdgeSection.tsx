@@ -65,6 +65,7 @@ function confidenceColor(c: "high" | "medium" | "low") {
 function riskColor(mode: ParlayBuildMode) {
   if (mode === "safe")       return "text-confidence-high";
   if (mode === "balanced")   return "text-amber-500";
+  if (mode === "cashout")    return "text-sky-500";
   return "text-destructive";
 }
 
@@ -366,6 +367,7 @@ function ParlayCard({ parlay }: { parlay: AutoParlay }) {
     safe:       "border-confidence-high/30 bg-confidence-high/5",
     balanced:   "border-amber-500/30 bg-amber-500/5",
     aggressive: "border-destructive/30 bg-destructive/5",
+    cashout:    "border-sky-500/30 bg-sky-500/5",
   };
 
   const sportTags = parlay.sportMix.split(",");

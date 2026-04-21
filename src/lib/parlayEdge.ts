@@ -149,6 +149,7 @@ const PARLAY_STRUCTURE: Record<
   safe:       { targetLegs: 3, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
   balanced:   { targetLegs: 4, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
   aggressive: { targetLegs: 6, maxTier3: 1, maxPerSport: 3, minTier1: 2 },
+  cashout:    { targetLegs: 3, maxTier3: 0, maxPerSport: 2, minTier1: 2 },
 };
 
 // ─── Odds sweet-spot bonus ───────────────────────────────────────
@@ -187,7 +188,8 @@ export function scoreLeg(c: ValueBetCandidate, mode: ParlayBuildMode): number {
   // NBA 0.85: rotations/pace confirm after Q1, so pre-game is slightly discounted.
   const timingW = TIMING_CONFIGS[c.sport as League]?.pregameWeight ?? 1.0;
 
-  if (mode === "safe") {
+  if (mode === "safe" || mode === "cashout") {
+    // cashout reuses safe leg-scoring; structural ordering is applied downstream
     return (
       (c.modelProbability * 0.40 +
       confidence         * 0.25 +
@@ -520,6 +522,7 @@ export function generateParlayEdge(
 export function parlayModeLabel(mode: ParlayBuildMode): string {
   if (mode === "safe")       return "Safe";
   if (mode === "balanced")   return "Balanced";
+  if (mode === "cashout")    return "Cash-Out";
   return "Aggressive";
 }
 
@@ -529,6 +532,9 @@ export function parlayModeDescription(mode: ParlayBuildMode): string {
   }
   if (mode === "balanced") {
     return "4-leg · mixed sports · edge + probability balance";
+  }
+  if (mode === "cashout") {
+    return "3-leg · staggered starts · high-prob first · upside last";
   }
   return "6-leg · payout-optimised · max edge · high variance tolerated";
 }
