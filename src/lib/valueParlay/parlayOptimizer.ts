@@ -80,6 +80,17 @@ function correlationPenalty(legs: ValueBetCandidate[]): number {
   for (const n of byCorr.values()) {
     if (n >= 2) pen += 8;
   }
+  // Dependency-chain stacking — e.g. two same-team hitters in the same game.
+  // Mild soft penalty: doesn't reject, just deprioritises. Hard rejection
+  // happens only in the cash-out single-sport fallback builder.
+  const chainInGame = new Map<string, number>();
+  for (const l of legs) {
+    const k = `${l.gameId}:${dependencyChainKey(l)}`;
+    chainInGame.set(k, (chainInGame.get(k) ?? 0) + 1);
+  }
+  for (const n of chainInGame.values()) {
+    if (n >= 2) pen += 10 * (n - 1);
+  }
   return Math.min(100, pen);
 }
 
@@ -768,22 +779,35 @@ function greedyBuild(
 
 /**
  * Reorder picked legs for cash-out friendliness:
- * highest hit probability first, highest payout leg last when possible.
- * Does not change which legs are included — only their order.
+ *   - Highest hit-probability legs in early positions
+ *   - Lowest-volatility legs in early positions (pushes HR/SB/long-shot style
+ *     props out of leg 1 so the first leg is more likely to resolve cleanly)
+ *   - Biggest-payout leg as the final "upside capper"
+ *
+ * Target structure: 2 high-probability / low-volatility legs + 1 moderate
+ * probability / higher-payout leg last. Does not change which legs are
+ * included — only their order.
  */
 function orderLegsForCashout(legs: ValueBetCandidate[]): ValueBetCandidate[] {
   if (legs.length <= 2) return [...legs];
-  // Sort by hit prob desc, then odds asc (favorites first). Then move the
-  // single biggest-payout leg to the end as the upside capper.
+
+  // Combined ordering score for early-position preference.
+  // hit_prob weight dominates; volatility applies a secondary nudge.
+  const earlyRank = (c: ValueBetCandidate): number => {
+    const hit = c.modelProbability ?? 0;
+    const volPenalty = (c.volatilityScore ?? 0) / 100;     // 0–1
+    return hit - volPenalty * 0.15;
+  };
+
   const sorted = [...legs].sort((a, b) => {
-    const ap = a.modelProbability ?? 0;
-    const bp = b.modelProbability ?? 0;
-    if (Math.abs(ap - bp) > 0.01) return bp - ap;
-    return a.americanOdds - b.americanOdds;
+    const delta = earlyRank(b) - earlyRank(a);
+    if (Math.abs(delta) > 0.005) return delta;
+    return a.americanOdds - b.americanOdds; // tiebreaker: favorites first
   });
-  // If the last leg is not already the biggest payout (largest american odds),
-  // swap it with the leg that has the biggest payout, but only if moving keeps
-  // first-leg hit probability high.
+
+  // Move the biggest-payout leg to the end as the upside capper, only when
+  // doing so doesn't displace a genuinely higher-probability leg from the
+  // final slot. Skips if the biggest payout is already first (keep anchor).
   let maxOddsIdx = 0;
   for (let i = 1; i < sorted.length; i++) {
     if (sorted[i].americanOdds > sorted[maxOddsIdx].americanOdds) maxOddsIdx = i;

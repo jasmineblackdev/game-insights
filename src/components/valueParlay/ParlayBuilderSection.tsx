@@ -435,8 +435,16 @@ export function ParlayBuilderSection({
       {!gamesLoading && candidates.length > 0 ? (
         <>
           <div className="grid lg:grid-cols-12 gap-4">
-            <div className="lg:col-span-5 rounded-xl border border-border bg-card/70 p-4 sm:p-5 space-y-3 shadow-sm">
-              <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">BUILD MODE</p>
+            <div className="lg:col-span-5 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] p-4 sm:p-5 space-y-3 shadow-sm">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <Wrench className="w-4 h-4 shrink-0" />
+                <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+                  Regular Parlay
+                </p>
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                Maximise probability all legs hit. Pick a tier:
+              </p>
               <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 w-full sm:w-auto">
                 {(["safe", "balanced", "aggressive"] as const).map((m) => (
                   <button
