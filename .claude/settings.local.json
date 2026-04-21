@@ -26,7 +26,13 @@
       "Bash(node_modules/.bin/esbuild src/components/GameDetailView.tsx --bundle=false --loader:.tsx=tsx)",
       "Bash(node_modules/.bin/esbuild:*)",
       "Bash(echo \"esbuild EXIT:$?\" npx tsc --noEmit)",
-      "Bash(echo \"tsc EXIT:$?\")"
+      "Bash(echo \"tsc EXIT:$?\")",
+      "Bash(echo \"tsc_exit=$?\")",
+      "Bash(npx eslint *)",
+      "Bash(echo \"eslint_exit=$?\")",
+      "Bash(npx vitest *)",
+      "Bash(echo \"vitest_exit=$?\")",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }
