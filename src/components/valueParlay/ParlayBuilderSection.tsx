@@ -17,9 +17,9 @@ import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 import { useRoiBySport, useRoiByMarketType, useParlayModelMix, type ParlayModelMixRow } from "@/hooks/useAnalyticsDashboard";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
-  safe: "Safe (3–5 legs)",
-  balanced: "Balanced (4–8)",
-  aggressive: "Aggressive (6–12)",
+  safe: "Safe (2 legs · +120 to +320)",
+  balanced: "Balanced (3 legs · +250 to +550)",
+  aggressive: "Aggressive (5–6 legs)",
   cashout: "Cash-Out (3 legs, staggered)",
 };
 

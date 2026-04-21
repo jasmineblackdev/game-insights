@@ -162,12 +162,15 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   // Clamped to ±0.08 at source; never overrides edge/ML/confidence.
   const injuryAdj = Math.min(0.08, Math.max(-0.08, c.injuryImpactAdj ?? 0));
 
+  // Weight schedule: edge remains primary driver but ml_hit_probability and
+  // stability_score get a slight bump so fragile legs are less likely to rank
+  // into safe-tier parlays. Weights sum to ~1.0 with additive analytics adj.
   return (
-    edge01         * 0.32 +
-    hitProb01      * 0.22 +
-    confAdjusted   * 0.18 +
-    timing01       * 0.12 +
-    stability01    * 0.08 +
+    edge01         * 0.30 +
+    hitProb01      * 0.24 +
+    confAdjusted   * 0.17 +
+    timing01       * 0.11 +
+    stability01    * 0.10 +
     marketAdj      * 0.05 +
     sportAdj       * 0.03 +
     mlbPropAdj            + // additive; bounded by mlbPropPriorityAdjustment()
@@ -465,6 +468,17 @@ function scoreParlay(
   const targetOddsBonus = oddsInRangeBonus(combined, mode); // 0, 0.5, or 1
   const legOddsInRange  = legs.filter((l) => oddsInRangePerLeg(mode, l.americanOdds)).length / legs.length;
 
+  // Stat-type diversity — discourages multiple legs that share the same
+  // outcome driver (e.g. two pass-dependent props, two same-game hitters).
+  // Pure player_prop legs diversify on statType; team bets on marketType+pickType.
+  const driverKeys = legs.map((l) =>
+    l.pickType === "player_prop"
+      ? `prop:${(l.statType ?? "").toLowerCase()}`
+      : `team:${l.pickType}`
+  );
+  const uniqueDrivers = new Set(driverKeys).size;
+  const statTypeDiv   = uniqueDrivers / legs.length; // 1.0 = all different
+
   // Cash-out structure bonus — reward: staggered start times, ordered by
   // hit probability descending, varied stat types, and cross-sport mix.
   let cashoutStructure = 0;
@@ -492,13 +506,17 @@ function scoreParlay(
     marketStrScore  * 0.07 +
     confSpreadScore * 0.06 -
     corrPen01       * 0.07 -
-    volPen01        * 0.05 -
+    // Slightly stronger volatility penalty so low-stability combinations
+    // cost more at the parlay level (complements stability weight bump in
+    // computeLegScore).
+    volPen01        * 0.06 -
     // Weakest-leg penalty: normalized deficit scaled by tier weight.
     // Max effect at ~0.15 deficit (full floor miss) → weakestPenWeight*1.0
     Math.min(1, weakestDeficit / 0.15) * weakestPenWeight -
     fragPen01       * fragPenWeight +
     targetOddsBonus * 0.03 +
     legOddsInRange  * 0.02 +
+    statTypeDiv     * 0.02 +
     cashoutStructure * 0.04;
 
   // Card confidence
@@ -701,8 +719,10 @@ function tierConfig(mode: ParlayBuildMode): {
   min: number; target: number; max: number;
   maxPerSport: number;
 } {
-  if (mode === "safe")       return { min: 2, target: 3, max: 4,  maxPerSport: 2 };
-  if (mode === "balanced")   return { min: 3, target: 4, max: 5,  maxPerSport: 3 };
+  // SAFE targets 2-leg parlays at roughly +120 to +320 combined odds.
+  // BALANCED targets 3-leg parlays at roughly +250 to +550.
+  if (mode === "safe")       return { min: 2, target: 2, max: 3,  maxPerSport: 2 };
+  if (mode === "balanced")   return { min: 3, target: 3, max: 4,  maxPerSport: 3 };
   if (mode === "cashout")    return { min: 3, target: 3, max: 4,  maxPerSport: 2 };
   return                            { min: 4, target: 5, max: 6,  maxPerSport: 4 };
 }
@@ -726,6 +746,25 @@ export function optimizeSmartParlays(
   if (!pool.length) {
     pool = candidates.filter((c) => c.edge > 0 && c.confidence !== "low" && c.edge >= 0.03);
   }
+
+  // SAFE hard-reject threshold on fragility. After scoring, if the parlay
+  // has fragilityScore ≥ this value, drop the weakest leg and rescore.
+  // Repeats until fragility is acceptable or legs fall below the tier min.
+  const SAFE_FRAGILITY_REJECT = 55;
+  const swapOutFragileLegs = (legs: ValueBetCandidate[], minLegs: number): ValueBetCandidate[] => {
+    if (mode !== "safe") return legs;
+    let current = [...legs];
+    while (current.length > minLegs) {
+      const scored = scoreParlay(current, mode, weights);
+      if ((scored.fragilityScore ?? 0) < SAFE_FRAGILITY_REJECT) return current;
+      // Drop the weakest leg by computeLegScore
+      const perLeg = current.map((l) => ({ l, s: computeLegScore(l, weights) }));
+      perLeg.sort((a, b) => a.s - b.s);
+      const weakest = perLeg[0].l;
+      current = current.filter((x) => x.id !== weakest.id);
+    }
+    return current;
+  };
 
   // Cash-Out mode: require cross-sport diversity — prefer 1 leg per sport.
   // If the pool can't support that many distinct sports, fall back to 2/sport.
@@ -771,6 +810,7 @@ export function optimizeSmartParlays(
     legsBest = pool.filter((c) => c.confidence !== "low").slice(0, Math.min(target, Math.max(2, pool.length)));
   }
   if (mode === "cashout") legsBest = orderLegsForCashout(legsBest);
+  legsBest = swapOutFragileLegs(legsBest, min);
   const bestValue = scoreParlay(
     legsBest.length ? legsBest : pool.slice(0, Math.min(3, pool.length)),
     mode,
@@ -788,6 +828,7 @@ export function optimizeSmartParlays(
         weights,
       });
   if (mode === "cashout") legsSafe = orderLegsForCashout(legsSafe);
+  legsSafe = swapOutFragileLegs(legsSafe, min);
   const safer = scoreParlay(legsSafe, mode, weights);
 
   // ── Higher payout: max legs, more underdogs ───────────────────────────────
@@ -801,6 +842,7 @@ export function optimizeSmartParlays(
         weights,
       });
   if (mode === "cashout") legsPay = orderLegsForCashout(legsPay);
+  legsPay = swapOutFragileLegs(legsPay, min);
   const higherPayout = scoreParlay(legsPay, mode, weights);
 
   return { bestValue, safer, higherPayout };

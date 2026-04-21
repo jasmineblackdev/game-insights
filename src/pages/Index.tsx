@@ -294,8 +294,8 @@ const PARLAY_TIERS: {
   {
     mode: "safe",
     label: "Safe Parlay",
-    legs: "3–4 legs",
-    desc: "High-confidence, low-correlation picks. Best for consistent returns.",
+    legs: "2 legs",
+    desc: "High-confidence picks · target +120 to +320 · max 1 medium-conf leg.",
     hitProb: "~65–72%",
     color: "border-emerald-500/40 bg-emerald-500/5",
     badge: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
@@ -303,8 +303,8 @@ const PARLAY_TIERS: {
   {
     mode: "balanced",
     label: "Balanced Parlay",
-    legs: "4–6 legs",
-    desc: "Mix of safe and high-upside legs. Strong edge-to-risk ratio.",
+    legs: "3 legs",
+    desc: "Edge + probability balance · target +250 to +550 combined odds.",
     hitProb: "~45–55%",
     color: "border-amber-500/40 bg-amber-500/5",
     badge: "bg-amber-500/15 text-amber-700 dark:text-amber-400",

@@ -146,8 +146,8 @@ const PARLAY_STRUCTURE: Record<
   ParlayBuildMode,
   { targetLegs: number; maxTier3: number; maxPerSport: number; minTier1: number }
 > = {
-  safe:       { targetLegs: 3, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
-  balanced:   { targetLegs: 4, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
+  safe:       { targetLegs: 2, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
+  balanced:   { targetLegs: 3, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
   aggressive: { targetLegs: 6, maxTier3: 1, maxPerSport: 3, minTier1: 2 },
   cashout:    { targetLegs: 3, maxTier3: 0, maxPerSport: 2, minTier1: 2 },
 };
@@ -528,10 +528,10 @@ export function parlayModeLabel(mode: ParlayBuildMode): string {
 
 export function parlayModeDescription(mode: ParlayBuildMode): string {
   if (mode === "safe") {
-    return "3-leg · low volatility · 2 Tier-1 sports · max 1 combat leg";
+    return "2-leg · +120 to +320 target · low volatility · max 1 medium-conf leg";
   }
   if (mode === "balanced") {
-    return "4-leg · mixed sports · edge + probability balance";
+    return "3-leg · +250 to +550 target · edge + probability balance";
   }
   if (mode === "cashout") {
     return "3-leg · staggered starts · high-prob first · upside last";
