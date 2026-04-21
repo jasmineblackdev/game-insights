@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Copy, RefreshCw, Shuffle, Trash2, Wallet, Wrench, Zap } from "lucide-react";
+import { Copy, Hourglass, RefreshCw, Shuffle, Trash2, Wallet, Wrench, Zap } from "lucide-react";
 import type { League } from "@/data/mockGames";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import type { ParlayBuildMode } from "@/lib/valueParlay/types";
+import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
+import { optimizeForMode, type AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
 import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
 import { parlayReasons } from "@/lib/valueParlay/parlayReasons";
 import { useQuery } from "@tanstack/react-query";
@@ -31,12 +32,11 @@ function TierPerformanceStrip() {
   const rows = data as ParlayModelMixRow[];
   if (!rows.length) return null;
 
-  const TIERS = ["safe", "balanced", "aggressive", "cashout"] as const;
+  const TIERS = ["safe", "balanced", "aggressive"] as const;
   const TIER_COLOR: Record<string, string> = {
     safe:       "text-emerald-500",
     balanced:   "text-yellow-500",
     aggressive: "text-orange-500",
-    cashout:    "text-sky-500",
   };
 
   const byTier = rows.reduce<Record<string, { resolved: number; hits: number }>>((acc, r) => {
@@ -76,6 +76,137 @@ function leagueShort(l: League) {
   return l === "soccer" ? "EPL" : l.toUpperCase();
 }
 
+// ── Cash-Out Parlay section ───────────────────────────────────────────────────
+// Isolated from Safe/Balanced/Aggressive. Builds a 3-leg parlay optimised
+// for early cash-out — staggered start times, highest-probability legs first,
+// biggest-payout leg last. Does not read or modify parlayMode.
+
+function CashOutParlaySection({
+  candidates,
+  analyticsWeights,
+  setBuilderLegs,
+  disabled,
+}: {
+  candidates: ValueBetCandidate[];
+  analyticsWeights: AnalyticsWeights;
+  setBuilderLegs: (legs: ValueBetCandidate[]) => void;
+  disabled: boolean;
+}) {
+  const [preview, setPreview] = useState<SmartParlayResult | null>(null);
+
+  const generate = () => {
+    if (!candidates.length) {
+      toast.message("No candidates available");
+      return;
+    }
+    const r = optimizeForMode(candidates, "cashout", analyticsWeights);
+    if (!r.legs.length) {
+      toast.error("Could not build a cash-out parlay from the current pool");
+      setPreview(null);
+      return;
+    }
+    setPreview(r);
+    toast.success("Cash-Out parlay generated");
+  };
+
+  const apply = () => {
+    if (!preview?.legs.length) return;
+    setBuilderLegs(preview.legs);
+    toast.success("Cash-Out legs applied to slip");
+  };
+
+  return (
+    <div className="rounded-2xl border border-sky-500/30 bg-sky-500/[0.04] p-4 sm:p-5 space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sky-600 dark:text-sky-400">
+            <Hourglass className="w-5 h-5 shrink-0" />
+            <span className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+              Cash-Out Parlay
+            </span>
+          </div>
+          <h3 className="font-display font-bold text-lg text-foreground">Cash-out friendly build</h3>
+          <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+            3 legs, staggered start times. Highest hit-probability legs resolve first so you can
+            take early cash-out offers with profit. Separate from Safe / Balanced / Aggressive.
+          </p>
+        </div>
+        <Button size="sm" variant="default" className="gap-1 shrink-0" onClick={generate} disabled={disabled}>
+          <Hourglass className="w-3.5 h-3.5" />
+          Generate
+        </Button>
+      </div>
+
+      {preview ? (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div className="rounded-lg bg-background/60 border border-border/60 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground">Legs</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">{preview.legs.length}</p>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border/60 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground">Payout</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">
+                {preview.projectedPayoutMultiplier.toFixed(2)}x
+              </p>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border/60 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground">Proj. hit</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">
+                {(preview.projectedHitProbability * 100).toFixed(1)}%
+              </p>
+            </div>
+            <div className="rounded-lg bg-background/60 border border-border/60 px-3 py-2">
+              <p className="text-[10px] text-muted-foreground">American</p>
+              <p className="text-lg font-bold tabular-nums text-foreground">
+                {preview.combinedAmericanOdds > 0 ? "+" : ""}{preview.combinedAmericanOdds}
+              </p>
+            </div>
+          </div>
+
+          <ol className="space-y-1.5 text-xs">
+            {preview.legs.map((l, i) => (
+              <li
+                key={l.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-background/40 px-3 py-2"
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <span className="text-[10px] font-bold tabular-nums text-sky-600 dark:text-sky-400 mt-0.5">
+                    #{i + 1}
+                  </span>
+                  <div className="min-w-0 space-y-0.5">
+                    <p className="font-semibold text-foreground text-sm truncate">{l.selectionLabel}</p>
+                    <p className="text-[11px] text-muted-foreground tabular-nums">
+                      {leagueShort(l.sport)} · {l.gameTimeLabel ?? "time TBD"} ·{" "}
+                      {l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds} · hit{" "}
+                      {((l.modelProbability ?? 0) * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" className="gap-1" onClick={apply}>
+              <Zap className="w-3.5 h-3.5" />
+              Apply to slip
+            </Button>
+            <Button size="sm" variant="outline" onClick={generate}>
+              <RefreshCw className="w-3.5 h-3.5" />
+              Regenerate
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground italic">
+          Click Generate to preview a 3-leg cash-out parlay. It will not change your current slip.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ParlayBuilderSection({
   games,
   oddsMap,
@@ -104,8 +235,10 @@ export function ParlayBuilderSection({
   const {
     parlayMode,
     setParlayMode,
+    analyticsWeights,
     setAnalyticsWeights,
     builderLegs,
+    setBuilderLegs,
     removeValueLeg,
     clearValueBuilder,
     autoBuildFromCandidates,
@@ -286,7 +419,7 @@ export function ParlayBuilderSection({
             <div className="lg:col-span-5 rounded-xl border border-border bg-card/70 p-4 sm:p-5 space-y-3 shadow-sm">
               <p className="text-[10px] font-semibold tracking-wider text-muted-foreground">BUILD MODE</p>
               <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 w-full sm:w-auto">
-                {(["safe", "balanced", "aggressive", "cashout"] as const).map((m) => (
+                {(["safe", "balanced", "aggressive"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -499,6 +632,13 @@ export function ParlayBuilderSection({
               </p>
             </div>
           ) : null}
+
+          <CashOutParlaySection
+            candidates={candidates}
+            analyticsWeights={analyticsWeights}
+            setBuilderLegs={setBuilderLegs}
+            disabled={actionsDisabled}
+          />
         </>
       ) : null}
     </div>
