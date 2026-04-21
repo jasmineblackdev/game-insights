@@ -36,6 +36,7 @@ import { easternYmd, fetchNbaGamePredictions } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbGamePredictions } from "@/lib/mlbEspn";
 import { fetchBoxingPredictions } from "@/lib/boxingFetch";
+import { fetchMmaPredictions } from "@/lib/mmaFetch";
 import {
   type EdgeCandidate,
   type EdgeCardSize,
@@ -223,6 +224,11 @@ function EdgeCardPageInner() {
       {
         queryKey: ["boxing-predictions"],
         queryFn: fetchBoxingPredictions,
+        staleTime: 5 * 60 * 1000,
+      },
+      {
+        queryKey: ["mma-predictions"],
+        queryFn: fetchMmaPredictions,
         staleTime: 5 * 60 * 1000,
       },
     ],
