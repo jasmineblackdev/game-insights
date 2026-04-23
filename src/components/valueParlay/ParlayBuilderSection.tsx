@@ -9,7 +9,7 @@ import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valu
 import { formatBuilderParlayShare } from "@/lib/valueParlay/parlayBotFormatting";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
-import { optimizeForMode, type AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
+import { optimizeForMode, optimizeSmartParlays, type AnalyticsWeights } from "@/lib/valueParlay/parlayOptimizer";
 import { RankedLiveParlayPresets } from "@/components/valueParlay/RankedLiveParlayPresets";
 import { parlayReasons } from "@/lib/valueParlay/parlayReasons";
 import { useQuery } from "@tanstack/react-query";
@@ -346,6 +346,10 @@ export function ParlayBuilderSection({
     logParlayLegRejections(candidates, parlayMode).catch(() => {});
   }, [candidates, parlayMode, propData, filterPropsByGameIds]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
+  const cashoutTriple = useMemo(
+    () => (tripleOpen ? optimizeSmartParlays(candidates, "cashout", analyticsWeights) : null),
+    [tripleOpen, candidates, analyticsWeights]
+  );
 
   const shareText = useMemo(
     () => (builderLegs.length ? formatBuilderParlayShare(builderLegs, builderMetrics) : ""),
@@ -589,31 +593,88 @@ export function ParlayBuilderSection({
           </div>
 
           {triple ? (
-            <div className="grid md:grid-cols-3 gap-3 text-xs">
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5">
-                <p className="font-display font-bold text-foreground">Best value parlay</p>
-                <p className="text-muted-foreground">{triple.bestValue.legs.length} legs</p>
-                <p className="tabular-nums font-semibold">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
-                <p className="tabular-nums text-muted-foreground">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
-                {parlayReasons(triple.bestValue).map((r) => (
-                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
-                ))}
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground px-0.5">
+                Best parlays today
+              </p>
+              <div className="grid md:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Best value parlay</p>
+                  <p className="text-muted-foreground">{triple.bestValue.legs.length} legs</p>
+                  <p className="tabular-nums font-semibold">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
+                  <p className="tabular-nums text-muted-foreground">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
+                  {parlayReasons(triple.bestValue).map((r) => (
+                    <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Safer alternative</p>
+                  <p className="text-muted-foreground">{triple.safer.legs.length} legs</p>
+                  <p className="tabular-nums font-semibold">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
+                  {parlayReasons(triple.safer).map((r) => (
+                    <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                  ))}
+                </div>
+                <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Higher payout</p>
+                  <p className="text-muted-foreground">{triple.higherPayout.legs.length} legs</p>
+                  <p className="tabular-nums font-semibold">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
+                  {parlayReasons(triple.higherPayout).map((r) => (
+                    <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
+                  ))}
+                </div>
               </div>
-              <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
-                <p className="font-display font-bold text-foreground">Safer alternative</p>
-                <p className="text-muted-foreground">{triple.safer.legs.length} legs</p>
-                <p className="tabular-nums font-semibold">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
-                {parlayReasons(triple.safer).map((r) => (
-                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
-                ))}
+            </div>
+          ) : null}
+
+          {cashoutTriple ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 px-0.5">
+                <Hourglass className="w-3.5 h-3.5 text-sky-500" />
+                <p className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">
+                  Cash-Out parlays today
+                </p>
               </div>
-              <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
-                <p className="font-display font-bold text-foreground">Higher payout</p>
-                <p className="text-muted-foreground">{triple.higherPayout.legs.length} legs</p>
-                <p className="tabular-nums font-semibold">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
-                {parlayReasons(triple.higherPayout).map((r) => (
-                  <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
-                ))}
+              <div className="grid md:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl border border-sky-500/30 bg-sky-500/[0.06] p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Best cash-out</p>
+                  <p className="text-muted-foreground">{cashoutTriple.bestValue.legs.length} legs · staggered</p>
+                  <p className="tabular-nums font-semibold">
+                    Hit {(cashoutTriple.bestValue.projectedHitProbability * 100).toFixed(1)}%
+                  </p>
+                  <p className="tabular-nums text-muted-foreground">
+                    Payout {cashoutTriple.bestValue.projectedPayoutMultiplier.toFixed(2)}x
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
+                    Legs ordered high-prob → upside. Supports early cash-out offers.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Safer cash-out</p>
+                  <p className="text-muted-foreground">{cashoutTriple.safer.legs.length} legs · safer first</p>
+                  <p className="tabular-nums font-semibold">
+                    Hit {(cashoutTriple.safer.projectedHitProbability * 100).toFixed(1)}%
+                  </p>
+                  <p className="tabular-nums text-muted-foreground">
+                    Payout {cashoutTriple.safer.projectedPayoutMultiplier.toFixed(2)}x
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
+                    Prioritises early-leg resolution. Lower variance.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-sky-400/30 bg-sky-400/[0.05] p-4 space-y-1.5">
+                  <p className="font-display font-bold text-foreground">Upside cash-out</p>
+                  <p className="text-muted-foreground">{cashoutTriple.higherPayout.legs.length} legs · capper last</p>
+                  <p className="tabular-nums font-semibold">
+                    Payout {cashoutTriple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x
+                  </p>
+                  <p className="tabular-nums text-muted-foreground">
+                    Hit {(cashoutTriple.higherPayout.projectedHitProbability * 100).toFixed(1)}%
+                  </p>
+                  <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
+                    Safer early legs, bigger payout leg last for cash-out growth.
+                  </p>
+                </div>
               </div>
             </div>
           ) : null}

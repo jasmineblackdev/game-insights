@@ -637,20 +637,50 @@ function scoreParlay(
   const uniqueDrivers = new Set(driverKeys).size;
   const statTypeDiv   = uniqueDrivers / legs.length; // 1.0 = all different
 
-  // Cash-out structure bonus — reward: staggered start times, ordered by
-  // hit probability descending, varied stat types, and cross-sport mix.
+  // Cash-out structure score — four equal-ish weighted terms per the spec.
+  //
+  //   cashoutScore = timeSeparation*0.30 + earlyLegStrength*0.30
+  //                + independence*0.20   + payoutBalance*0.20
+  //
+  // Used as a secondary ranking signal via cashoutStructure * 0.04 below.
+  // Does not influence Regular parlay scoring (mode !== "cashout" skips).
   let cashoutStructure = 0;
   if (mode === "cashout" && legs.length >= 2) {
-    const stagger = staggerDiversity(legs);
-    // Check ordering: first leg should have higher hit prob than last
-    const firstProb = legs[0].modelProbability;
-    const lastProb  = legs[legs.length - 1].modelProbability;
-    const orderedBonus = firstProb > lastProb ? 1 : firstProb === lastProb ? 0.5 : 0;
+    // (1) Time separation — legs spread across different start windows.
+    //     Uses gameTimeLabel when present, falls back to gameId distinctness.
+    const timeSeparation = staggerDiversity(legs);
+
+    // (2) Early leg strength — the first leg must carry the card. Blend of
+    //     its hit probability, inverse volatility, and stability.
+    const first = legs[0];
+    const earlyHit   = first.modelProbability ?? 0.5;
+    const earlyVolOk = 1 - Math.min(100, first.volatilityScore ?? 50) / 100;
+    const earlyStab  = first.stabilityScore ?? 0.5;
+    const earlyLegStrength = earlyHit * 0.5 + earlyVolOk * 0.3 + earlyStab * 0.2;
+
+    // (3) Independence — mean of per-axis diversity: games, teams, stat types.
+    const gameDiv = new Set(legs.map((l) => l.gameId)).size / legs.length;
+    const teamDiv = new Set(legs.map((l) => l.teamId ?? `g:${l.gameId}`)).size / legs.length;
     const statDiv = new Set(legs.map((l) => l.statType ?? l.marketType ?? "")).size / legs.length;
-    // Sport diversity: max credit when every leg is from a different sport.
-    const sportDiv = new Set(legs.map((l) => l.sport)).size / legs.length;
+    const independence = (gameDiv + teamDiv + statDiv) / 3;
+
+    // (4) Payout balance — reward "high-prob early + upside late" structure
+    //     without drifting into all-longshot territory. Combines:
+    //       a) final leg has higher odds than first (directional check)
+    //       b) average implied probability sits in the 0.55–0.70 sweet spot
+    const last = legs[legs.length - 1];
+    const directional = last.americanOdds > first.americanOdds ? 1
+                      : last.americanOdds === first.americanOdds ? 0.5 : 0;
+    const avgImplied = legs.reduce((s, l) => s + (l.impliedProbability ?? 0.5), 0) / legs.length;
+    const sweetSpotDeviation = Math.abs(avgImplied - 0.625);
+    const balanceScore = Math.max(0, 1 - sweetSpotDeviation / 0.25);
+    const payoutBalance = directional * 0.5 + balanceScore * 0.5;
+
     cashoutStructure =
-      stagger * 0.30 + orderedBonus * 0.25 + statDiv * 0.15 + sportDiv * 0.30;
+      timeSeparation   * 0.30 +
+      earlyLegStrength * 0.30 +
+      independence     * 0.20 +
+      payoutBalance    * 0.20;
   }
 
   // diversificationBoost shifts weight from timing → sport diversity.
