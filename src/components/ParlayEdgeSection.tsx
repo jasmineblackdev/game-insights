@@ -8,6 +8,7 @@ import {
   ChevronUp,
   Clock,
   Globe,
+  Hourglass,
   Shield,
   Sliders,
   TrendingUp,
@@ -16,6 +17,8 @@ import {
 import type { GamePrediction, League } from "@/data/mockGames";
 import { cn } from "@/lib/utils";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
+import { optimizeSmartParlays } from "@/lib/valueParlay/parlayOptimizer";
+import type { SmartParlayResult } from "@/lib/valueParlay/types";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerEdgePredictions } from "@/lib/playerEdgeApi";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
@@ -357,6 +360,112 @@ function TimingBadge({ sport, marketType }: { sport: League; marketType: string 
   );
 }
 
+// ─── Cash-Out Card ───────────────────────────────────────────────
+// Renders one variant of the cashout triple produced by optimizeSmartParlays.
+// Sky-tinted for visual parity with the dedicated Cash-Out UI elsewhere.
+
+function CashoutCard({
+  variant,
+  label,
+  result,
+}: {
+  variant: "Best" | "Safer" | "Upside";
+  label: string;
+  result: SmartParlayResult;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const legs = result.legs;
+  const empty = legs.length === 0;
+
+  const tint =
+    variant === "Best"   ? "border-sky-500/40 bg-sky-500/[0.06]"
+    : variant === "Safer" ? "border-sky-500/25 bg-sky-500/[0.03]"
+    :                       "border-sky-400/40 bg-sky-400/[0.05]";
+
+  return (
+    <motion.div layout className={cn("rounded-lg border p-4 space-y-3 transition-colors", tint)}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold tracking-wider text-sky-600 dark:text-sky-400">
+              {label.toUpperCase()}
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-semibold">
+              {legs.length}-LEG
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+            {variant === "Best"
+              ? "Staggered starts · high-prob first · cash-out ready"
+              : variant === "Safer"
+                ? "Safer early legs · prioritises early resolution"
+                : "Safer early + upside leg last for cash-out growth"}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-sm font-bold tabular-nums text-foreground">
+            {result.combinedAmericanOdds > 0 ? "+" : ""}{result.combinedAmericanOdds}
+          </p>
+          <p className="text-[10px] tabular-nums text-muted-foreground">
+            {result.projectedPayoutMultiplier.toFixed(2)}x payout
+          </p>
+        </div>
+      </div>
+
+      {empty ? (
+        <p className="text-[11px] text-muted-foreground italic">
+          Not enough qualifying legs today for this variant.
+        </p>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 text-[11px]">
+          <div className="rounded bg-background/40 border border-border/60 px-2 py-1.5">
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Hit prob</p>
+            <p className="text-sm font-bold tabular-nums text-foreground">
+              {(result.projectedHitProbability * 100).toFixed(1)}%
+            </p>
+          </div>
+          <div className="rounded bg-background/40 border border-border/60 px-2 py-1.5">
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Card conf</p>
+            <p className="text-sm font-bold capitalize text-foreground">{result.cardConfidence}</p>
+          </div>
+        </div>
+      )}
+
+      {legs.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-[11px] font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center justify-center gap-1 pt-1"
+        >
+          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {expanded ? "Hide legs" : "View legs"}
+        </button>
+      )}
+
+      {expanded && legs.length > 0 && (
+        <ol className="space-y-1 text-[11px]">
+          {legs.map((l, i) => (
+            <li
+              key={l.id}
+              className="flex items-start gap-2 rounded border border-border/50 bg-background/40 px-2 py-1.5"
+            >
+              <span className="font-bold tabular-nums text-sky-500 shrink-0 mt-0.5">#{i + 1}</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-foreground text-xs truncate">{l.selectionLabel}</p>
+                <p className="text-[10px] text-muted-foreground tabular-nums">
+                  {String(l.sport).toUpperCase()} · {l.gameTimeLabel ?? "time TBD"} ·{" "}
+                  {l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds} · hit{" "}
+                  {((l.modelProbability ?? 0) * 100).toFixed(0)}%
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </motion.div>
+  );
+}
+
 // ─── Parlay Card ─────────────────────────────────────────────────
 
 function ParlayCard({ parlay }: { parlay: AutoParlay }) {
@@ -626,6 +735,19 @@ export function ParlayEdgeSection({ allGames, oddsMap, currentLeague = "nba" }: 
     [candidates, filterMode, biasSport]
   );
 
+  // Cash-Out parlays — uses the newer ML-aware optimizer with 3-stage sport-
+  // diversity fallback, implied-prob floor, recent-game enrichment, etc.
+  // Returns bestValue / safer / higherPayout variants under the cashout tier.
+  const cashoutTriple = useMemo(
+    () => candidates.length ? optimizeSmartParlays(candidates, "cashout") : null,
+    [candidates]
+  );
+  const cashoutHasLegs = cashoutTriple
+    ? (cashoutTriple.bestValue.legs.length +
+       cashoutTriple.safer.legs.length +
+       cashoutTriple.higherPayout.legs.length) > 0
+    : false;
+
   const insights  = useMemo(() => getLearningInsights(), []);
   const topPool   = output.candidatePool.slice(0, 6);
   const hasAnyParlay = output.safe || output.balanced || output.aggressive;
@@ -702,6 +824,24 @@ export function ParlayEdgeSection({ allGames, oddsMap, currentLeague = "nba" }: 
           </div>
         )}
       </section>
+
+      {/* ── Section 1b: Cash-Out Parlays Today ── */}
+      {cashoutTriple && cashoutHasLegs && (
+        <section>
+          <div className="flex items-center gap-2 mb-4">
+            <Hourglass className="w-4 h-4 text-sky-500" />
+            <h3 className="font-display font-bold text-base text-foreground">Cash-Out Parlays Today</h3>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-600 dark:text-sky-400 font-semibold">
+              STAGGERED
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <CashoutCard variant="Best"   label="Best cash-out"   result={cashoutTriple.bestValue} />
+            <CashoutCard variant="Safer"  label="Safer cash-out"  result={cashoutTriple.safer} />
+            <CashoutCard variant="Upside" label="Upside cash-out" result={cashoutTriple.higherPayout} />
+          </div>
+        </section>
+      )}
 
       {/* ── Section 2: Top Ranked Legs ── */}
       {topPool.length > 0 && (
