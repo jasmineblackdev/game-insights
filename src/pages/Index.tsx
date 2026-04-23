@@ -965,7 +965,18 @@ const Index = () => {
                   allGames={allGames}
                   allProps={homePropsQuery.data?.items ?? []}
                   oddsMap={oddsMapAll}
-                  loading={activeQuery.isPending || homePropsQuery.isPending}
+                  // Tomorrow needs the full cross-sport pool. Wait for every
+                  // supported sport's fetch, not just the currently-selected
+                  // league's query — otherwise the tab looks "done" while
+                  // NFL/Boxing/MMA are still loading.
+                  loading={
+                    nbaFastQuery.isPending ||
+                    nflQuery.isPending ||
+                    mlbFastQuery.isPending ||
+                    boxingQuery.isPending ||
+                    mmaQuery.isPending ||
+                    homePropsQuery.isPending
+                  }
                 />
               ) : viewMode === "parlay_builder" ? (
                 <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
