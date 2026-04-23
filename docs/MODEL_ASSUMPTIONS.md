@@ -8,14 +8,13 @@
 
 ## Live player props (main game cards)
 
-- After the same sport checkpoints as team live picks (Q1 / F5 / soccer HT, etc.), props are re-ranked with `live_prop_score` in `src/lib/livePropRanking.ts` using live heuristics (pace, score margin, inning, HT). Signals are **not** play-by-play feeds.
+- After the same sport checkpoints as team live picks (Q1 / F5 / round-1, etc.), props are re-ranked with `live_prop_score` in `src/lib/livePropRanking.ts` using live heuristics (pace, score margin, inning). Signals are **not** play-by-play feeds.
 
-## Minutes, snap count, and soccer “role” / xG-style edges
+## Minutes, snap count, and usage role edges
 
 - **NBA / NFL player props** (`src/lib/valueParlay/playerPropEngine.ts`): baselines blend **last-five and season averages** from card-level trend data, with **team pace** (and similar) as a coarse adjustment. This is **not** a minutes model, snap-share model, or coaching-usage model.
-- **Soccer props** (e.g. shots / SoT): projections scale trend baselines with **fixture pace heuristics**, not StatsBomb-style xG or event-level role data.
 
-Constants: `src/lib/modelAssumptions.ts` (`PLAYER_PROP_MINUTES_OR_SNAP_MODEL`, `SOCCER_PROP_XG_OR_ROLE_MODEL`).
+Constants: `src/lib/modelAssumptions.ts` (`PLAYER_PROP_MINUTES_OR_SNAP_MODEL`).
 
 ## Learning & accuracy
 
