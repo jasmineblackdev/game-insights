@@ -61,8 +61,7 @@ export function buildRankedLiveMoneylinePool(
   const live = games.filter((g) => g.status === "live");
   const overlays = buildLivePickOverlays(live);
   const ranked = [...overlays.entries()]
-    .filter(([, o]) => o.kind === "ranked")
-    .map(([id, o]) => ({ id, rank: o.rank }))
+    .flatMap(([id, o]) => (o.kind === "ranked" ? [{ id, rank: o.rank }] : []))
     .sort((a, b) => a.rank - b.rank);
 
   const all = buildAllValueCandidates(games, oddsMap);

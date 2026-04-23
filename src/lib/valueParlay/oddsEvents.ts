@@ -141,12 +141,8 @@ async function fetchJsonForSport(sportKey: string, eventIds?: string[]): Promise
   return Array.isArray(data) ? (data as OddsEvent[]) : [];
 }
 
-/** Odds API `sport_key` for a prediction (soccer maps from ESPN league slug). */
+/** Odds API `sport_key` for a prediction. */
 export function oddsSportKeyForPrediction(pred: GamePrediction): string {
-  if (pred.league === "soccer") {
-    const slug = pred._meta?.soccerLeagueSlug ?? "eng.1";
-    return ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug] ?? "soccer_epl";
-  }
   if (pred.league === "nba") return "basketball_nba";
   if (pred.league === "nfl") return "americanfootball_nfl";
   if (pred.league === "mma") return "mma_mixed_martial_arts";
@@ -229,25 +225,6 @@ export async function fetchOddsBundlesForLeague(
   const map = new Map<string, GameOddsBundle>();
   if (!isOddsApiAvailable() || predictions.length === 0) {
     for (const p of predictions) map.set(p.id, { gameId: p.id });
-    return map;
-  }
-
-  if (league === "soccer") {
-    const byKey = new Map<string, GamePrediction[]>();
-    for (const p of predictions) {
-      const slug = p._meta?.soccerLeagueSlug ?? "eng.1";
-      const key = ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug] ?? "soccer_epl";
-      const arr = byKey.get(key) ?? [];
-      arr.push(p);
-      byKey.set(key, arr);
-    }
-    for (const [sportKey, preds] of byKey) {
-      const events = await fetchJsonForSport(sportKey);
-      for (const p of preds) {
-        const ev = matchEvent(p, events);
-        map.set(p.id, bundleForPred(p, ev));
-      }
-    }
     return map;
   }
 

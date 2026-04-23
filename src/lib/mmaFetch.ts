@@ -369,7 +369,7 @@ function buildMmaPrediction(
         valueRating: edge >= 0.08 ? "high" : edge >= 0.04 ? "medium" : "low",
         parlayFitScore: parlayFit,
         parlaySafetyScore: Math.round(parlayFit * 0.8),
-        recommendedForParlay: parlayFit >= 55 && confidence !== "low",
+        recommendedForParlay: parlayFit >= 55,
         filterNotes: [],
       } : undefined,
     },

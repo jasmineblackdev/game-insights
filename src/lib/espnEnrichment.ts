@@ -91,40 +91,6 @@ const INJURY_URLS: Record<"nba" | "nfl" | "mlb", string> = {
   mlb: "https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/injuries",
 };
 
-/** Top 5 European leagues — merged injury map keyed by ESPN team id. */
-const SOCCER_INJURY_SLUGS = [
-  "eng.1",
-  "esp.1",
-  "ger.1",
-  "ita.1",
-  "usa.1",
-  "uefa.champions",
-  "uefa.europa",
-];
-
-async function fetchMergedSoccerInjuryMap(): Promise<Map<string, PlayerInjury[]>> {
-  const merged = new Map<string, PlayerInjury[]>();
-  for (const slug of SOCCER_INJURY_SLUGS) {
-    const res = await fetch(`https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/injuries`);
-    if (!res.ok) continue;
-    const data = (await res.json()) as { injuries?: Record<string, unknown>[] };
-    for (const block of data.injuries ?? []) {
-      const tid = String((block as { id?: string }).id ?? "");
-      if (!tid) continue;
-      const rows = (block as { injuries?: Record<string, unknown>[] }).injuries ?? [];
-      const parsed = rows.map(rowToInjury).filter((x): x is PlayerInjury => x != null);
-      if (!parsed.length) continue;
-      const prev = merged.get(tid) ?? [];
-      merged.set(tid, mergeInjuryLists(prev, parsed));
-    }
-  }
-  return merged;
-}
-
-function soccerSlugOrDefault(slug: string | undefined): string {
-  return slug && slug.length > 0 ? slug : "eng.1";
-}
-
 function summaryUrl(league: League, eventId: string, soccerLeagueSlug?: string): string | null {
   if (league === "nba") {
     return `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=${eventId}`;
@@ -134,10 +100,6 @@ function summaryUrl(league: League, eventId: string, soccerLeagueSlug?: string):
   }
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/summary?event=${eventId}`;
-  }
-  if (league === "soccer") {
-    const s = soccerSlugOrDefault(soccerLeagueSlug);
-    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/summary?event=${eventId}`;
   }
   return null;
 }
@@ -152,10 +114,6 @@ function teamUrl(league: League, teamId: string, soccerLeagueSlug?: string): str
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}`;
   }
-  if (league === "soccer") {
-    const s = soccerSlugOrDefault(soccerLeagueSlug);
-    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/teams/${teamId}`;
-  }
   return null;
 }
 
@@ -168,10 +126,6 @@ function scheduleUrl(league: League, teamId: string, soccerLeagueSlug?: string):
   }
   if (league === "mlb") {
     return `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${teamId}/schedule`;
-  }
-  if (league === "soccer") {
-    const s = soccerSlugOrDefault(soccerLeagueSlug);
-    return `https://site.api.espn.com/apis/site/v2/sports/soccer/${s}/teams/${teamId}/schedule`;
   }
   return null;
 }
@@ -206,13 +160,12 @@ async function fetchTeamScheduleMap(
 ): Promise<Map<string, Set<string>>> {
   const out = new Map<string, Set<string>>();
   const unique = [...new Set(teamIds)].filter(Boolean);
-  const probeSlug = league === "soccer" ? soccerSlugForTeam?.(unique[0] ?? "") : undefined;
-  if (!scheduleUrl(league, unique[0] ?? "", probeSlug)) return out;
+  if (!scheduleUrl(league, unique[0] ?? "")) return out;
   const batch = 4;
   for (let i = 0; i < unique.length; i += batch) {
     const slice = unique.slice(i, i + batch);
     const results = await Promise.all(
-      slice.map((id) => fetchTeamGameDates(league, id, league === "soccer" ? soccerSlugForTeam?.(id) : undefined))
+      slice.map((id) => fetchTeamGameDates(league, id))
     );
     slice.forEach((id, j) => out.set(id, results[j] ?? new Set()));
   }
@@ -225,7 +178,6 @@ const POSITION_MULTIPLIER: Record<string, Record<string, number>> = {
   nfl: { QB: 2.5, RB: 1.2, FB: 1.1, WR: 1.1, TE: 1.0, OL: 1.0, OG: 1.0, OT: 1.0, C: 1.0, DE: 1.3, DT: 1.2, LB: 1.1, CB: 1.1, S: 1.1, SS: 1.1, FS: 1.1, K: 0.9, P: 0.7 },
   mlb: { SP: 2.0, CP: 1.5, RP: 1.2, C: 1.2, SS: 1.3, "2B": 1.1, "3B": 1.1, "1B": 1.0, LF: 1.0, RF: 1.0, CF: 1.1, DH: 0.9 },
   nba: { PG: 1.5, SG: 1.2, SF: 1.2, PF: 1.2, C: 1.3, G: 1.3, F: 1.2 },
-  soccer: { GK: 1.8, CB: 1.3, LB: 1.1, RB: 1.1, CM: 1.2, DM: 1.2, AM: 1.3, LW: 1.2, RW: 1.2, CF: 1.5, ST: 1.5 },
 };
 
 function applyPositionWeighting(injuries: PlayerInjury[], league: League): PlayerInjury[] {
@@ -401,39 +353,12 @@ async function fetchTeamPatch(
       roadWinPct: parsePct(roadItem?.summary),
     };
   }
-  if (league === "soccer") {
-    const gp = statVal(stats, "gamesPlayed");
-    const pf = statVal(stats, "pointsFor");
-    const pa = statVal(stats, "pointsAgainst");
-    const gf = gp != null && gp > 0 && pf != null ? Math.round((pf / gp) * 100) / 100 : undefined;
-    const ga = gp != null && gp > 0 && pa != null ? Math.round((pa / gp) * 100) / 100 : undefined;
-    const homeItem = items?.find((x) => x.type === "home");
-    const roadItem = items?.find((x) => x.type === "road");
-    const soccerSplitStrength = (rec: string | undefined): number | undefined => {
-      const m = rec?.trim().match(/^(\d+)-(\d+)-(\d+)$/);
-      if (!m) return undefined;
-      const w = Number(m[1]);
-      const d = Number(m[2]);
-      const l = Number(m[3]);
-      const n = w + d + l;
-      return n > 0 ? (3 * w + d) / (3 * n) : undefined;
-    };
-    return {
-      record: summary,
-      recentForm,
-      offensiveRating: gf,
-      defensiveRating: ga,
-      homeWinPct: soccerSplitStrength(homeItem?.summary),
-      roadWinPct: soccerSplitStrength(roadItem?.summary),
-    };
-  }
   return {};
 }
 
 async function fetchTeamMetricsMap(
   league: League,
   teamIds: string[],
-  soccerSlugForTeam?: (teamId: string) => string | undefined
 ): Promise<Map<string, Partial<TeamData>>> {
   const out = new Map<string, Partial<TeamData>>();
   const unique = [...new Set(teamIds)].filter(Boolean);
@@ -441,7 +366,7 @@ async function fetchTeamMetricsMap(
   for (let i = 0; i < unique.length; i += batch) {
     const slice = unique.slice(i, i + batch);
     const patches = await Promise.all(
-      slice.map((id) => fetchTeamPatch(league, id, league === "soccer" ? soccerSlugForTeam?.(id) : undefined))
+      slice.map((id) => fetchTeamPatch(league, id))
     );
     slice.forEach((id, j) => out.set(id, patches[j] ?? {}));
   }
@@ -604,8 +529,6 @@ async function enrichOne(
   const eid = pred._meta?.eventId;
   if (!hid || !aid || !eid) return pred;
 
-  const soccerSlug = league === "soccer" ? pred._meta?.soccerLeagueSlug : undefined;
-
   let mlbWeatherMeta: { tempF: number | null; windMph: number | null } | undefined;
 
   let homeInj = injuryMap.get(hid) ?? [];
@@ -613,7 +536,7 @@ async function enrichOne(
   const notes = [...(pred.enrichmentNotes ?? [])];
   let summaryForWeather: Record<string, unknown> | null = null;
 
-  const summary = await fetchGameSummary(league, eid, soccerSlug);
+  const summary = await fetchGameSummary(league, eid);
   if (summary) {
     summaryForWeather = summary;
     const fromSum = injuriesFromSummaryBlocks(summary.injuries, hid, aid);
@@ -622,7 +545,7 @@ async function enrichOne(
     homeInj = applyPositionWeighting(homeInj, league);
     awayInj = applyPositionWeighting(awayInj, league);
 
-    if (league === "nba" || league === "soccer") {
+    if (league === "nba") {
       const h2h = seasonSeriesNote(summary);
       if (h2h) notes.push(h2h);
     }
@@ -776,41 +699,6 @@ async function enrichOne(
     }
   }
 
-  let soccerOut = pred.soccer;
-  if (league === "soccer") {
-    if (threeWay && homeTeam.homeWinPct != null && awayTeam.roadWinPct != null) {
-      const splitDiff = homeTeam.homeWinPct - awayTeam.roadWinPct;
-      const delta = Math.max(-4, Math.min(4, Math.round(splitDiff * 12)));
-      if (delta !== 0) {
-        threeWay = shiftThreeWayProb(threeWay, delta);
-        winProbability = { home: threeWay.home, away: threeWay.away };
-      }
-    }
-    if (scheduleMap.size > 0 && pred._meta?.easternYmd) {
-      const gy = pred._meta.easternYmd;
-      const h7 = countCompletedGamesInWindow(scheduleMap.get(hid) ?? new Set(), gy, 7);
-      const a7 = countCompletedGamesInWindow(scheduleMap.get(aid) ?? new Set(), gy, 7);
-      const h14 = countCompletedGamesInWindow(scheduleMap.get(hid) ?? new Set(), gy, 14);
-      const a14 = countCompletedGamesInWindow(scheduleMap.get(aid) ?? new Set(), gy, 14);
-      const base = pred.soccer ?? { competition: "", modelNotes: [], dataGaps: [] };
-      soccerOut = {
-        ...base,
-        congestion: { homeLast7: h7, awayLast7: a7, homeLast14: h14, awayLast14: a14 },
-        scheduleSource: "espn-scoreboard",
-      };
-      const conDiff = h7 - a7;
-      if (threeWay && Math.abs(conDiff) >= 2) {
-        const mag = Math.min(3, Math.round(Math.abs(conDiff) * 0.7));
-        const towardHome = conDiff < 0 ? mag : -mag;
-        threeWay = shiftThreeWayProb(threeWay, towardHome);
-        winProbability = { home: threeWay.home, away: threeWay.away };
-        notes.push(
-          `Fixture load (7d): ${homeTeam.abbreviation} ${h7} vs ${awayTeam.abbreviation} ${a7} — congestion shifts rotation risk.`
-        );
-      }
-    }
-  }
-
   const topReasons = [...pred.topReasons];
   if (notes.length) {
     const first = notes[0];
@@ -819,22 +707,13 @@ async function enrichOne(
     }
   }
 
-  if (league !== "soccer") {
+  {
     const homePenalty = computeInjuryPenalty(homeInj);
     const awayPenalty = computeInjuryPenalty(awayInj);
     const netPenalty = homePenalty - awayPenalty;
     if (Math.abs(netPenalty) >= 6) {
       const shift = Math.min(Math.round(netPenalty * 0.25), 8);
       winProbability = shiftWinProbabilityTwoWay(winProbability, -shift);
-    }
-  } else if (threeWay) {
-    const homePenalty = computeInjuryPenalty(homeInj);
-    const awayPenalty = computeInjuryPenalty(awayInj);
-    const netPenalty = homePenalty - awayPenalty;
-    if (Math.abs(netPenalty) >= 6) {
-      const mag = Math.min(Math.round(netPenalty * 0.22), 8);
-      threeWay = shiftThreeWayProb(threeWay, -mag);
-      winProbability = { home: threeWay.home, away: threeWay.away };
     }
   }
 
@@ -899,22 +778,13 @@ export async function enrichGamePredictions(predictions: GamePrediction[], leagu
     if (p._meta?.awayTeamId) teamIds.push(p._meta.awayTeamId);
   }
 
-  const soccerSlugForTeam = (tid: string): string | undefined => {
-    for (const p of predictions) {
-      if (p._meta?.homeTeamId === tid) return p._meta?.soccerLeagueSlug;
-      if (p._meta?.awayTeamId === tid) return p._meta?.soccerLeagueSlug;
-    }
-    return undefined;
-  };
+  const injuryMapPromise = fetchLeagueInjuryMap(lg);
 
-  const injuryMapPromise =
-    lg === "soccer" ? fetchMergedSoccerInjuryMap() : fetchLeagueInjuryMap(lg as "nba" | "nfl" | "mlb");
-
-  const wantSchedule = lg === "nba" || lg === "mlb" || lg === "nfl" || lg === "soccer";
+  const wantSchedule = lg === "nba" || lg === "mlb" || lg === "nfl";
 
   const [teamPatches, scheduleMap, nbaAdvanced, injuryMap] = await Promise.all([
-    fetchTeamMetricsMap(lg, teamIds, lg === "soccer" ? soccerSlugForTeam : undefined),
-    wantSchedule ? fetchTeamScheduleMap(lg, teamIds, lg === "soccer" ? soccerSlugForTeam : undefined) : Promise.resolve(new Map<string, Set<string>>()),
+    fetchTeamMetricsMap(lg, teamIds),
+    wantSchedule ? fetchTeamScheduleMap(lg, teamIds) : Promise.resolve(new Map<string, Set<string>>()),
     lg === "nba" ? fetchNbaAdvancedRatings() : Promise.resolve(null),
     injuryMapPromise,
   ]);

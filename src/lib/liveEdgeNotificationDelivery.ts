@@ -24,7 +24,8 @@ export async function deliverLiveEdgeNotification(payload: LiveEdgeNotificationP
       badge: "/favicon.png",
       tag: payload.tag,
       data: { url: absUrl },
-      renotify: true,
+      // renotify requires tag; cast because TS lib may not include it yet
+      ...({ renotify: true } as Record<string, unknown>),
     });
     return;
   }

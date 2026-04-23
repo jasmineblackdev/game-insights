@@ -287,7 +287,7 @@ function buildPrediction(
         valueRating: edge >= 0.08 ? "high" : edge >= 0.04 ? "medium" : "low",
         parlayFitScore: Math.round(50 + edge * 300),
         parlaySafetyScore: Math.round(40 + edge * 200),
-        recommendedForParlay: edge >= 0.04 && confidence !== "low",
+        recommendedForParlay: edge >= 0.04,
         filterNotes: [],
       } : undefined,
     },

@@ -19,6 +19,7 @@ import {
   sortCompetitors,
   winProbFromOdds,
   winProbFromRecords,
+  type EspnCompetition,
   type EspnCompetitor,
   type EspnEvent,
   ymdToParam,

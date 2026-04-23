@@ -467,8 +467,7 @@ function persistSnapshot(
       },
       { onConflict: "id" }
     )
-    .then(() => null)
-    .catch(() => null);
+    .then(() => null, () => null);
 }
 
 // ── Main model application ────────────────────────────────────────────────────

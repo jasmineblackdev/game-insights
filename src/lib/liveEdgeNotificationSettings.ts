@@ -10,7 +10,6 @@ export interface LiveEdgeNotificationSettings {
     nba: boolean;
     nfl: boolean;
     mlb: boolean;
-    soccer: boolean;
   };
   /** Safe: higher edge + high confidence. Aggressive: ≥3% edge + medium+ confidence. */
   pickMode: LiveEdgeNotifyPickMode;
@@ -23,7 +22,7 @@ export interface LiveEdgeNotificationSettings {
 export const defaultLiveEdgeNotificationSettings: LiveEdgeNotificationSettings = {
   masterEnabled: false,
   onlyWhenBackground: true,
-  sports: { nba: true, nfl: true, mlb: true, soccer: true },
+  sports: { nba: true, nfl: true, mlb: true },
   pickMode: "aggressive",
   nbaHalftimeUpdates: true,
   playerPropAlerts: false,

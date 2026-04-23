@@ -28,6 +28,7 @@ import { computeConfidence } from "@/lib/ml/models/confidence";
 import { computeTiming } from "@/lib/ml/models/timing";
 import { computeAlpha, mlIsActive, getAdaptiveWeights, getAdaptiveWeightsSync } from "@/lib/ml/weights";
 import { loadPlattParams } from "@/lib/ml/calibration";
+import { clampAlpha } from "@/lib/ml/alphaConfig";
 
 /** Rules engine output passed into the blender. */
 export interface RulesOutput {
@@ -52,7 +53,9 @@ export async function blendPropPrediction(
   // Look up sample size to determine alpha
   const weights = await getAdaptiveWeights(sport, "hit_probability", fv.context);
   const sampleSize = weights?.sample_size ?? 0;
-  const alpha = computeAlpha(sampleSize);
+  // Clamp α to the per-sport [min, max] range so combat sports don't over-
+  // trust the ML layer and NBA can still reach its higher ceiling.
+  const alpha = clampAlpha(sport, computeAlpha(sampleSize));
   const active = mlIsActive(sampleSize);
 
   // If ML hasn't accumulated enough data, return rules output unchanged
@@ -69,8 +72,10 @@ export async function blendPropPrediction(
     };
   }
 
-  // Load Platt calibration params
-  const platt = loadPlattParams(sport, "hit_probability");
+  // Load per-bucket Platt calibration params so the nightly-fitted (sport,
+  // market, confidence_bucket) values actually take effect. Falls back to
+  // ALL-bucket, then identity.
+  const platt = loadPlattParams(sport, "hit_probability", rulesOutput.confidence);
 
   // Run ML models
   const mlProjection  = computePropProjection(fv);
@@ -119,7 +124,7 @@ export function blendPropPredictionSync(
 ): BlendedPropOutput {
   const weights = getAdaptiveWeightsSync(sport, "hit_probability", fv.context);
   const sampleSize = weights?.sample_size ?? 0;
-  const alpha = computeAlpha(sampleSize);
+  const alpha = clampAlpha(sport, computeAlpha(sampleSize));
   const active = mlIsActive(sampleSize);
 
   const timing = computeTiming(fv);
@@ -137,7 +142,7 @@ export function blendPropPredictionSync(
     };
   }
 
-  const platt = loadPlattParams(sport, "hit_probability");
+  const platt = loadPlattParams(sport, "hit_probability", rulesOutput.confidence);
   const mlProjection  = computePropProjection(fv);
   const mlHitProb     = computeHitProbability(fv, platt);
   const mlConf        = computeConfidence(fv);

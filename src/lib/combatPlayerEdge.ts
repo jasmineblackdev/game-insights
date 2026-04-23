@@ -122,10 +122,17 @@ function getMethodContext(game: GamePrediction): MethodContext | null {
   const method = boxing?.modelOutput?.methodProbabilities ?? mma?.modelOutput?.methodProbabilities;
   if (!method) return null;
 
-  const homeFighter = mma?.homeFighter ?? boxing?.homeFighter;
-  const awayFighter = mma?.awayFighter ?? boxing?.awayFighter;
-  const hasRealStats = homeFighter?.koTkoPct != null || awayFighter?.koTkoPct != null
-    || homeFighter?.subPct != null || awayFighter?.subPct != null;
+  // Both boxing and MMA profiles have different fields. When MMA is present,
+  // use its richer fighter stats (koTkoPct, subPct). Boxing fighters fall back
+  // to koPct and never have subPct.
+  const mmaHome = mma?.homeFighter;
+  const mmaAway = mma?.awayFighter;
+  const boxingHome = boxing?.homeFighter;
+  const boxingAway = boxing?.awayFighter;
+  const hasRealStats =
+    mmaHome?.koTkoPct != null || mmaAway?.koTkoPct != null ||
+    mmaHome?.subPct != null   || mmaAway?.subPct != null   ||
+    boxingHome?.koPct != null || boxingAway?.koPct != null;
 
   const koProb  = (method as Record<string, number>).ko_tko   ?? 0;
   const subProb = (method as Record<string, number>).submission ?? 0;
@@ -133,6 +140,10 @@ function getMethodContext(game: GamePrediction): MethodContext | null {
   const drawProb = Math.max(0, 1 - koProb - subProb - decProb);
 
   const favHome = game.winProbability.home >= game.winProbability.away;
+  // Downstream code expects MmaFighterProfile shape; use MMA profile when
+  // available, otherwise fall back to a minimal adapter for boxing.
+  const homeFighter = mmaHome;
+  const awayFighter = mmaAway;
   return {
     koProb, subProb, decProb, drawProb,
     hasRealStats,

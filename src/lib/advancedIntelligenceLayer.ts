@@ -520,8 +520,9 @@ export async function applyAdvancedIntelligenceToGames(predictions: GamePredicti
     const fatH = getFatigueFromMap(fatM, league, hAbbr, g._meta?.easternYmd);
     const fatA = getFatigueFromMap(fatM, league, aAbbr, g._meta?.easternYmd);
 
-    if (league === "soccer") {
-      out.push(applySoccer(g, homeM, awayM, matchup, fatH, fatA));
+    if (league === "boxing" || league === "mma") {
+      // Combat sports use a different pipeline — skip team-matchup apply.
+      out.push(g);
       continue;
     }
     out.push(applyNbaNflMlb(g, league, homeM, awayM, matchup, fatH, fatA));

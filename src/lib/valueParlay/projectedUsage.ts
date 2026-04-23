@@ -22,7 +22,7 @@
 import type { GamePrediction, PlayerInjury, PlayerTrendData } from "@/data/mockGames";
 
 function isOutOrDoubtful(i: PlayerInjury): boolean {
-  return i.status === "OUT" || i.status === "DOUBTFUL";
+  return i.status === "OUT" || i.status === "QUESTIONABLE" || i.status === "GTD";
 }
 
 function positionGroup(pos: string | undefined): string {

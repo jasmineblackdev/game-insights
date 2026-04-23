@@ -67,10 +67,7 @@ export function GamePredictionCard({
   const liveVer =
     versions.find(
       (v) =>
-        v.phase === "live_q1" ||
-        v.phase === "live_f5" ||
-        v.phase === "live_15min" ||
-        v.phase === "live_halftime"
+        v.phase === "live_r1"
     ) ??
     versions.find((v) => v.phase === "late_news");
   const liveTriggerMet = isLiveTriggerMet(game);

@@ -61,7 +61,7 @@ function estimateLiveAmerican(
   }
 
   const m =
-    game.league === "mlb" ? 32 : game.league === "soccer" ? 24 : game.league === "nfl" ? 11 : 10;
+    game.league === "mlb" ? 32 : game.league === "nfl" ? 11 : 10;
 
   let adj = pregameAmerican;
   if (side === "draw") {
@@ -104,7 +104,7 @@ export interface LiveCheckpointDef {
   label: string;
 }
 
-/** Sport-specific gates aligned with product spec (NBA/NFL Q1, MLB F5, soccer 30′ / HT). */
+/** Sport-specific gates aligned with product spec (NBA/NFL Q1, MLB F5). */
 export function activeLiveBettingCheckpoints(game: GamePrediction): LiveCheckpointDef[] {
   if (game.status !== "live") return [];
   const ls = game._meta?.liveState;
@@ -122,12 +122,6 @@ export function activeLiveBettingCheckpoints(game: GamePrediction): LiveCheckpoi
       break;
     case "mlb":
       if (ls.periodNum >= 5) out.push({ id: "after_inning_5", label: "After 5th inning" });
-      break;
-    case "soccer":
-      if (!ls.isHalftime && ls.periodNum >= 30) {
-        out.push({ id: "soccer_pattern", label: "≥30′ pattern" });
-      }
-      if (ls.isHalftime) out.push({ id: "soccer_halftime", label: "Halftime" });
       break;
     default:
       break;
@@ -165,18 +159,6 @@ function sportSignalsForCheckpoint(game: GamePrediction, checkpointId: string): 
       `Innings completed: through ${inn} (checkpoint at 5+).`,
       `Bullpen window: leverage spots approach if starter turns lineup third time.`,
       `Live scoring: ${ls ? `${game.awayTeam.abbreviation} ${ls.awayScore}–${ls.homeScore} ${game.homeTeam.abbreviation}` : "n/a"}.`,
-    ];
-  }
-  if (game.league === "soccer") {
-    const ht = checkpointId === "soccer_halftime" || ls?.isHalftime;
-    return [
-      `xG trend: proxy from score diff ${diff} — ${diff === 0 ? "finishing noise" : "chance tilt to leader"}.`,
-      `Possession: ${ht ? "HT reset — second-half shape pending" : "mid-first-half shape stabilizing"}.`,
-      `Cards: no live card feed — assume discipline baseline.`,
-      ht
-        ? "Halftime state: tactical subs and draw risk peak here."
-        : "Pre-halftime: pattern checkpoint before bench disruption.",
-      `Draw risk: ${game.threeWay && game.threeWay.draw >= 28 ? "elevated 1X2 draw mass" : "moderate draw mass"}.`,
     ];
   }
   return [];

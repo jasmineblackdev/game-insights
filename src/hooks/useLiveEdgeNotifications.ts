@@ -11,9 +11,7 @@ import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
-import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 import { useOddsBundlesWithLivePoll } from "@/hooks/useOddsBundlesWithLivePoll";
-import { scoreboardRefetchIntervalMs } from "@/lib/scoreboardPollConfig";
 
 /** Avoid re-running notification scan on every scoreboard tick. */
 const SCAN_THROTTLE_MS = 12_000;
@@ -30,8 +28,7 @@ export function useLiveEdgeNotifications(): void {
   const anySport =
     settings.sports.nba ||
     settings.sports.nfl ||
-    settings.sports.mlb ||
-    settings.sports.soccer;
+    settings.sports.mlb;
 
   const canPoll =
     settings.masterEnabled &&
@@ -73,23 +70,13 @@ export function useLiveEdgeNotifications(): void {
     staleTime: Infinity,
   });
 
-  const soccerQuery = useQuery({
-    queryKey: ["soccer-espn-scoreboard", ymd],
-    queryFn: fetchSoccerGamePredictions,
-    staleTime: (q) => scoreboardRefetchIntervalMs(q.state.data),
-    refetchInterval: (q) => (canPoll && settings.sports.soccer ? scoreboardRefetchIntervalMs(q.state.data) : false),
-    refetchIntervalInBackground: false,
-    enabled: canPoll && settings.sports.soccer,
-  });
-
   const leagueGames = useMemo(() => {
     const out: GamePrediction[] = [];
     if (nbaQuery.data?.length) out.push(...nbaQuery.data);
     if (nflQuery.data?.length) out.push(...nflQuery.data);
     if (mlbModeledQuery.data?.length) out.push(...mlbModeledQuery.data);
-    if (soccerQuery.data?.length) out.push(...soccerQuery.data);
     return out;
-  }, [nbaQuery.data, nflQuery.data, mlbModeledQuery.data, soccerQuery.data]);
+  }, [nbaQuery.data, nflQuery.data, mlbModeledQuery.data]);
 
   const oddsMap = useOddsBundlesWithLivePoll(leagueGames);
 
@@ -152,6 +139,5 @@ export function useLiveEdgeNotifications(): void {
     settings.sports.mlb,
     settings.sports.nba,
     settings.sports.nfl,
-    settings.sports.soccer,
   ]);
 }

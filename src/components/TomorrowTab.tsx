@@ -329,7 +329,7 @@ export function TomorrowTab({
         (g) =>
           g.gameDate === "tomorrow" &&
           g.status === "upcoming" &&
-          TOMORROW_ALLOWED_SPORTS.has(String(g.sport).toLowerCase())
+          TOMORROW_ALLOWED_SPORTS.has(String(g.league).toLowerCase())
       ),
     [allGames]
   );

@@ -148,8 +148,8 @@ export function computeBettingIntelligenceMeta(
     else lineMovementSharpTowardPick = null;
   }
 
-  const quality = betQualityFromSignals({ edge, modelP, american, inSweetSpot });
-  const vRating = valueRatingFrom(edge, quality);
+  const quality = betQualityFromSignals({ edge, modelP, american, inSweetSpot, minEdgeRec });
+  const vRating = valueRatingFrom(edge, quality, minEdgeRec);
   const fit = parlayFitScore({ edge, modelP, american, inSweetSpot, volatilityScore: vol });
   const safety = parlaySafetyScore({ modelP, american, volatilityScore: vol, flags });
 

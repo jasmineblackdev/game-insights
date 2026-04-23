@@ -153,65 +153,7 @@ export async function mergeTheOddsApiNotes(
   }
 }
 
-/**
- * Fetch odds per soccer Odds API key (mapped from ESPN slug) so multi-league boards get US-book lines
- * without cross-league team-name collisions.
- */
+/** Deprecated soccer odds merger — no-op now that soccer is no longer supported. */
 export async function mergeSoccerOddsFromTheOddsApi(predictions: GamePrediction[]): Promise<GamePrediction[]> {
-  if (!isOddsApiAvailable()) return predictions;
-  const keysNeeded = new Set<string>();
-  for (const p of predictions) {
-    if (p.league !== "soccer") continue;
-    const slug = p._meta?.soccerLeagueSlug;
-    if (!slug) continue;
-    const key = ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug];
-    if (key) keysNeeded.add(key);
-  }
-
-  const eventsByKey = new Map<string, OddsEvent[]>();
-  for (const sportKey of keysNeeded) {
-    try {
-      const res = await fetchOddsForSport({
-        sportKey,
-        markets: "h2h,spreads,totals",
-        regions: "us",
-        oddsFormat: "american",
-      });
-      if (!res.ok) {
-        console.warn(
-          `[GameLens odds] No ${sportKey} odds (${res.status}) — free tier may omit this league or region.`
-        );
-        continue;
-      }
-      const raw = (await res.json()) as unknown;
-      if (!Array.isArray(raw)) continue;
-      eventsByKey.set(sportKey, raw as OddsEvent[]);
-    } catch (e) {
-      console.warn(`[GameLens odds] ${sportKey} request failed:`, e);
-    }
-  }
-
-  return predictions.map((p) => {
-    if (p.league !== "soccer") return p;
-    const slug = p._meta?.soccerLeagueSlug;
-    const sportKey = slug ? ODDS_API_SOCCER_KEY_BY_ESPN_SLUG[slug] : undefined;
-    const pool = sportKey ? eventsByKey.get(sportKey) ?? [] : [];
-    const ev = findEvent(p, pool);
-    if (!ev?.bookmakers?.length) return p;
-    const dk = ev.bookmakers.find((b) => (b.key ?? "").includes("draftkings") || (b.title ?? "").includes("DraftKings"));
-    const fd = ev.bookmakers.find((b) => (b.key ?? "").includes("fanduel") || (b.title ?? "").includes("FanDuel"));
-    const mgm = ev.bookmakers.find((b) => (b.key ?? "").includes("betmgm") || (b.title ?? "").includes("BetMGM"));
-    const parts: string[] = ["The Odds API (US books):"];
-    const ds = spreadLine(dk);
-    const fs = spreadLine(fd);
-    const ms = spreadLine(mgm);
-    if (ds) parts.push(`DK spread ${ds}`);
-    if (fs) parts.push(`FD spread ${fs}`);
-    if (ms) parts.push(`MGM spread ${ms}`);
-    if (parts.length < 2) return p;
-    const line = parts.join(" · ");
-    const notes = [...(p.enrichmentNotes ?? [])];
-    if (!notes.some((n) => n.includes("Odds API"))) notes.push(line);
-    return { ...p, enrichmentNotes: notes };
-  });
+  return predictions;
 }

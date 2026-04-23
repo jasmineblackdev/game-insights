@@ -5,7 +5,6 @@ import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbEnrichedGames } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { mergeMlbStarterConfirmations } from "@/lib/mlbStarterConfirm";
-import { fetchSoccerGamePredictions } from "@/lib/soccerEspn";
 
 const STALE_MS = 2 * 60 * 1000;
 
@@ -22,11 +21,6 @@ export function prefetchEdgeCardQueries(queryClient: QueryClient): void {
   void queryClient.prefetchQuery({
     queryKey: ["nfl-espn-scoreboard", ymd],
     queryFn: fetchNflGamePredictions,
-    ...base,
-  });
-  void queryClient.prefetchQuery({
-    queryKey: ["soccer-espn-scoreboard", ymd],
-    queryFn: fetchSoccerGamePredictions,
     ...base,
   });
 

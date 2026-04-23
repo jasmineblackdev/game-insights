@@ -114,34 +114,6 @@ export function computeContextAwareBlendWeights(
     w.recent_trend *= 0.95;
   }
 
-  if (league === "soccer") {
-    const sc = g.soccer;
-    const gapCount = sc?.dataGaps?.length ?? 0;
-    if (gapCount >= 2) {
-      w.market *= 1.12;
-      w.matchup *= 0.93;
-      w.historical_baseline *= 0.97;
-    } else if (gapCount === 1) {
-      w.market *= 1.05;
-    }
-    if (sc?.congestion) {
-      const { homeLast7, awayLast7 } = sc.congestion;
-      if (Math.abs(homeLast7 - awayLast7) >= 2) {
-        w.recent_trend *= 1.06;
-        w.matchup *= 1.04;
-      }
-      if (homeLast7 >= 3 || awayLast7 >= 3) {
-        w.recent_trend *= 1.05;
-        w.market *= 1.05;
-      }
-    }
-    if (g.threeWay && g.threeWay.draw >= 26) {
-      w.market *= 1.06;
-      w.live *= 0.9;
-      w.matchup *= 0.97;
-    }
-  }
-
   if (league === "mlb" && g.mlb) {
     const pc = g.mlb.pitcherCertainty;
     if (pc === "unknown" || pc === "partial") {
@@ -197,17 +169,7 @@ export function computeOpponentStyleCompatibilityPp(g: GamePrediction): number {
     }
     return clamp(pp, -1.45, 1.45);
   }
-  const paceGap = Math.abs(h.pace - a.pace);
-  const hNet = h.offensiveRating - h.defensiveRating;
-  const aNet = a.offensiveRating - a.defensiveRating;
-  const tempo = h.pace > a.pace ? paceGap * 0.028 : -paceGap * 0.023;
-  let soccerPp = (hNet - aNet) * 0.072 + tempo;
-  const tab = g.soccer?.table;
-  if (tab?.homePosition != null && tab?.awayPosition != null) {
-    const betterHome = tab.awayPosition - tab.homePosition;
-    soccerPp += clamp(betterHome * 0.016, -0.24, 0.24);
-  }
-  return clamp(soccerPp, -1.38, 1.38);
+  return 0;
 }
 
 /** 0–100: higher = more consistent recent outcomes vs season baseline. */
@@ -237,12 +199,6 @@ export function computeDataCompletenessScore(g: GamePrediction): number {
   ).length;
   s -= Math.min(36, q * 9);
   if (!g.lines?.homeMl && !g.lines?.awayMl && !g._meta?.marketMl) s -= 8;
-  if (g.league === "soccer" && g.soccer?.dataGaps?.length) {
-    s -= Math.min(26, g.soccer.dataGaps.length * 8);
-  }
-  if (g.league === "soccer" && g.soccer && (g.soccer.table?.homePosition == null || g.soccer.table?.awayPosition == null)) {
-    s -= 6;
-  }
   return Math.round(clamp(s, 5, 100) * 10) / 10;
 }
 
@@ -288,24 +244,24 @@ export function computeMarketReactionProbPp(args: {
   const { league, modelHome, closeH, lineMove, sharpMove, sentimentSteamScore } = args;
   if (closeH == null || lineMove == null) return 0;
   if (sharpMove) return 0;
-  const steamFloor = league === "mlb" || league === "soccer" ? 48 : 52;
-  const moveFloor = league === "mlb" || league === "soccer" ? 1.85 : 2.2;
+  const steamFloor = league === "mlb" ? 48 : 52;
+  const moveFloor = league === "mlb" ? 1.85 : 2.2;
   if (sentimentSteamScore < steamFloor) return 0;
   if (Math.abs(lineMove) < moveFloor) return 0;
   let pull = (closeH - modelHome) * 0.12 * clamp(sentimentSteamScore / 72, 0.35, 1);
-  if (league === "mlb" || league === "soccer") pull *= 1.14;
+  if (league === "mlb") pull *= 1.14;
   if (league === "nba" && sentimentSteamScore < 62) pull *= 0.88;
   return clamp(pull, -0.95, 0.95);
 }
 
 function interactionTiltFromState(state: SportEngineLearningState, tags: string[], league: League): number {
   let t = 0;
-  const minRowN = league === "mlb" || league === "soccer" ? 20 : 24;
+  const minRowN = league === "mlb" ? 20 : 24;
   for (const tag of tags) {
     const row = state.interactions[tag];
     if (row && row.n >= minRowN && typeof row.tiltPp === "number") t += row.tiltPp;
   }
-  const cap = league === "mlb" || league === "soccer" ? 0.62 : 0.55;
+  const cap = league === "mlb" ? 0.62 : 0.55;
   return clamp(t, -cap, cap);
 }
 
@@ -326,8 +282,7 @@ function staticFeatureInteractionPp(g: GamePrediction, volLabel: string): number
   ) {
     pp -= 0.16;
   }
-  if (L === "soccer" && g.threeWay && g.threeWay.draw >= 28 && volLabel === "high") pp -= 0.22;
-  if (L === "soccer" && (g.soccer?.dataGaps?.length ?? 0) >= 2 && volLabel === "high") pp -= 0.18;
+  void L;
   const paceGap = Math.abs(g.homeTeam.pace - g.awayTeam.pace);
   if (L === "nba" && paceGap >= 8 && volLabel === "high") pp -= 0.12;
   return clamp(pp, -0.62, 0.15);
@@ -354,11 +309,11 @@ export function computeLearningProbabilityStackPp(args: {
   const fav = modelHome >= 50 ? 1 : -1;
   const mag = Math.abs(modelHome - 50);
   const calMult =
-    league === "mlb" || league === "soccer" ? 1.22 : league === "nba" ? 0.9 : 1.06;
+    league === "mlb" ? 1.22 : league === "nba" ? 0.9 : 1.06;
   const calPull = -fav * clamp(mag * 0.018 * state.probTiltPp * calMult, -1.35, 1.35);
 
   const drift = clamp(state.driftBaselinePp, -0.38, 0.38);
-  const driftMult = league === "mlb" || league === "soccer" ? 1.12 : league === "nba" ? 0.85 : 1;
+  const driftMult = league === "mlb" ? 1.12 : league === "nba" ? 0.85 : 1;
   const driftAdj = clamp(drift * driftMult, -0.38, 0.38);
 
   const style = computeOpponentStyleCompatibilityPp(g);
@@ -387,7 +342,7 @@ export function computeLearningProbabilityStackPp(args: {
   const staticInteract = staticFeatureInteractionPp(g, volLabel);
 
   const sum = calPull + driftAdj + style + marketReact + learnedInteract + staticInteract;
-  const cap = league === "mlb" || league === "soccer" ? 3.05 : 2.8;
+  const cap = league === "mlb" ? 3.05 : 2.8;
   return clamp(sum, -cap, cap);
 }
 

@@ -95,8 +95,6 @@ export function inferMissTagsForLearning(game: GamePrediction, hit: boolean): st
     if (game.mlb?.pitcherCertainty !== "confirmed") tags.add("lineup_change");
   }
 
-  if (game.league === "soccer") tags.add("substitution_risk");
-
   if (game._meta?.quality?.market?.sharp_move_hint || game._meta?.quality?.market?.line_movement_home_pp != null) {
     tags.add("market_movement");
   }
@@ -110,10 +108,6 @@ function learningExtra(game: GamePrediction): Record<string, unknown> {
   return {
     blowout_risk: typeof blow === "number" && blow >= 58 ? "high" : "normal",
     lineup_confirmed: game.league === "mlb" ? Boolean(game.mlb?.lineupConfirmed) : undefined,
-    low_xg_fixture:
-      game.league === "soccer" &&
-      (game.soccer?.dataGaps?.some((g) => g.toLowerCase().includes("xg")) ||
-        (game.topReasons.join(" ").toLowerCase().includes("low") && game.topReasons.join(" ").toLowerCase().includes("goal"))),
     volatility_label: game._meta?.quality?.volatility?.volatility_label ?? null,
   };
 }

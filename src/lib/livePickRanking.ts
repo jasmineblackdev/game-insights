@@ -93,8 +93,6 @@ export function passesMainScreenLivePickGate(game: GamePrediction): boolean {
       return ls.periodNum >= 2 && ls.isHalftime !== true;
     case "mlb":
       return ls.periodNum >= 5;
-    case "soccer":
-      return ls.isHalftime === true;
     default:
       return false;
   }
@@ -126,9 +124,6 @@ export function selectLiveCheckpointRow(game: GamePrediction, filter?: LiveCheck
     case "mlb":
       want.add("after_inning_5");
       break;
-    case "soccer":
-      want.add("soccer_halftime");
-      break;
     default:
       return null;
   }
@@ -142,7 +137,7 @@ function checkpointRowForRanking(game: GamePrediction): LiveBettingStageRow | nu
 }
 
 export function mainScreenCheckpointLabel(game: GamePrediction, row: LiveBettingStageRow): string {
-  if (row.stageId === "halftime" || row.stageId === "soccer_halftime") return "Halftime Confirmed";
+  if (row.stageId === "halftime") return "Halftime Confirmed";
   if (row.stageId === "after_inning_5") return "F5 Confirmed";
   if (row.stageId === "after_q1") return "Q1 Confirmed";
   return "Live Confirmed";

@@ -22,9 +22,15 @@ import type { PlattParams, MLSport } from "@/lib/ml/types";
 const PLATT_LS_PREFIX = "gamelens-ml-platt-v2";
 const MIN_CALIBRATION_SAMPLES = 100;
 
-/** localStorage key for Platt params. */
-function plattKey(sport: MLSport, model: string): string {
-  return `${PLATT_LS_PREFIX}:${sport}:${model}`;
+/**
+ * localStorage key for Platt params — includes confidence bucket so the
+ * nightly-fitted per-bucket params are retrievable. Legacy keys without a
+ * bucket (ALL fallback) continue to work.
+ */
+function plattKey(sport: MLSport, model: string, bucket: string = "ALL"): string {
+  return bucket === "ALL"
+    ? `${PLATT_LS_PREFIX}:${sport}:${model}`
+    : `${PLATT_LS_PREFIX}:${sport}:${model}:${bucket}`;
 }
 
 /** Default (identity) Platt params — no calibration applied. */
@@ -39,26 +45,43 @@ export function defaultPlattParams(sport: MLSport, model: string): PlattParams {
   };
 }
 
-/** Load cached Platt params from localStorage. Returns defaults if missing. */
-export function loadPlattParams(sport: MLSport, model: string): PlattParams {
-  try {
-    const raw = localStorage.getItem(plattKey(sport, model));
-    if (!raw) return defaultPlattParams(sport, model);
-    const parsed = JSON.parse(raw) as PlattParams;
-    // Validate minimum samples
-    if (parsed.sample_size < MIN_CALIBRATION_SAMPLES) {
-      return defaultPlattParams(sport, model);
+/**
+ * Load cached Platt params from localStorage, preferring the per-(sport,
+ * model, confidence_bucket) params when available and falling back to the
+ * sport×model "ALL" bucket, then to identity defaults.
+ */
+export function loadPlattParams(
+  sport: MLSport,
+  model: string,
+  confidenceBucket?: string,
+): PlattParams {
+  const pick = (bucket: string | undefined): PlattParams | null => {
+    try {
+      const raw = localStorage.getItem(plattKey(sport, model, bucket ?? "ALL"));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as PlattParams;
+      if (parsed.sample_size < MIN_CALIBRATION_SAMPLES) return null;
+      return parsed;
+    } catch {
+      return null;
     }
-    return parsed;
-  } catch {
-    return defaultPlattParams(sport, model);
+  };
+  if (confidenceBucket && confidenceBucket !== "ALL") {
+    const bucketed = pick(confidenceBucket.toUpperCase());
+    if (bucketed) return bucketed;
   }
+  const allBucket = pick("ALL");
+  if (allBucket) return allBucket;
+  return defaultPlattParams(sport, model);
 }
 
 /** Persist updated Platt params to localStorage. */
-export function savePlattParams(params: PlattParams): void {
+export function savePlattParams(params: PlattParams, confidenceBucket?: string): void {
   try {
-    localStorage.setItem(plattKey(params.sport, params.model), JSON.stringify(params));
+    localStorage.setItem(
+      plattKey(params.sport, params.model, confidenceBucket ?? "ALL"),
+      JSON.stringify(params),
+    );
   } catch {
     // localStorage may be unavailable in SSR
   }

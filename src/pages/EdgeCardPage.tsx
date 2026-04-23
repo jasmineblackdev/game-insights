@@ -367,7 +367,7 @@ function EdgeCardPageInner() {
           <div className="flex items-center gap-2 shrink-0 overflow-x-auto max-w-full pb-0.5 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0 [scrollbar-width:thin]">
             <UnitSizeCalculator variant="compact" className="h-10 w-10 sm:h-9 sm:w-9 shrink-0 touch-manipulation" />
             <div className="inline-flex items-center gap-1 rounded-full bg-muted p-0.5 shrink-0">
-              {([3, 4, 6, 10] as const).map((n) => (
+              {([3, 5, 7, 10] as const).map((n) => (
                 <button
                   key={n}
                   type="button"
@@ -418,7 +418,7 @@ function EdgeCardPageInner() {
           </>
         ) : null}
         {edgeTab === "parlay" ? (
-          <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} loading={loading || oddsLoading} />
+          <ParlayBuilderSection games={allGamesWithIntel} oddsMap={oddsMap} gamesLoading={loading} bookOddsLoading={oddsLoading} />
         ) : null}
         {edgeTab === "analytics" ? (
           <ParlayPerformanceDashboard />
@@ -443,13 +443,13 @@ function EdgeCardPageInner() {
                 <Sparkles className="w-3.5 h-3.5" />
                 Auto Edge 3
               </Button>
-              <Button variant="outline" size="sm" onClick={() => runAuto(4)} className="gap-1">
+              <Button variant="outline" size="sm" onClick={() => runAuto(5)} className="gap-1">
                 <Sparkles className="w-3.5 h-3.5" />
-                Auto 4
+                Auto 5
               </Button>
-              <Button variant="outline" size="sm" onClick={() => runAuto(6)} className="gap-1">
+              <Button variant="outline" size="sm" onClick={() => runAuto(7)} className="gap-1">
                 <Sparkles className="w-3.5 h-3.5" />
-                Auto 6
+                Auto 7
               </Button>
               <Button variant="outline" size="sm" onClick={() => runAuto(10)} className="gap-1">
                 <Sparkles className="w-3.5 h-3.5" />

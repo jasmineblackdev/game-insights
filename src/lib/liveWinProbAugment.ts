@@ -16,11 +16,9 @@ export function sportSpecificLiveAugmentationPp(game: GamePrediction): number {
   const { periodNum, homeScore, awayScore } = ls;
   const scoreDiff = homeScore - awayScore;
   const frac =
-    game.league === "soccer"
-      ? clamp(periodNum / 90, 0, 1)
-      : game.league === "mlb"
-        ? clamp(periodNum / 9, 0, 1)
-        : clamp(periodNum / 4, 0, 1);
+    game.league === "mlb"
+      ? clamp(periodNum / 9, 0, 1)
+      : clamp(periodNum / 4, 0, 1);
 
   if (game.league === "nba") {
     const paceGap = game.homeTeam.pace - game.awayTeam.pace;
@@ -43,21 +41,6 @@ export function sportSpecificLiveAugmentationPp(game: GamePrediction): number {
     const bull = game.mlb?.modelOutput?._debug?.bullpenScore ?? 0;
     const inn = clamp(periodNum / 9, 0, 1);
     return clamp(Math.round(bull * 8 * inn), -4, 4);
-  }
-
-  if (game.league === "soccer") {
-    const cong = game.soccer?.congestion;
-    let fatigue = 0;
-    if (cong) {
-      fatigue = clamp((cong.homeLast7 - cong.awayLast7) * 0.4, -2, 2);
-    }
-    const drawMass = game.threeWay ? game.threeWay.draw / 100 : 0.28;
-    const drawDrag = drawMass >= 0.32 ? -1 : drawMass <= 0.22 ? 0.5 : 0;
-    const tableTilt =
-      game.soccer?.table?.homePosition != null && game.soccer?.table?.awayPosition != null
-        ? clamp((game.soccer.table.awayPosition - game.soccer.table.homePosition) * 0.15, -2, 2)
-        : 0;
-    return clamp(Math.round(fatigue * frac + drawDrag + tableTilt * (1 - frac)), -3, 3);
   }
 
   return 0;

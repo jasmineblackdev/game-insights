@@ -63,11 +63,6 @@ function blowoutRiskPenalty(league: League, m: number): number {
       else if (m >= 5) tier = 2;
       else if (m >= 3) tier = 1;
       break;
-    case "soccer":
-      if (m >= 3) tier = 3;
-      else if (m >= 2) tier = 2;
-      else if (m >= 1) tier = 1;
-      break;
     default:
       break;
   }
@@ -127,17 +122,6 @@ function mlbLiveHeuristic(game: GamePrediction, row: PlayerPropModelRow): { edge
   return { edgeBump, label };
 }
 
-function soccerHtHeuristic(game: GamePrediction, row: PlayerPropModelRow): { edgeBump: number; label: string } {
-  if (game.league !== "soccer" || !game._meta?.liveState?.isHalftime) {
-    return { edgeBump: 0, label: "" };
-  }
-  const shots = row.statType === "shots" || row.statType === "shots_on_target";
-  return {
-    edgeBump: shots ? 0.006 : 0.003,
-    label: "Halftime — second-half shots / xG involvement & set-piece role repriced.",
-  };
-}
-
 function findPlayerTrend(game: GamePrediction, row: PlayerPropModelRow): "hot" | "cold" | "steady" {
   const pool = [...game.playerTrends.home, ...game.playerTrends.away];
   const hit = pool.find((p) => p.name === row.playerName);
@@ -171,7 +155,6 @@ function roleStability01(
   if (inj.some((i) => i.status === "QUESTIONABLE" || i.status === "GTD")) s -= 0.1;
   if (game.league === "mlb" && game.mlb?.pitcherCertainty !== "confirmed") s -= 0.08;
   if (blowoutTier >= 2) s -= 0.12;
-  if (game.league === "soccer" && game._meta?.liveState?.isHalftime) s -= 0.04;
   return Math.min(0.95, Math.max(0.18, s));
 }
 
@@ -191,7 +174,6 @@ function matchupAdvantage01(
     else if (avgP < 98) m -= 0.06;
   }
   m += nflExtra;
-  if (league === "soccer") m += 0.06;
   return Math.min(0.92, Math.max(0.2, m));
 }
 
@@ -278,14 +260,6 @@ function adjustRowForLive(game: GamePrediction, row: PlayerPropModelRow): {
       vol += blowTier >= 1 ? 4 : 0;
       break;
     }
-    case "soccer": {
-      const sc = soccerHtHeuristic(game, row);
-      edge += sc.edgeBump;
-      if (sc.label) reasons.push(sc.label);
-      reasons.push("Touches in box & sub risk modeled lightly until event feeds land.");
-      vol += 4;
-      break;
-    }
     default:
       break;
   }
@@ -303,7 +277,8 @@ function adjustRowForLive(game: GamePrediction, row: PlayerPropModelRow): {
         : "Shot attempts & foul risk reflected in live repricing (heuristic).",
     nfl: "Snap share, target share & game script direction (heuristic).",
     mlb: "Pitch count, K pace & remaining AB context (heuristic).",
-    soccer: "Shots / xG involvement & set-piece role at HT (heuristic).",
+    boxing: "Round-by-round scoring pace & output flags (heuristic).",
+    mma: "Striking output & grappling exchange rates (heuristic).",
   };
 
   return {

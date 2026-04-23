@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Copy, Hourglass, RefreshCw, Shuffle, Trash2, Wallet, Wrench, Zap } from "lucide-react";
-import type { League } from "@/data/mockGames";
+import type { GamePrediction, League } from "@/data/mockGames";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -81,7 +81,7 @@ function TierPerformanceStrip() {
 }
 
 function leagueShort(l: League) {
-  return l === "soccer" ? "EPL" : l.toUpperCase();
+  return l.toUpperCase();
 }
 
 // ── Cash-Out Parlay section ───────────────────────────────────────────────────

@@ -88,7 +88,7 @@ export function bumpSportEngineFromOutcome(
     interactions: { ...(prev?.interactions ?? {}) },
   };
 
-  const noisyLeague = league === "mlb" || league === "soccer";
+  const noisyLeague = league === "mlb" || league === "boxing" || league === "mma";
   const emaKeep = noisyLeague ? 0.982 : 0.985;
   const emaTake = noisyLeague ? 0.018 : 0.015;
 

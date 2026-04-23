@@ -238,7 +238,7 @@ function detectLateNews(g: GamePrediction, sharpMove: boolean): boolean {
 
 export function applyQualityToOneGame(g: GamePrediction, calibrationRows: CalibrationRow[]): GamePrediction {
   const rawConfidence = g.confidence;
-  let next: GamePrediction = { ...g, _meta: g._meta ? { ...g._meta } : {} };
+  let next: GamePrediction = { ...g, _meta: g._meta ? { ...g._meta } : g._meta };
 
   const inj = injuryImportanceMeta(next);
   const fat = fatigueMeta(next);

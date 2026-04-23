@@ -58,6 +58,11 @@ const SPORT_TO_ML: Record<PlayerEdgePrediction["sport"], MLSport> = {
  * Floors at 0.50 (never express negative edge in P), caps at 0.90.
  */
 function rulesHitProbability(pred: PlayerEdgePrediction): number {
+  // Prefer the variance-adjusted path; fall back to the linear edge map
+  // only when projected_value / line_value aren't useful.
+  if (Number.isFinite(pred.projected_value) && Number.isFinite(pred.line_value)) {
+    return rulesHitProbabilityVariance(pred);
+  }
   const maxEdge: Record<string, number> = {
     NBA: 8, NFL: 30, MLB: 2, Boxing: 15, MMA: 15,
   };
@@ -67,13 +72,42 @@ function rulesHitProbability(pred: PlayerEdgePrediction): number {
 }
 
 /**
- * Derive a market probability proxy when actual market odds are unavailable.
- * Uses confidence tier as a conservative estimate.
+ * Real market-implied probability when American odds are present.
+ * Falls back to a confidence-tier proxy only when the feed hasn't supplied
+ * actual odds — important because the nightly Platt fitter trains on this
+ * value. Synthetic targets pollute calibration.
  */
 function marketProbProxy(pred: PlayerEdgePrediction): number {
+  const a = pred.american_odds;
+  if (typeof a === "number" && Number.isFinite(a) && a !== 0) {
+    return a >= 0 ? 100 / (a + 100) : -a / (-a + 100);
+  }
   if (pred.confidence === "HIGH") return 0.62;
   if (pred.confidence === "MED")  return 0.56;
   return 0.51;
+}
+
+/**
+ * Variance-adjusted rules hit probability from projected value vs line.
+ * Previously a linear transform of |edge|, which makes Platt train on a
+ * signal that's structurally equivalent to edge. Now uses:
+ *   P_over = Φ((projected − line) / sport_sigma)
+ * where sport_sigma is a stat-specific residual volatility.
+ */
+function rulesHitProbabilityVariance(pred: PlayerEdgePrediction): number {
+  const sportSigma: Record<string, number> = {
+    NBA: 4.5, NFL: 18, MLB: 0.6, Boxing: 0.08, MMA: 0.08,
+  };
+  const sigma = sportSigma[pred.sport] ?? 4.0;
+  const z = (pred.projected_value - pred.line_value) / sigma;
+  // Normal CDF approximation (Abramowitz & Stegun 7.1.26 variant)
+  const t = 1 / (1 + 0.2316419 * Math.abs(z));
+  const d = 0.3989422804 * Math.exp(-0.5 * z * z);
+  const cdf = 1 - d * (0.31938153 * t - 0.356563782 * t * t + 1.781477937 * t * t * t
+                       - 1.821255978 * t * t * t * t + 1.330274429 * t * t * t * t * t);
+  const pOver = z >= 0 ? cdf : 1 - cdf;
+  const side = pred.prediction_direction === "MORE" ? pOver : 1 - pOver;
+  return Math.max(0.10, Math.min(0.90, side));
 }
 
 // ── Timing label builder ──────────────────────────────────────────────────────
@@ -211,8 +245,21 @@ const PREDICTION_LOG_BATCH_SIZE = 20;
 export async function logSurfacedPredictions(preds: PlayerEdgePrediction[]): Promise<void> {
   if (!supabase) return;
 
+  // Filter out MLB predictions whose starting pitcher isn't confirmed yet —
+  // pre-confirmation variance poisons the MLB strikeout calibration bucket
+  // and shrinks alpha trust for legitimate confirmed-starter samples.
+  // Pre-confirmation predictions re-enter the pool automatically once the
+  // pitcher is confirmed (they get a new id on the next fetch).
+  const gated = preds.filter((p) => {
+    if (p.sport !== "MLB") return true;
+    // Any MLB pred tagged with pendingConfirmation / ml_debug flag skips logging.
+    type MlbPreConfirmShape = { pendingConfirmation?: boolean };
+    if ((p as MlbPreConfirmShape).pendingConfirmation) return false;
+    return true;
+  });
+
   // Only log predictions we haven't logged this session
-  const toLog = preds.filter((p) => !_loggedThisSession.has(p.id));
+  const toLog = gated.filter((p) => !_loggedThisSession.has(p.id));
   if (toLog.length === 0) return;
 
   // Mark as logged immediately to prevent duplicate calls

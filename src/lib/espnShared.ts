@@ -136,18 +136,9 @@ export function winProbFromRecords(
   return { home: Math.round(h * 100), away: Math.round((1 - h) * 100) };
 }
 
-/** 0–1 strength: NBA/NFL/MLB uses win%; soccer uses (3W+D)/(3·games) from W-D-L tables. */
-export function seasonStrengthFromRecord(summary: string | undefined, league: League): number {
+/** 0–1 strength from win percentage. */
+export function seasonStrengthFromRecord(summary: string | undefined, _league: League): number {
   if (!summary) return 0.5;
-  const soccer = summary.match(/^(\d+)-(\d+)-(\d+)$/);
-  if (league === "soccer" && soccer) {
-    const w = Number(soccer[1]);
-    const d = Number(soccer[2]);
-    const l = Number(soccer[3]);
-    const n = w + d + l;
-    if (n === 0) return 0.5;
-    return (3 * w + d) / (3 * n);
-  }
   return parseRecord(summary).pct;
 }
 
@@ -184,20 +175,14 @@ export function probThreeWayFromAmerican(
   return { home: rh, away: ra, draw: rd };
 }
 
-/** Fallback 1X2 when odds missing: table-strength gap + home boost; draw peaks when teams are even. */
+/** Deprecated soccer fallback — kept as a no-op stub until callers are removed. */
 export function probThreeWayFromSoccerRecords(
-  homeRecord: string | undefined,
-  awayRecord: string | undefined
+  _homeRecord: string | undefined,
+  _awayRecord: string | undefined
 ): { home: number; away: number; draw: number } {
-  const hs = seasonStrengthFromRecord(homeRecord, "soccer") + 0.045;
-  const as = seasonStrengthFromRecord(awayRecord, "soccer");
-  const diff = hs - as;
-  const pDraw = Math.min(0.36, Math.max(0.2, 0.29 - Math.abs(diff) * 0.55));
-  const rem = 1 - pDraw;
-  const eh = Math.exp(4 * diff);
-  const ea = Math.exp(-4 * diff);
-  const ph = (rem * eh) / (eh + ea);
-  const pa = rem - ph;
+  const ph = 0.4;
+  const pa = 0.4;
+  const pDraw = 0.2;
   const h100 = ph * 100;
   const a100 = pa * 100;
   const d100 = pDraw * 100;
@@ -380,7 +365,7 @@ export function buildSituationalTags(
   // Status tag
   if (status === "live") tags.push("LIVE");
   else if (status === "final") tags.push("FINAL");
-  else tags.push(league === "soccer" ? soccerListTag ?? "SOC" : league.toUpperCase());
+  else tags.push(league.toUpperCase());
 
   // Toss-up — spread within 1.5 pts or prob near 50/50
   const probGap = Math.abs(prob.home - prob.away);
@@ -507,7 +492,7 @@ export function buildEdges(
   }
   if (details) {
     edges.push({
-      label: league === "soccer" ? "Line (DK)" : "Spread (DK)",
+      label: "Spread (DK)",
       team: spread != null && spread < 0 ? "home" : "away",
       description: details,
     });
@@ -515,7 +500,7 @@ export function buildEdges(
   const hp = seasonStrengthFromRecord(away.record, league);
   const ap = seasonStrengthFromRecord(home.record, league);
   edges.push({
-    label: league === "soccer" ? "Table / form (W-D-L)" : "Season record",
+    label: "Season record",
     team: hp > ap ? "away" : "home",
     description: `${away.abbreviation} ${away.record} vs ${home.abbreviation} ${home.record}`,
   });

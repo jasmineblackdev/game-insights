@@ -67,6 +67,14 @@ export type PlayerEdgePrediction = PlayerPropInput & {
   best_time_to_bet?: string | null;
   /** True when stat variance is high — confidence model flags this as unreliable. */
   volatility_flag?: boolean;
+  /** NFL-only: true when a relevant injury flag was detected for this player. */
+  has_injury_flag?: boolean;
+  /**
+   * American odds for the prop when known (from sportsbook feed). Lets the
+   * enricher compute real implied probability instead of the confidence-tier
+   * proxy. Missing → fall back to marketProbProxy().
+   */
+  american_odds?: number;
   /** 80% confidence interval lower bound from propProjection model. */
   projection_ci_low?: number;
   /** 80% confidence interval upper bound from propProjection model. */

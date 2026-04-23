@@ -99,8 +99,7 @@ export function writeGameOutcome(
       final_away_score: finalAwayScore,
     })
     .eq("id", `${eventId}-pregame`)
-    .then(() => null)
-    .catch(() => null);
+    .then(() => null, () => null);
 }
 
 // ── Calibration utility ───────────────────────────────────────────────────────

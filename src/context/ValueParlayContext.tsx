@@ -11,9 +11,9 @@ import { optimizeForMode, optimizeSmartParlays, type AnalyticsWeights } from "@/
 import { logParlayBuild } from "@/lib/valueParlay/parlayLogger";
 import {
   parlayAmericanOdds,
-  parlayHitProbability,
   payoutMultiplierFromAmerican,
 } from "@/lib/valueParlay/oddsMath";
+import { correlatedParlayHitProbability } from "@/lib/valueParlay/correlatedParlayProbability";
 
 interface ValueParlayContextValue {
   parlayMode: ParlayBuildMode;
@@ -42,7 +42,9 @@ const MAX_BUILDER_LEGS = 12;
 function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
   if (!legs.length) return null;
   const combined = parlayAmericanOdds(legs.map((l) => l.americanOdds));
-  const hit = parlayHitProbability(legs.map((l) => l.modelProbability));
+  // Correlation-aware joint probability — same engine the optimizer uses.
+  // Prevents overstating EV for same-game / same-team SGP legs.
+  const hit = correlatedParlayHitProbability(legs, legs.map((l) => l.modelProbability));
   const mult = payoutMultiplierFromAmerican(combined);
   const corr = legs.reduce((s, l, _, arr) => {
     const same = arr.filter((x) => x.gameId === l.gameId).length;

@@ -88,7 +88,6 @@ export function LiveEdgeNotificationSettings({ className }: { className?: string
               ["nba", "NBA"],
               ["nfl", "NFL"],
               ["mlb", "MLB"],
-              ["soccer", "Soccer (EPL)"],
             ] as const
           ).map(([k, label]) => (
             <div key={k} className="flex items-center justify-between gap-2">

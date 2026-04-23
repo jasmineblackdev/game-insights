@@ -49,6 +49,11 @@ function minEdge(settings: LiveEdgeNotificationSettings): number {
   return settings.pickMode === "safe" ? 0.04 : 0.03;
 }
 
+/** Sport-aware effective floor: max of user threshold and learned sport floor. */
+function effectiveMinEdge(game: GamePrediction, settings: LiveEdgeNotificationSettings): number {
+  return Math.max(minEdge(settings), defaultMinEdgeForRecommend(game.league));
+}
+
 function confidenceOk(settings: LiveEdgeNotificationSettings, game: GamePrediction): boolean {
   if (settings.pickMode === "safe") return game.confidence === "high";
   return game.confidence === "medium" || game.confidence === "high";

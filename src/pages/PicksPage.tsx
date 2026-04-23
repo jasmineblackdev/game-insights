@@ -190,7 +190,7 @@ export default function PicksPage() {
 
   const { data: picks = [], isPending: picksLoading } = useQuery({
     queryKey: ["picks-log"],
-    queryFn:  fetchMyPicks,
+    queryFn:  () => fetchMyPicks(),
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
