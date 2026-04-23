@@ -102,6 +102,18 @@ export const MLB_STAT_VOLATILITY_FLOOR: Record<string, number> = {
   stolen_bases: 72,   // game-state + catcher dependent; very noisy
   rbi:          60,   // team-run environment dependent
   runs:         58,
+  // ── Longshot-prone categories (usually +200+ at the 1+ threshold) ───────
+  doubles:      64,   // rare event; ~25–30% per-game hit rate even for SLG%
+  triples:      88,   // almost always a +2000+ longshot
+  extra_base_hits: 58,
+  singles:      40,   // moderate — usually requires 1+ hit + non-XBH
+  reach_on_error: 88, // book offers this at +5000 routinely
+  // "1st of Game" and "1st plate appearance" markets are heavy longshots
+  // whether they show up as stat_type = first_hit / first_rbi / etc.
+  first_hit:       82,
+  first_rbi:       82,
+  first_stolen_base: 90,
+  first_run:       82,
 };
 
 /**

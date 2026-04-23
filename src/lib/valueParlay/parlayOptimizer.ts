@@ -227,12 +227,19 @@ interface TierFloors {
    * candidate has a valid recentHitRate with ≥ 3 samples.
    */
   minRecentHitRate: number;
+  /**
+   * Minimum implied probability from the American odds. Prevents longshot
+   * alt lines like "Rebounds 7+ at +270" (27% implied) from entering
+   * high-confidence tiers even when the model sees edge. A positive-edge
+   * longshot is still a longshot — this floor cuts them at the door.
+   */
+  minImpliedProbability: number;
 }
 
 function tierFloors(mode: ParlayBuildMode): TierFloors {
   if (mode === "safe") {
-    // SAFE is now noticeably tighter: only high-probability legs and props
-    // where the player has been hitting the line recently can enter.
+    // SAFE only accepts legs that imply ≥ 55% hit rate from the odds alone.
+    // Roughly equivalent to "no worse than about -120 American".
     return {
       maxVolatility: 45,
       minStability:  0.62,
@@ -242,9 +249,11 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       waitMinEdge:   999,
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.45,
+      minImpliedProbability: 0.55,
     };
   }
   if (mode === "balanced") {
+    // BALANCED lets moderate underdogs in (≥ ~44% implied, i.e. -130 to +130).
     return {
       maxVolatility: 65,
       minStability:  0.52,
@@ -254,11 +263,11 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       waitMinEdge:   0.09,
       maxMediumConfidenceLegs: 2,
       minRecentHitRate: 0.35,
+      minImpliedProbability: 0.44,
     };
   }
   if (mode === "cashout") {
-    // Cash-out uses slightly looser ML-prob floor than safe because we also
-    // want at least one upside leg; structural ordering does the heavy lifting.
+    // Cash-out early legs must resolve reliably — same implied floor as SAFE.
     return {
       maxVolatility: 55,
       minStability:  0.58,
@@ -268,6 +277,7 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       waitMinEdge:   999,
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.40,
+      minImpliedProbability: 0.52,
     };
   }
   // aggressive
@@ -280,6 +290,7 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
     waitMinEdge:   0,
     maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
     minRecentHitRate: 0,
+    minImpliedProbability: 0,
   };
 }
 
@@ -312,6 +323,7 @@ export function diagnoseLegRejection(
   if (c.volatilityScore >= floors.maxVolatility) return "tier_floor_volatility";
   if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return "tier_floor_stability";
   if ((c.modelProbability ?? 0) < floors.minHitProb) return "tier_floor_hit_prob";
+  if ((c.impliedProbability ?? 0) < floors.minImpliedProbability) return "tier_floor_implied_prob";
 
   // Recent-performance gate — only applied when we have a real sample.
   // Rejects player props where the player has missed the line in most of
@@ -339,7 +351,40 @@ export function diagnoseLegRejection(
     if (cat === "hitter_high_vol") return "mlb_hitter_high_vol_safe_gate";
   }
 
+  // Hard-block longshot-prone stat categories in SAFE / CASHOUT regardless
+  // of how good the posted edge looks (triples, specific-inning markets,
+  // "first-of-game" props, etc.). Balanced/Aggressive still allow them.
+  if ((mode === "safe" || mode === "cashout") && isHighVarianceStatType(c.statType)) {
+    return "longshot_stat_category";
+  }
+
   return null;
+}
+
+// ── High-variance prop guardrails ─────────────────────────────────────────────
+// Some stat_types are inherently longshot-prone regardless of the individual
+// player (triples, stolen bases, specific-inning markets). Legs that hit these
+// categories get an implicit volatility bump so SAFE / CASHOUT tier floors
+// reject them automatically, while AGGRESSIVE still allows them.
+
+const HIGH_VARIANCE_STAT_TYPES = new Set<string>([
+  // MLB — covered additionally in MLB_STAT_VOLATILITY_FLOOR
+  "triples", "reach_on_error",
+  "first_hit", "first_rbi", "first_stolen_base", "first_run",
+  // NBA — "only a guard's 7+ rebounds ever becomes a +270 price"
+  // The stat_type itself isn't the problem; the threshold is. But when the
+  // book line produces a > +200 line for a non-high-variance stat, the
+  // implied-probability floor catches it. We keep this set minimal so we
+  // don't block legitimate prime-line NBA points/rebounds props.
+  "four_pt_made", "six_pt_play", "triple_double",
+  // NFL
+  "longest_completion", "longest_reception", "longest_rush",
+  "interceptions_thrown_by_qb", // volatile single-event
+]);
+
+function isHighVarianceStatType(statType: string | undefined): boolean {
+  if (!statType) return false;
+  return HIGH_VARIANCE_STAT_TYPES.has(statType.toLowerCase());
 }
 
 // ── Preferred odds ranges per tier ────────────────────────────────────────────
