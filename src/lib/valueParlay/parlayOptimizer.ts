@@ -173,6 +173,16 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
   // Clamped to ±0.08 at source; never overrides edge/ML/confidence.
   const injuryAdj = Math.min(0.08, Math.max(-0.08, c.injuryImpactAdj ?? 0));
 
+  // Recent-performance adjustment: how often the player cleared the line in
+  // the picked direction across their last ~5 games. Centered at 0.5; deviation
+  // maps linearly to ±0.06. Undefined rate → 0 (no effect). Requires at least
+  // 3 decided samples to count.
+  const rhr      = c.recentHitRate;
+  const samples  = c.recentHitRateSamples ?? 0;
+  const recentAdj = (rhr != null && samples >= 3)
+    ? Math.min(0.06, Math.max(-0.06, (rhr - 0.5) * 0.12))
+    : 0;
+
   // Weight schedule: edge remains primary driver but ml_hit_probability and
   // stability_score get a slight bump so fragile legs are less likely to rank
   // into safe-tier parlays. Weights sum to ~1.0 with additive analytics adj.
@@ -185,7 +195,8 @@ export function computeLegScore(c: ValueBetCandidate, weights: AnalyticsWeights 
     marketAdj      * 0.05 +
     sportAdj       * 0.03 +
     mlbPropAdj            + // additive; bounded by mlbPropPriorityAdjustment()
-    injuryAdj               // additive; bounded to ±0.08; NFL only
+    injuryAdj             + // additive; bounded to ±0.08; NFL only
+    recentAdj               // additive; bounded to ±0.06; player_prop only
   );
 }
 
@@ -210,29 +221,39 @@ interface TierFloors {
   allowWait:    boolean;
   waitMinEdge:  number;     // when allowWait=true and leg is wait-timing
   maxMediumConfidenceLegs: number;
+  /**
+   * Minimum recent-hit-rate for player props. Rejects props where the player
+   * missed the line in most of their last 5 games. Only applied when the
+   * candidate has a valid recentHitRate with ≥ 3 samples.
+   */
+  minRecentHitRate: number;
 }
 
 function tierFloors(mode: ParlayBuildMode): TierFloors {
   if (mode === "safe") {
+    // SAFE is now noticeably tighter: only high-probability legs and props
+    // where the player has been hitting the line recently can enter.
     return {
-      maxVolatility: 50,
-      minStability:  0.58,
-      minHitProb:    0.54,
-      minLegScore:   0.58,
+      maxVolatility: 45,
+      minStability:  0.62,
+      minHitProb:    0.62,
+      minLegScore:   0.60,
       allowWait:     false,
       waitMinEdge:   999,
       maxMediumConfidenceLegs: 1,
+      minRecentHitRate: 0.45,
     };
   }
   if (mode === "balanced") {
     return {
       maxVolatility: 65,
-      minStability:  0.50,
-      minHitProb:    0.50,
-      minLegScore:   0.52,
+      minStability:  0.52,
+      minHitProb:    0.54,
+      minLegScore:   0.54,
       allowWait:     true,
       waitMinEdge:   0.09,
       maxMediumConfidenceLegs: 2,
+      minRecentHitRate: 0.35,
     };
   }
   if (mode === "cashout") {
@@ -240,12 +261,13 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
     // want at least one upside leg; structural ordering does the heavy lifting.
     return {
       maxVolatility: 55,
-      minStability:  0.55,
-      minHitProb:    0.53,
-      minLegScore:   0.55,
+      minStability:  0.58,
+      minHitProb:    0.58,
+      minLegScore:   0.56,
       allowWait:     false,
       waitMinEdge:   999,
       maxMediumConfidenceLegs: 1,
+      minRecentHitRate: 0.40,
     };
   }
   // aggressive
@@ -257,6 +279,7 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
     allowWait:     true,
     waitMinEdge:   0,
     maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
+    minRecentHitRate: 0,
   };
 }
 
@@ -289,6 +312,17 @@ export function diagnoseLegRejection(
   if (c.volatilityScore >= floors.maxVolatility) return "tier_floor_volatility";
   if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return "tier_floor_stability";
   if ((c.modelProbability ?? 0) < floors.minHitProb) return "tier_floor_hit_prob";
+
+  // Recent-performance gate — only applied when we have a real sample.
+  // Rejects player props where the player has missed the line in most of
+  // their last games. Game-level picks and unenriched props skip this.
+  if (c.pickType === "player_prop"
+      && floors.minRecentHitRate > 0
+      && c.recentHitRate != null
+      && (c.recentHitRateSamples ?? 0) >= 3
+      && c.recentHitRate < floors.minRecentHitRate) {
+    return "recent_hit_rate_too_low";
+  }
 
   if (c.americanOdds > 0 && c.volatilityScore >= 55 && c.edge <= 0.08) return "underdog_volatility_trap";
 

@@ -130,6 +130,9 @@ export async function logParlayLegRejections(
       timing_urgency:     c.timingUrgency ?? null,
       rejection_reason:   reason,
       rejection_date:     day,
+      // Note: recentHitRate not persisted yet — would require a schema add.
+      // Tracked at the leg-score level via computeLegScore so existing
+      // analytics pipeline still benefits.
     });
   }
 

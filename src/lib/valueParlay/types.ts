@@ -88,6 +88,15 @@ export interface ValueBetCandidate {
    */
   gameTimeLabel?: string;
   /**
+   * Fraction of the player's last N (default 5) games where the stat value
+   * cleared the line in the prop's direction. 0–1; undefined when the
+   * gamelog couldn't be fetched (unsupported sport/stat, missing athlete id,
+   * or API failure). Computed post-fetch and attached before parlay build.
+   */
+  recentHitRate?: number;
+  /** Sample size behind recentHitRate. */
+  recentHitRateSamples?: number;
+  /**
    * NFL-only: pre-computed injury position multiplier.
    * Populated by buildCandidates when game.league === "nfl" and injury data
    * is present. Positive = injuries create opportunity; negative = injuries

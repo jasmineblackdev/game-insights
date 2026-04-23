@@ -20,6 +20,7 @@ import {
   logParlayLegRejections,
   logGamePredictionSnapshots,
 } from "@/lib/ml/impressionLogger";
+import { enrichCandidatesWithRecentPerformance } from "@/lib/valueParlay/recentPerformanceEnrichment";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -294,7 +295,7 @@ export function ParlayBuilderSection({
     gcTime: 10 * 60 * 1000,
   });
 
-  const candidates = useMemo(() => {
+  const rawCandidates = useMemo(() => {
     const gameCandidates = buildAllValueCandidates(games, oddsMap);
     const rawProps = propData?.items ?? [];
     const filteredProps = filterPropsByGameIds
@@ -310,6 +311,26 @@ export function ParlayBuilderSection({
     );
     return [...gameCandidates, ...uniqueEnriched].sort((a, b) => b.valueScore - a.valueScore);
   }, [games, oddsMap, propData]);
+
+  // Recent-performance enrichment — batch-fetches each player's last 5 games,
+  // computes hit rate vs the prop's line, and re-returns the candidate pool
+  // with recentHitRate attached. SAFE tier uses this as a hard floor; every
+  // mode uses it as a soft leg-score adjustment.
+  const candidateKey = useMemo(
+    () => rawCandidates.map((c) => `${c.id}:${c.playerId ?? ""}:${c.statType ?? ""}:${c.lineValue ?? ""}`).join("|"),
+    [rawCandidates]
+  );
+  const { data: enrichedCandidates } = useQuery({
+    queryKey:  ["parlay-candidates-recent-perf", candidateKey],
+    queryFn:   () => enrichCandidatesWithRecentPerformance(rawCandidates),
+    staleTime: 10 * 60 * 1000,
+    gcTime:    30 * 60 * 1000,
+    enabled:   rawCandidates.length > 0,
+  });
+
+  // Use enriched candidates when available; fall back to raw until fetch lands.
+  // First render shows raw (no recentHitRate), then updates once gamelogs resolve.
+  const candidates = enrichedCandidates ?? rawCandidates;
 
   // ML training coverage: log every prop impression, every rejected candidate
   // for the current mode, and every pre-game team pick. Fire-and-forget —
