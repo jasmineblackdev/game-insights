@@ -346,9 +346,11 @@ export function ParlayBuilderSection({
     logParlayLegRejections(candidates, parlayMode).catch(() => {});
   }, [candidates, parlayMode, propData, filterPropsByGameIds]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
+  // Cash-Out parlays today is shown whenever candidates are loaded — the user
+  // shouldn't have to toggle the triple card to see the Cash-Out section.
   const cashoutTriple = useMemo(
-    () => (tripleOpen ? optimizeSmartParlays(candidates, "cashout", analyticsWeights) : null),
-    [tripleOpen, candidates, analyticsWeights]
+    () => (candidates.length ? optimizeSmartParlays(candidates, "cashout", analyticsWeights) : null),
+    [candidates, analyticsWeights]
   );
 
   const shareText = useMemo(
@@ -627,7 +629,10 @@ export function ParlayBuilderSection({
             </div>
           ) : null}
 
-          {cashoutTriple ? (
+          {cashoutTriple &&
+           (cashoutTriple.bestValue.legs.length +
+            cashoutTriple.safer.legs.length +
+            cashoutTriple.higherPayout.legs.length) > 0 ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2 px-0.5">
                 <Hourglass className="w-3.5 h-3.5 text-sky-500" />
