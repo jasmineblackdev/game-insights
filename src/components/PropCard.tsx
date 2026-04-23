@@ -11,6 +11,8 @@
 
 import { cn } from "@/lib/utils";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
+import { useQuery } from "@tanstack/react-query";
+import { fetchPlayerLastGames, type PlayerGameStat } from "@/lib/playerGameLog";
 
 // ── Line movement helpers ─────────────────────────────────────────────────────
 
@@ -55,6 +57,82 @@ export function earlyValueTag(
   // Solid edge with role certainty
   if (pred.edge >= 6 && stab >= 0.60) return "EARLY VALUE";
   return null;
+}
+
+// ── Last-5 recent games strip ────────────────────────────────────────────────
+// Fetches the player's last 5 game values for the prop's stat_type from the
+// ESPN gamelog endpoint. Cached 10 minutes via React Query; silent failure
+// hides the strip so non-supported sports/stats don't show an empty row.
+
+function RecentGamesStrip({
+  sport,
+  playerId,
+  statType,
+  line,
+  direction,
+}: {
+  sport: string;
+  playerId: string;
+  statType: string;
+  line: number;
+  direction: "MORE" | "LESS";
+}) {
+  const { data = [], isLoading } = useQuery<PlayerGameStat[]>({
+    queryKey: ["player-gamelog", sport, playerId, statType],
+    queryFn:  () => fetchPlayerLastGames(sport, playerId, statType, 5),
+    staleTime: 10 * 60 * 1000,
+    gcTime:    30 * 60 * 1000,
+    enabled:   !!playerId && !!statType,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground/70">
+        <span className="font-semibold tracking-wider">L5</span>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <span key={i} className="h-4 w-6 rounded bg-muted/60 animate-pulse" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!data.length) return null;
+
+  const hits = data.filter((g) =>
+    direction === "MORE" ? g.value > line : g.value < line
+  ).length;
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+      <span className="font-semibold tracking-wider text-muted-foreground">L5</span>
+      {data.map((g, i) => {
+        const hit =
+          direction === "MORE" ? g.value > line :
+          direction === "LESS" ? g.value < line :
+          null;
+        const push = g.value === line;
+        return (
+          <span
+            key={i}
+            className={cn(
+              "tabular-nums font-semibold px-1.5 py-0.5 rounded border",
+              push
+                ? "bg-muted text-muted-foreground border-border"
+                : hit
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                  : "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/25"
+            )}
+            title={`${g.date}${g.opponent ? ` ${g.homeAway === "away" ? "@" : "vs"} ${g.opponent}` : ""}: ${g.value}`}
+          >
+            {Number.isInteger(g.value) ? g.value : g.value.toFixed(1)}
+          </span>
+        );
+      })}
+      <span className="text-muted-foreground/80 ml-0.5">
+        {hits}/{data.length} hit
+      </span>
+    </div>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -197,6 +275,13 @@ export function PropCard({
           </span>
         )}
       </div>
+      <RecentGamesStrip
+        sport={pred.sport}
+        playerId={pred.player_id}
+        statType={pred.stat_type}
+        line={pred.line_value}
+        direction={pred.prediction_direction}
+      />
     </div>
   );
 }
