@@ -30,6 +30,10 @@ import {
   computeNflTotalInjuryAdj,
   nflInjuryTimingBoost,
 } from "@/lib/valueParlay/nflInjuryImpact";
+import {
+  computeNbaTeamInjuryAdj,
+  computeMlbTeamInjuryAdj,
+} from "@/lib/valueParlay/generalInjuryImpact";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
@@ -85,6 +89,32 @@ function syntheticAmericanFromModel(p: number): number {
   return americanFromImpliedProb(vigged);
 }
 
+/**
+ * Returns true when the MLB game's probable pitchers aren't confirmed yet.
+ * All MLB candidates for such a game are tagged preConfirmationFlag=true
+ * and have their confidence capped at "low" — they're meant to be re-
+ * emitted once confirmation lands, not bet before the lineup is set.
+ */
+function isMlbPreConfirmation(game: GamePrediction): boolean {
+  if (game.league !== "mlb") return false;
+  if (!game.mlb) return true; // no mlb block at all → treat as pre-confirmation
+  return game.mlb.pitcherCertainty !== "confirmed";
+}
+
+function applyPreConfirmationDowngrade(
+  candidate: ValueBetCandidate,
+  game: GamePrediction,
+): ValueBetCandidate {
+  if (!isMlbPreConfirmation(game)) return candidate;
+  return {
+    ...candidate,
+    preConfirmationFlag: true,
+    confidence: "low",
+    isRecommended: false,
+    exclusionReason: candidate.exclusionReason ?? "MLB pitchers not yet confirmed",
+  };
+}
+
 function moneylineCandidate(
   game: GamePrediction,
   side: EdgeSide,
@@ -108,9 +138,19 @@ function moneylineCandidate(
 
   const ownInj = side === "home" ? game.injuries.home : game.injuries.away;
   const oppInj = side === "home" ? game.injuries.away : game.injuries.home;
-  const injuryImpactAdj = game.league === "nfl"
-    ? computeNflTeamInjuryAdj(ownInj, oppInj)
+  const injuryImpactAdj =
+    game.league === "nfl" ? computeNflTeamInjuryAdj(ownInj, oppInj)
+    : game.league === "nba" ? computeNbaTeamInjuryAdj(ownInj, oppInj)
+    : game.league === "mlb" ? computeMlbTeamInjuryAdj(ownInj, oppInj)
     : undefined;
+
+  // Feature-vector integration: the injury delta now also nudges
+  // modelProbability (clamped) so hitProbability reflects roster state,
+  // not just the ranking layer. Range matches the per-sport clamp.
+  const adjustedModelP = injuryImpactAdj != null
+    ? Math.min(0.95, Math.max(0.05, modelP + injuryImpactAdj))
+    : modelP;
+  const adjustedEdge = adjustedModelP - implied;
 
   const id = `vp-${game.id}-ml-${side}`;
   return {
@@ -123,9 +163,9 @@ function moneylineCandidate(
     teamId: picked.abbreviation,
     americanOdds: american,
     impliedProbability: implied,
-    modelProbability: modelP,
-    edge,
-    edgeScore: meta.edgeScore,
+    modelProbability: adjustedModelP,
+    edge: adjustedEdge,
+    edgeScore: Math.round(adjustedEdge * 1000) / 10,
     betQualityRating: meta.betQualityRating,
     valueRating: meta.valueRating,
     parlayFitScore: meta.parlayFitScore,
@@ -427,19 +467,19 @@ export function buildAllValueCandidates(
     const b = oddsMap.get(g.id);
     const h = moneylineCandidate(g, "home", b);
     const a = moneylineCandidate(g, "away", b);
-    if (h) out.push(h);
-    if (a) out.push(a);
+    if (h) out.push(applyPreConfirmationDowngrade(h, g));
+    if (a) out.push(applyPreConfirmationDowngrade(a, g));
     const to = totalCandidate(g, b, "over");
     const tu = totalCandidate(g, b, "under");
-    if (to) out.push(to);
-    if (tu) out.push(tu);
+    if (to) out.push(applyPreConfirmationDowngrade(to, g));
+    if (tu) out.push(applyPreConfirmationDowngrade(tu, g));
     const sh = spreadCandidate(g, b, "home");
     const sa = spreadCandidate(g, b, "away");
-    if (sh) out.push(sh);
-    if (sa) out.push(sa);
+    if (sh) out.push(applyPreConfirmationDowngrade(sh, g));
+    if (sa) out.push(applyPreConfirmationDowngrade(sa, g));
     const props = buildPlayerPropProjectionsForGame(g);
     for (const row of props) {
-      out.push(propCandidate(g, row));
+      out.push(applyPreConfirmationDowngrade(propCandidate(g, row), g));
     }
   }
   return out.sort((x, y) => y.valueScore - x.valueScore);

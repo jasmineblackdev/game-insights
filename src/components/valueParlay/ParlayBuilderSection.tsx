@@ -21,6 +21,7 @@ import {
   logGamePredictionSnapshots,
 } from "@/lib/ml/impressionLogger";
 import { enrichCandidatesWithRecentPerformance } from "@/lib/valueParlay/recentPerformanceEnrichment";
+import { snapshotClvForCandidates, sealClvForPredictions } from "@/lib/ml/clvSnapshotter";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -344,6 +345,10 @@ export function ParlayBuilderSection({
     logPropImpressions(filteredProps).catch(() => {});
     logGamePredictionSnapshots(candidates).catch(() => {});
     logParlayLegRejections(candidates, parlayMode).catch(() => {});
+    // CLV — snapshot lines for candidates inside the close-to-tipoff window
+    // and seal closing_line_american on prediction_history once games start.
+    snapshotClvForCandidates(candidates).catch(() => {});
+    sealClvForPredictions(candidates).catch(() => {});
   }, [candidates, parlayMode, propData, filterPropsByGameIds]);
   const triple = useMemo(() => (tripleOpen ? triplePreview(candidates) : null), [tripleOpen, triplePreview, candidates]);
   // Cash-Out parlays today is shown whenever candidates are loaded — the user

@@ -97,6 +97,12 @@ export interface ValueBetCandidate {
   /** Sample size behind recentHitRate. */
   recentHitRateSamples?: number;
   /**
+   * MLB-only: true when the candidate's game has unconfirmed probable
+   * pitchers. Predictions emitted before confirmation are capped at
+   * low-confidence and re-issued once confirmation lands.
+   */
+  preConfirmationFlag?: boolean;
+  /**
    * NFL-only: pre-computed injury position multiplier.
    * Populated by buildCandidates when game.league === "nfl" and injury data
    * is present. Positive = injuries create opportunity; negative = injuries
