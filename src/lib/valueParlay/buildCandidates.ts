@@ -34,6 +34,7 @@ import {
   computeNbaTeamInjuryAdj,
   computeMlbTeamInjuryAdj,
 } from "@/lib/valueParlay/generalInjuryImpact";
+import { calibrateProbability } from "@/lib/ml/plattCalibration";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
@@ -147,9 +148,15 @@ function moneylineCandidate(
   // Feature-vector integration: the injury delta now also nudges
   // modelProbability (clamped) so hitProbability reflects roster state,
   // not just the ranking layer. Range matches the per-sport clamp.
-  const adjustedModelP = injuryImpactAdj != null
+  const injuryAdjustedP = injuryImpactAdj != null
     ? Math.min(0.95, Math.max(0.05, modelP + injuryImpactAdj))
     : modelP;
+  // Apply nightly-fitted Platt calibration (no-op when params missing or
+  // sample size too small). Produces p_calibrated that matches observed
+  // hit rates tighter than the raw blended model's output.
+  const adjustedModelP = calibrateProbability(
+    injuryAdjustedP, game.league, "moneyline", game.confidence,
+  );
   const adjustedEdge = adjustedModelP - implied;
 
   const id = `vp-${game.id}-ml-${side}`;
@@ -583,9 +590,13 @@ export function buildEnrichedPropCandidates(
     // Model probability: prefer ML hit probability, else derive from edge
     const maxEdge = pred.sport === "NFL" ? 30 : pred.sport === "MLB" ? 2 : 8;
     const edgeDerived = 0.50 + Math.min(Math.abs(pred.edge) / maxEdge * 0.40, 0.40);
-    const modelP = Math.max(0.05, Math.min(0.95,
+    const rawModelP = Math.max(0.05, Math.min(0.95,
       pred.ml_hit_probability ?? edgeDerived
     ));
+    // Apply nightly-fitted Platt calibration — no-op when params missing.
+    const modelP = calibrateProbability(
+      rawModelP, pred.sport, "player_prop", pred.confidence,
+    );
 
     const edge = modelP - marketProb;
 

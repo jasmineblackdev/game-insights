@@ -2,9 +2,9 @@ import type { ConfidenceLevel } from "@/data/mockGames";
 import { MIN_EDGE_RECOMMEND } from "@/lib/bettingIntelligence";
 import {
   parlayAmericanOdds,
-  parlayHitProbability,
   payoutMultiplierFromAmerican,
 } from "@/lib/valueParlay/oddsMath";
+import { correlatedParlayHitProbability } from "@/lib/valueParlay/correlatedParlayProbability";
 import type { ParlayBuildMode, ParlayTriple, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
 import {
   mlbPropCategory,
@@ -576,7 +576,10 @@ function scoreParlay(
   const odds     = legs.map((l) => l.americanOdds);
   const combined = parlayAmericanOdds(odds);
   const probs    = legs.map((l) => l.modelProbability);
-  const hit      = parlayHitProbability(probs);
+  // Correlation-aware joint probability — accounts for same-game /
+  // same-team movement instead of assuming leg independence. Falls back
+  // to the naive product for single-leg or uncorrelated pools.
+  const hit      = correlatedParlayHitProbability(legs, probs);
   const mult     = payoutMultiplierFromAmerican(combined);
 
   // Per-leg scores (reused across multiple components)

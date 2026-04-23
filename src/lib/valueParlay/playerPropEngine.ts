@@ -1,6 +1,7 @@
 import type { GamePrediction, League, PlayerTrendData } from "@/data/mockGames";
 import { americanFromImpliedProb, americanToImpliedProb } from "@/lib/valueParlay/oddsMath";
 import type { PlayerPropModelRow } from "@/lib/valueParlay/types";
+import { projectedUsageMultiplier } from "@/lib/valueParlay/projectedUsage";
 
 function slugId(s: string): string {
   return s
@@ -41,8 +42,9 @@ function projectStat(
   league: League,
   trend: PlayerTrendData,
   statType: string,
-  game: GamePrediction
-): { projected: number; line: number; volatility: number; reasons: [string, string] } {
+  game: GamePrediction,
+  side: "home" | "away",
+): { projected: number; line: number; volatility: number; reasons: [string, string]; usageMult: number } {
   const base = trend.last5Avg * 0.55 + trend.seasonAvg * 0.45;
   let paceAdj = 0;
   if (league === "nba" || league === "nfl") {
@@ -52,8 +54,12 @@ function projectStat(
     paceAdj = (avgP - 100) * 0.04;
   }
 
+  // Minutes / snap / lineup scaling — shifts projection by teammate
+  // availability. Returns 1.0 when no relevant injuries.
+  const usageMult = projectedUsageMultiplier(game, trend, side, statType);
 
-  const projected = Math.max(0, base + paceAdj * (statType.includes("yards") ? 8 : 1.2));
+  const rawProjected = base + paceAdj * (statType.includes("yards") ? 8 : 1.2);
+  const projected = Math.max(0, rawProjected * usageMult);
   const line =
     statType.includes("yards") || statType === "points"
       ? Math.round((projected - (statType.includes("yards") ? 12 : 2.5)) / 0.5) * 0.5
@@ -62,14 +68,24 @@ function projectStat(
   const vol =
     league === "mlb" ? 44 : league === "nfl" ? 40 : league === "nba" ? 32 : 36;
 
+  // Surface the usage adjustment in the reason string so the UI can
+  // explain "backup RB getting RB1 snaps" without having to eyeball it.
+  const usagePct = Math.round((usageMult - 1) * 100);
+  const usageNote =
+    usageMult === 1.0 ? "Role and blowout risk can swing minutes — monitor late scratches."
+    : usageMult > 1
+      ? `Injury-adjusted workload ↑${usagePct}% (teammate OUT).`
+      : `Injury-adjusted workload ↓${Math.abs(usagePct)}% (lineup/context weaker).`;
+
   return {
     projected: Math.round(projected * 10) / 10,
     line: Math.max(0.5, line),
     volatility: vol,
     reasons: [
       `${statType.replace(/_/g, " ")} baseline from recent vs season, adjusted for pace.`,
-      "Role and blowout risk can swing minutes — monitor late scratches.",
+      usageNote,
     ],
+    usageMult,
   };
 }
 
@@ -89,11 +105,11 @@ export function buildPlayerPropProjectionsForGame(game: GamePrediction): PlayerP
     },
   ];
   const out: PlayerPropModelRow[] = [];
-  for (const { abbr, opp, trends } of sides) {
+  for (const { side, abbr, opp, trends } of sides) {
     for (const t of trends) {
       const statType = trendToStatType(game.league, t);
       if (!statType || statType === "anytime_td_proxy") continue;
-      const { projected, line, volatility, reasons } = projectStat(game.league, t, statType, game);
+      const { projected, line, volatility, reasons } = projectStat(game.league, t, statType, game, side);
       const z = (projected - line) / Math.max(1.2, projected * 0.18);
       const overP = sigmoid(z * 1.4);
       const underP = 1 - overP;

@@ -22,6 +22,7 @@ import {
 } from "@/lib/ml/impressionLogger";
 import { enrichCandidatesWithRecentPerformance } from "@/lib/valueParlay/recentPerformanceEnrichment";
 import { snapshotClvForCandidates, sealClvForPredictions } from "@/lib/ml/clvSnapshotter";
+import { loadPlattParams } from "@/lib/ml/plattCalibration";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -257,6 +258,10 @@ export function ParlayBuilderSection({
   } = useValueParlay();
 
   const [tripleOpen, setTripleOpen] = useState(false);
+
+  // Load Platt calibration params once per session — used by candidate
+  // builders to scale raw model probabilities to observed hit rates.
+  useEffect(() => { loadPlattParams().catch(() => {}); }, []);
 
   // ── Analytics weights from Supabase RPCs ──────────────────────────────────
   // 30-day window gives a stable baseline; won't overpower live edge/confidence.

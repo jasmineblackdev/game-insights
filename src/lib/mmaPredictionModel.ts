@@ -23,6 +23,7 @@
  */
 
 import type { MmaFighterProfile, MmaIntel, MmaModelOutput } from "@/data/mockGames";
+import { combatFighterWinProbAdj } from "@/lib/valueParlay/combatFighterFeatures";
 
 // ── Default factor weights (sum to 1.0) ───────────────────────────────────────
 
@@ -537,7 +538,20 @@ export function mmaWinProbability(
   marketCtx?: { homeOpenImplied?: number; homeCurrentImplied?: number },
 ): { home: number; away: number } {
   const output = scoreMmaFight(home, away, weights, scheduledRounds, marketCtx);
-  const homeProb = Math.round(deltaToProbability(output._debug.combinedDelta) * 100);
+  const baseHome = deltaToProbability(output._debug.combinedDelta);
+  // Layoff + SOS adjustment. Runs on any fighter profile that carries
+  // recentBouts / daysSinceLastFight / recentSosAvg — silently no-ops
+  // when the feed hasn't populated them.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const h = home as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const a = away as any;
+  const homeAdj = combatFighterWinProbAdj(
+    { recentBouts: h.recentBouts, daysSinceLastFight: h.daysSinceLastFight, recentSosAvg: h.recentSosAvg },
+    { recentBouts: a.recentBouts, daysSinceLastFight: a.daysSinceLastFight, recentSosAvg: a.recentSosAvg },
+  );
+  const adjustedHome = Math.min(0.95, Math.max(0.05, baseHome + homeAdj));
+  const homeProb = Math.round(adjustedHome * 100);
   return { home: homeProb, away: 100 - homeProb };
 }
 
