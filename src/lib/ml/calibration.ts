@@ -149,3 +149,48 @@ export function estimatePlattParams(
     B: Math.max(-2.0, Math.min(2.0, B)),
   };
 }
+
+// ── Server → client sync ─────────────────────────────────────────────────────
+// The nightly ml-recalibrate edge function writes per (sport, market_type,
+// confidence_bucket) rows to Supabase.platt_calibration_params. The browser
+// reads from localStorage via loadPlattParams. Without a sync path the
+// server fits are never applied client-side.
+
+import { supabase } from "@/lib/supabase";
+
+let syncRanThisSession = false;
+
+/**
+ * Pull the latest platt_calibration_params rows and mirror them into
+ * localStorage under the per-bucket keys loadPlattParams() reads.
+ *
+ * Safe to call multiple times — no-ops after first run per session.
+ * Fire-and-forget: any failure leaves existing localStorage untouched
+ * and calibration falls back to identity.
+ */
+export async function syncPlattParamsFromSupabase(): Promise<void> {
+  if (!supabase || syncRanThisSession) return;
+  syncRanThisSession = true;
+  try {
+    const { data, error } = await supabase
+      .from("platt_calibration_params")
+      .select("sport, market_type, confidence_bucket, a_param, b_param, sample_size, fitted_at");
+    if (error || !data) return;
+    for (const row of data) {
+      const sport = String(row.sport).toLowerCase() as MLSport;
+      const market = String(row.market_type).toLowerCase();
+      const bucket = String(row.confidence_bucket).toUpperCase();
+      const params: PlattParams = {
+        sport,
+        model: market,
+        A: Number(row.a_param),
+        B: Number(row.b_param),
+        sample_size: Number(row.sample_size),
+        calibrated_at: row.fitted_at ? new Date(row.fitted_at).toISOString() : null,
+      };
+      savePlattParams(params, bucket);
+    }
+  } catch {
+    // silent — fall back to whatever localStorage already has
+  }
+}

@@ -12,6 +12,7 @@
 
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { MLB_PARK_FACTORS, MLB_OUTDOOR_PARKS } from "@/lib/mlbConstants";
+import { easternYmd, nextCalendarYmd, ymdToParam } from "@/lib/espnShared";
 
 // ── ESPN scoreboard endpoints ─────────────────────────────────────────────────
 
@@ -267,17 +268,31 @@ async function fetchSportPlayerEdge(
   sport: "NBA" | "MLB" | "NFL",
   sortBase: number
 ): Promise<PlayerEdgePrediction[]> {
-  const url = SCOREBOARDS[sport];
+  const baseUrl = SCOREBOARDS[sport];
   const statMap = SPORT_STAT_MAP[sport] ?? {};
 
-  let res: Response;
-  try {
-    res = await fetch(url);
-    if (!res.ok) return [];
-  } catch { return []; }
+  // Fetch today AND tomorrow so the Tomorrow tab has player props matching
+  // tomorrow's game slate. The team-game fetchers already pull two days
+  // this way; this keeps props aligned with that behaviour.
+  const today    = easternYmd();
+  const tomorrow = nextCalendarYmd(today);
+  const urls = [
+    `${baseUrl}?dates=${ymdToParam(today)}`,
+    `${baseUrl}?dates=${ymdToParam(tomorrow)}`,
+  ];
 
-  const data = (await res.json()) as { events?: EspnEventRaw[] };
-  const events = data.events ?? [];
+  const events: EspnEventRaw[] = [];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = (await res.json()) as { events?: EspnEventRaw[] };
+      for (const ev of data.events ?? []) events.push(ev);
+    } catch {
+      // silent — fall through to any events we did pull
+    }
+  }
+  if (!events.length) return [];
   const predictions: PlayerEdgePrediction[] = [];
   const t = edgeThresholds(sport);
 

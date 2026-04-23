@@ -21,12 +21,11 @@
  */
 
 import { useMemo } from "react";
-import { Calendar, Sparkles, TrendingUp, Wrench } from "lucide-react";
+import { Calendar, Sparkles, TrendingUp } from "lucide-react";
 import type { GamePrediction } from "@/data/mockGames";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
-import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { PropCard, earlyValueTag } from "@/components/PropCard";
 import {
   useEarlyValueImpactBySport,
@@ -440,21 +439,10 @@ export function TomorrowTab({
         )}
       </section>
 
-      {/* ── SECTION 3: AI Parlays Tomorrow ────────────────────────────────── */}
-      <section>
-        <SectionHeader
-          icon={Wrench}
-          title="AI parlays tomorrow"
-          subtitle="Safe, Balanced, and Aggressive parlays built from tomorrow's NBA, NFL, MLB, Boxing, and UFC/MMA slate. Same optimizer, pregame context."
-        />
-        <ParlayBuilderSection
-          games={tomorrowGames}
-          oddsMap={oddsMap}
-          gamesLoading={false}
-          filterPropsByGameIds={tomorrowGameIds}
-          tomorrowMode
-        />
-      </section>
+      {/* Parlay Builder intentionally NOT rendered here — the dedicated
+          Parlay Builder page already pulls tomorrow's slate via allGames.
+          Showing it twice (once here, once on the Builder page) confused
+          users who thought they were looking at separate builders. */}
 
     </div>
   );
