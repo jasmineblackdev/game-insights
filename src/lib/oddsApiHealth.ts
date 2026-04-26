@@ -31,6 +31,17 @@ export interface OddsHealthState {
 let state: OddsHealthState = { stale: false };
 const listeners = new Set<(s: OddsHealthState) => void>();
 
+/**
+ * Per-sport lockout — when the provider returns a hard quota error
+ * (OUT_OF_USAGE_CREDITS, EXCEEDED_FREQ_LIMIT) we stop hitting that
+ * sport for LOCKOUT_TTL_MS so we don't burn through retry budget on
+ * a request that's guaranteed to fail. Soft errors (UNKNOWN_SPORT,
+ * INVALID_MARKET) don't trigger a lockout — those are bugs in our
+ * params and the dev needs to see them, not a quota issue.
+ */
+const LOCKOUT_TTL_MS = 5 * 60 * 1000;
+const lockedUntil = new Map<string, number>();
+
 function emit(): void {
   for (const l of listeners) l(state);
 }
@@ -52,7 +63,35 @@ export function markOddsApiStale(args: { reason: StaleReason; sportKey?: string 
     occurredAt: new Date().toISOString(),
     message: REASON_MESSAGES[args.reason],
   };
+  // Hard-quota responses lock the sport out for LOCKOUT_TTL_MS so we
+  // don't retry the same dead request every poll cycle. Networking
+  // errors lock too — a sport whose endpoint is unreachable shouldn't
+  // be hammered every 30s.
+  if ((args.reason === "quota" || args.reason === "freq_limit" || args.reason === "network") && args.sportKey) {
+    lockedUntil.set(args.sportKey.toLowerCase(), Date.now() + LOCKOUT_TTL_MS);
+  }
   emit();
+}
+
+/**
+ * Returns true when the sport is in lockout AND the TTL hasn't elapsed.
+ * Callers (oddsApiFetch, multiOddsProvider) check this before firing
+ * a request and skip the call when locked. Auto-expires.
+ */
+export function isOddsSportLocked(sportKey: string | undefined): boolean {
+  if (!sportKey) return false;
+  const until = lockedUntil.get(sportKey.toLowerCase());
+  if (!until) return false;
+  if (Date.now() >= until) {
+    lockedUntil.delete(sportKey.toLowerCase());
+    return false;
+  }
+  return true;
+}
+
+/** Test/debug — clear all sport lockouts. */
+export function _clearOddsSportLockouts(): void {
+  lockedUntil.clear();
 }
 
 export function clearOddsApiStale(): void {

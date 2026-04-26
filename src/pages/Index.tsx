@@ -1099,21 +1099,18 @@ const Index = () => {
               ) : viewMode === "parlay_builder" ? (
                 <div className="space-y-10">
                   {/*
-                    Render the builder as soon as ANY sport has games loaded.
-                    Previously we waited for all five sport queries (NBA, NFL,
-                    MLB, Boxing, MMA) to resolve before showing anything; an
-                    offseason sport (NFL in spring, MMA on weekdays) would
-                    keep the page in skeleton state indefinitely. Now we only
-                    show skeletons when we genuinely have zero games yet.
+                    Single parlay surface — ParlayBuilderSection is the primary
+                    builder and already includes a leg picker via
+                    RankedLiveParlayPresets. BestValuePicksSection used to
+                    render above this but it duplicated the leg-picker role
+                    and the reviewer flagged "two parlay builders render
+                    together on Home". Moved into a collapsed details below
+                    for users who want the individual best-value list.
+
+                    Loading gate: only show skeletons when we genuinely have
+                    zero games yet. Offseason sports (NFL in spring, MMA on
+                    weekdays) shouldn't block the render.
                   */}
-                  <BestValuePicksSection
-                    games={allGamesWithIntel}
-                    oddsMap={oddsMapAll}
-                    loading={allGamesWithIntel.length === 0 && (
-                      nbaFastQuery.isPending ||
-                      mlbFastQuery.isPending
-                    )}
-                  />
                   <ParlayBuilderSection
                     games={allGamesWithIntel}
                     oddsMap={oddsMapAll}
@@ -1123,6 +1120,19 @@ const Index = () => {
                     )}
                     bookOddsLoading={false}
                   />
+                  <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
+                    <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
+                      <span>Best-value picks (individual leg list)</span>
+                      <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
+                    </summary>
+                    <div className="mt-4">
+                      <BestValuePicksSection
+                        games={allGamesWithIntel}
+                        oddsMap={oddsMapAll}
+                        loading={false}
+                      />
+                    </div>
+                  </details>
                   <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
                     <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
                       <span>Auto-build presets (Safe / Balanced / Cashout)</span>

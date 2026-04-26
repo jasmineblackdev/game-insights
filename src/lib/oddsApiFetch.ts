@@ -3,7 +3,7 @@
  * or (3) legacy `VITE_THE_ODDS_API_KEY`. Dev proxy is tried first so local `.env.local` works without deploying Edge.
  */
 
-import { trackOddsResponse } from "@/lib/oddsApiHealth";
+import { trackOddsResponse, isOddsSportLocked } from "@/lib/oddsApiHealth";
 
 // Production fallback values — VITE_ prefix means these are intentionally public (client-bundled).
 // Used when Vercel build doesn't inject the env vars from .env.production.
@@ -119,6 +119,21 @@ export async function fetchOddsForSport(params: {
   eventIds?: string;
 }): Promise<Response> {
   const { sportKey, markets, regions = "us", oddsFormat = "american", eventIds } = params;
+
+  // Per-sport TTL lockout — after a hard quota / freq-limit / network
+  // error the sport is locked out for 5 minutes (see oddsApiHealth).
+  // Skip the round-trip entirely so we don't burn the retry budget
+  // on a guaranteed-fail.
+  if (isOddsSportLocked(sportKey)) {
+    return new Response(JSON.stringify({
+      message: "odds_api_sport_locked",
+      sportKey,
+    }), {
+      status: 503,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   const q = new URLSearchParams({ regions, markets, oddsFormat });
   if (eventIds?.trim()) q.set("eventIds", eventIds.trim());
   const path = `sports/${encodeURIComponent(sportKey)}/odds?${q.toString()}`;
