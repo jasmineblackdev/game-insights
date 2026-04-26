@@ -32,6 +32,8 @@ import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
+import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
+import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
@@ -433,7 +435,17 @@ const Index = () => {
   useEffect(() => {
     if (allGamesWithIntel.length === 0) return;
     void settleFinalGames(allGamesWithIntel);
+    // Resolve app-recommended parlays whose underlying games finalled.
+    // Same per-session dedupe pattern; safe to fire alongside the settler.
+    void resolveRecommendedParlays(allGamesWithIntel);
   }, [allGamesWithIntel]);
+
+  // Warm the user-betting-pattern cache on first render so the value
+  // score boost is available for the next pick rebuild. Refreshes
+  // every 5 minutes via internal cache TTL — cheap.
+  useEffect(() => {
+    void loadUserBettingPatterns();
+  }, []);
 
   // Auto-advance to "week" if no today fights exist (non-fight nights)
   useEffect(() => {

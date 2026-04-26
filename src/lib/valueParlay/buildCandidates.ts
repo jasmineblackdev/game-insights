@@ -36,6 +36,7 @@ import {
 } from "@/lib/valueParlay/generalInjuryImpact";
 import { calibrateProbability } from "@/lib/ml/plattCalibration";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
+import { computePatternBoostSync } from "@/lib/learning/userBettingPatterns";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 
 function sigmoid(x: number): number {
@@ -245,6 +246,11 @@ function totalCandidate(
     volatilityScore: vol,
     uncertaintyScore: unc,
     lineMovementDeltaPp: game._meta?.quality?.market?.line_movement_home_pp,
+    userPatternBoost: computePatternBoostSync({
+      sport: game.league,
+      marketType: "total",
+      americanOdds: american,
+    }),
   });
 
   const risk = compositeRiskScore({
@@ -332,6 +338,11 @@ function spreadCandidate(
     confidence: game.confidence,
     impliedProbability: implied,
     modelProbability: modelCover,
+    userPatternBoost: computePatternBoostSync({
+      sport: game.league,
+      marketType: "spread",
+      americanOdds: american,
+    }),
     volatilityScore: vol,
     uncertaintyScore: unc,
   });
@@ -407,6 +418,11 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     modelProbability: modelP,
     volatilityScore: Math.min(100, volB),
     uncertaintyScore: Math.min(100, uncB),
+    userPatternBoost: computePatternBoostSync({
+      sport: game.league,
+      marketType: "player_prop",
+      americanOdds: american,
+    }),
   });
 
   const risk = compositeRiskScore({
@@ -661,6 +677,11 @@ export function buildEnrichedPropCandidates(
       volatilityScore,
       uncertaintyScore,
       lineMovementDeltaPp: pred.line_delta ?? null,
+      userPatternBoost: computePatternBoostSync({
+        sport: pred.sport,
+        marketType: "player_prop",
+        americanOdds: americanOdds,
+      }),
     });
 
     const risk = compositeRiskScore({

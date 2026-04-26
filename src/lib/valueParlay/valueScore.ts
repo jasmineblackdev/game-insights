@@ -77,6 +77,15 @@ export function computeValueScore(args: {
    * when this isn't passed.
    */
   oppositeImpliedProbability?: number;
+  /**
+   * Additive boost from the user pattern coach (see
+   * src/lib/learning/userBettingPatterns.ts). When the leg falls
+   * into a (sport × market × odds_range) bucket where the user has
+   * a demonstrated edge over ≥10 samples, this nudges the raw score
+   * up by 0–0.05. Capped so a single hot streak can't drown out the
+   * other signals.
+   */
+  userPatternBoost?: number;
 }): number {
   const edge01 = Math.max(0, Math.min(1, args.edge * 8));
   const conf01 = confidence01(args.confidence);
@@ -95,7 +104,8 @@ export function computeValueScore(args: {
     lineM * 0.05 +
     rest * 0.05;
 
-  return Math.round(raw * 1000) / 1000;
+  const boost = Math.max(0, Math.min(0.05, args.userPatternBoost ?? 0));
+  return Math.round(Math.min(1, raw + boost) * 1000) / 1000;
 }
 
 export function valueGrade(score: number): "A" | "B" | "C" | "D" {

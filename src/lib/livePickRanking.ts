@@ -5,6 +5,7 @@
 import type { GamePrediction, LiveBettingStageRow } from "@/data/mockGames";
 import { computePickFlags, getFavoredSide, type EdgeSide } from "@/lib/edgeCardScoring";
 import { computeValueScore } from "@/lib/valueParlay/valueScore";
+import { computePatternBoostSync } from "@/lib/learning/userBettingPatterns";
 import { defaultMinEdgeForRecommend, isEdgeBelowSportFloor } from "@/lib/sportEdgeThresholds";
 
 export const LIVE_PICK_RANK_MAX = 6;
@@ -181,6 +182,13 @@ export function computeLivePickScore(game: GamePrediction, row: LiveBettingStage
     scheduleRestHint: game._meta?.quality?.fatigue
       ? 100 - (game._meta.quality.fatigue.fatigue_penalty ?? 30)
       : undefined,
+    // Live ranking row doesn't carry American odds directly. The
+    // pattern boost falls through to 0 when odds are unknown.
+    userPatternBoost: computePatternBoostSync({
+      sport: game.league,
+      marketType: "team_moneyline",
+      americanOdds: null,
+    }),
   });
   const value_score = value01 * 28;
 

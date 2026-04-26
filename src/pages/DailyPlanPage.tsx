@@ -62,6 +62,8 @@ import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
+import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
+import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
 import {
   getPropRiskLevel,
   riskLevelClass,
@@ -392,7 +394,15 @@ export default function DailyPlanPage() {
   useEffect(() => {
     if (enrichedGames.length === 0) return;
     void settleFinalGames(enrichedGames);
+    // Resolve app-recommended parlays whose games finalled.
+    void resolveRecommendedParlays(enrichedGames);
   }, [enrichedGames]);
+
+  // Warm the user-betting-pattern cache so value-score boosts are
+  // ready when the optimizer rebuilds.
+  useEffect(() => {
+    void loadUserBettingPatterns();
+  }, []);
 
   const candidates = useMemo<ValueBetCandidate[]>(() => {
     const teamCandidates = buildAllValueCandidates(enrichedGames, oddsMap);

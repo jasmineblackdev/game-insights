@@ -18,6 +18,7 @@ import {
 import type { GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { americanFromImpliedProb, americanToImpliedProb } from "@/lib/valueParlay/oddsMath";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
+import { computePatternBoostSync } from "@/lib/learning/userBettingPatterns";
 import {
   americanOddsForPick,
   pickAbbrevForSide,
@@ -315,6 +316,11 @@ export function evaluateMoneylineForParlay(
     scheduleRestHint: game._meta?.quality?.fatigue
       ? 100 - (game._meta.quality.fatigue.fatigue_penalty ?? 30)
       : undefined,
+    userPatternBoost: computePatternBoostSync({
+      sport: game.league,
+      marketType: "team_moneyline",
+      americanOdds: meta.americanOdds,
+    }),
   });
 
   const pubBias = game._meta?.quality?.predictionIntel?.public_bias_score ?? 0;
