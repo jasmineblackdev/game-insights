@@ -38,6 +38,41 @@ export interface AlphaAdjustmentLog {
   /** Hit rate delta (ml_blended - rules) in percentage points. */
   diff_pp:      number;
   timestamp:    string;
+  /** Average CLV (closing - opening implied prob, in pp) for the lookback window. Optional — only set when CLV broke a tie or when CLV data was available. */
+  clv_pp_avg?:  number;
+}
+
+/**
+ * Average closing-line value (clv_pp) over the last N days for a
+ * given sport. Used as a tie-breaker in alpha adjustment when the
+ * direct hit-rate diff is in the ±2pp dead zone.
+ *
+ * Reads from prediction_history.clv_pp which the CLV snapshotter
+ * fills via sealClvForPredictions(). Returns null when there's no
+ * sealed data yet (Supabase not configured, no resolved bets, etc).
+ */
+async function fetchAvgClvForSport(sport: string, lookbackDays: number): Promise<number | null> {
+  if (!supabase) return null;
+  try {
+    const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabase
+      .from("prediction_history")
+      .select("clv_pp")
+      .eq("sport", sport.toLowerCase())
+      .gte("predicted_at", since)
+      .not("clv_pp", "is", null);
+    if (error || !data || data.length === 0) return null;
+    const values = (data as Array<{ clv_pp: number | null }>)
+      .map((r) => r.clv_pp)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    // Need at least 10 sealed CLV samples before we trust the average
+    // — otherwise random variance dominates.
+    if (values.length < 10) return null;
+    const sum = values.reduce((a, b) => a + b, 0);
+    return sum / values.length;
+  } catch {
+    return null;
+  }
 }
 
 function writeAlphaAdjustmentLog(sport: string, entry: AlphaAdjustmentLog): void {
@@ -296,12 +331,30 @@ export async function maybeAdjustAlphaFromContribution(sport: string): Promise<v
     let newAlpha = currentAlpha;
     let direction: AlphaAdjustmentLog["direction"] = "unchanged";
 
+    // CLV signal — a tie-breaker when blended-vs-rules diff is small.
+    // Positive avg CLV means we're consistently picking value the
+    // market later agrees with → trust ML more. Negative avg CLV
+    // means we're picking peak/stale lines → pull alpha back faster.
+    const clvAvg = await fetchAvgClvForSport(sport, 30);
+
     if (diff > 2) {
       newAlpha   = clampAlpha(sport, currentAlpha + range.step);
       direction  = newAlpha > currentAlpha ? "up" : "unchanged";
     } else if (diff < -2) {
       newAlpha   = clampAlpha(sport, currentAlpha - range.step);
       direction  = newAlpha < currentAlpha ? "down" : "unchanged";
+    } else if (clvAvg != null) {
+      // Diff is in the ±2pp dead zone — let CLV break the tie when it's
+      // strong enough (≥ 1.5pp average). Step is half-size since this is
+      // an indirect signal vs the direct hit-rate comparison.
+      const halfStep = range.step / 2;
+      if (clvAvg >= 1.5) {
+        newAlpha  = clampAlpha(sport, currentAlpha + halfStep);
+        direction = newAlpha > currentAlpha ? "up" : "unchanged";
+      } else if (clvAvg <= -1.5) {
+        newAlpha  = clampAlpha(sport, currentAlpha - halfStep);
+        direction = newAlpha < currentAlpha ? "down" : "unchanged";
+      }
     }
 
     // Always log the check result — "unchanged" entries are useful for the panel
@@ -311,6 +364,7 @@ export async function maybeAdjustAlphaFromContribution(sport: string): Promise<v
       alpha_after:  Math.round(newAlpha    * 10000) / 10000,
       diff_pp:      Math.round(diff * 10)  / 10,
       timestamp:    new Date().toISOString(),
+      clv_pp_avg:   clvAvg != null ? Math.round(clvAvg * 10) / 10 : undefined,
     });
 
     if (direction === "unchanged") return;
