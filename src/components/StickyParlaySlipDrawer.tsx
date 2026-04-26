@@ -15,7 +15,7 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Layers, X, Trash2, Shuffle } from "lucide-react";
+import { Layers, X, Trash2, Shuffle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -151,9 +151,29 @@ export function StickyParlaySlipDrawer() {
 
         <div className="mt-4 flex-1 overflow-y-auto space-y-2 -mx-2 px-2">
           {count === 0 ? (
-            <div className="rounded-md border border-dashed border-border bg-card/40 p-4 text-center text-xs text-muted-foreground">
-              <p>No legs yet.</p>
-              <p className="mt-1">Tap "Add to parlay" on any pick to start your slip.</p>
+            <div className="rounded-md border border-dashed border-border bg-card/40 p-4 text-center text-xs text-muted-foreground space-y-3">
+              <div>
+                <p className="font-semibold text-foreground">No legs yet</p>
+                <p className="mt-1">Tap "Add to parlay" on any pick to start your slip.</p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <SheetClose asChild>
+                  <Button asChild variant="default" size="sm">
+                    <Link to="/daily">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Build today's Auto Profit bet
+                    </Link>
+                  </Button>
+                </SheetClose>
+                <SheetClose asChild>
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/?view=parlay_builder">
+                      <Layers className="w-3.5 h-3.5" />
+                      Open Parlay Builder
+                    </Link>
+                  </Button>
+                </SheetClose>
+              </div>
             </div>
           ) : (
             builderLegs.map((l) => {

@@ -28,6 +28,9 @@ import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
+import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
+import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
+import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
 import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
@@ -623,7 +626,9 @@ const Index = () => {
   const allGamesKey = useMemo(() => allGames.map((g) => g.id).sort().join(","), [allGames]);
   const [oddsMapAll, setOddsMapAll] = useState<Map<string, GameOddsBundle>>(() => new Map());
   useEffect(() => {
-    if (viewMode !== "parlay_builder" && viewMode !== "tomorrow") return;
+    // Home + parlay_builder + tomorrow all need cross-sport odds for the
+    // Auto Profit card and the parlay surfaces.
+    if (viewMode !== "home" && viewMode !== "parlay_builder" && viewMode !== "tomorrow") return;
     if (!allGames.length) return;
     let cancelled = false;
     fetchAllOddsBundles(allGames).then((m) => {
@@ -644,6 +649,7 @@ const Index = () => {
     () => enrichGamesWithBettingIntelligence(allGames, oddsMapAll),
     [allGames, oddsMapAll]
   );
+
 
   useEffect(() => {
     if (!selectedGame || selectedGame.league !== "mlb") return;
@@ -705,6 +711,16 @@ const Index = () => {
     () => sortPlayerEdgePredictions(homePropsQuery.data?.items ?? []).slice(0, 3),
     [homePropsQuery.data]
   );
+
+  // Cross-sport candidate pool for the Home Auto Profit card. Same
+  // builder the parlay surface and /daily use, so picks line up.
+  const homeAutoProfitCandidates = useMemo<ValueBetCandidate[]>(() => {
+    if (viewMode !== "home") return [];
+    if (allGamesWithIntel.length === 0) return [];
+    const team = buildAllValueCandidates(allGamesWithIntel, oddsMapAll);
+    const props = buildEnrichedPropCandidates(homePropsQuery.data?.items ?? []);
+    return [...team, ...props];
+  }, [viewMode, allGamesWithIntel, oddsMapAll, homePropsQuery.data]);
 
   const draftPicksQuery = useQuery({
     queryKey: ["draft-picks", league],
@@ -998,6 +1014,21 @@ const Index = () => {
               {(viewMode === "home" || viewMode === "parlay_builder") ? (
                 <div className="mb-5">
                   <BankrollWidget />
+                </div>
+              ) : null}
+
+              {/* Auto Profit top card on Home — guides the user to one
+                  clear next step before the dashboard's full breakdown. */}
+              {viewMode === "home" ? (
+                <div className="mb-6">
+                  <HomeAutoProfit
+                    candidates={homeAutoProfitCandidates}
+                    loading={
+                      nbaFastQuery.isPending ||
+                      mlbFastQuery.isPending ||
+                      homePropsQuery.isPending
+                    }
+                  />
                 </div>
               ) : null}
 

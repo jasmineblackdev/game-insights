@@ -9,6 +9,7 @@ import { Wallet, ChevronDown, ChevronUp, Plus, Minus, TrendingUp, TrendingDown }
 import { Button } from "@/components/ui/button";
 import { useBankroll } from "@/context/BankrollContext";
 import { BankrollPanel } from "./BankrollPanel";
+import { LocalOnlyBadge } from "@/components/LocalOnlyBadge";
 import { cn } from "@/lib/utils";
 
 function fmt(n: number): string {
@@ -42,6 +43,7 @@ export function BankrollWidget({ compact = false }: { compact?: boolean }) {
         <div className="flex items-center gap-2">
           <Wallet className="w-4 h-4 text-primary" />
           <h3 className="text-sm font-display font-bold">Set your bankroll</h3>
+          <LocalOnlyBadge className="ml-auto" />
         </div>
         <p className="text-xs text-muted-foreground">
           Enter your starting bankroll so we can suggest realistic stake sizes for each pick.
@@ -89,6 +91,7 @@ export function BankrollWidget({ compact = false }: { compact?: boolean }) {
         className="w-full p-3 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left"
       >
         <Wallet className="w-4 h-4 text-primary shrink-0" />
+        <LocalOnlyBadge />
 
         <div className="flex-1 min-w-0 grid grid-cols-3 gap-2">
           <div>

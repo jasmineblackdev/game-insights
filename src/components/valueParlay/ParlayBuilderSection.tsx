@@ -25,6 +25,7 @@ import { snapshotClvForCandidates, sealClvForPredictions } from "@/lib/ml/clvSna
 import { loadPlattParams } from "@/lib/ml/plattCalibration";
 import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
 import { logRecommendedParlay, type SaveStatus } from "@/lib/parlayTracking/recommendedParlayLogger";
+import { AutoProfitBuilderHint } from "@/components/dailyPlan/AutoProfitBuilderHint";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -582,6 +583,8 @@ export function ParlayBuilderSection({
       </div>
 
       <TierPerformanceStrip />
+
+      <AutoProfitBuilderHint />
 
       <RankedLiveParlayPresets games={games} oddsMap={oddsMap} candidates={candidates} gamesLoading={gamesLoading} />
 

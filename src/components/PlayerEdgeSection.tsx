@@ -11,6 +11,12 @@ import {
 } from "@/lib/playerEdgeApi";
 import { usePlayerEdgeFavorites } from "@/hooks/usePlayerEdgeFavorites";
 import { logPick, fetchAccuracyStats } from "@/lib/picksLog";
+import { useBankroll } from "@/context/BankrollContext";
+import {
+  pickActionForPrediction,
+  pickActionLabel,
+  pickActionClass,
+} from "@/lib/dailyPlan/pickAction";
 import {
   type PlayerEdgePrediction,
   type PlayerEdgeSportFilter,
@@ -146,6 +152,10 @@ function PlayerEdgeCard({
   const dirClass = pred.prediction_direction === "MORE"
     ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
     : "bg-red-500/15 text-red-600 dark:text-red-400";
+  // Auto Profit action label per pick — derived from confidence,
+  // matchup, model status, and the user's current bankroll state.
+  const { lossStreak, hadLossToday } = useBankroll();
+  const action = pickActionForPrediction(pred, { lossStreak, hadLossToday });
 
   // Copy pick text to clipboard and log it
   const copyPick = () => {
@@ -208,11 +218,17 @@ function PlayerEdgeCard({
       </div>
 
       {/* ── BIG: Bet recommendation ───────────────────────── */}
-      <div className="bg-muted/40 rounded-md px-3 py-3 text-center">
-        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider mb-1">
+      <div className="bg-muted/40 rounded-md px-3 py-3 text-center space-y-1.5">
+        <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
           {isCombatSport ? "Fight Prop" : "Bet Recommendation"}
         </p>
         <p className="font-display font-bold text-xl text-foreground leading-tight">{headline}</p>
+        <span className={cn(
+          "inline-block text-[10px] font-black tracking-wider px-2.5 py-0.5 rounded-full uppercase",
+          pickActionClass(action),
+        )}>
+          {pickActionLabel(action)}
+        </span>
       </div>
 
       {/* ── MEDIUM: Confidence + risk tier ───────────────── */}
