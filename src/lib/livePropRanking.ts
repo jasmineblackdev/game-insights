@@ -275,6 +275,10 @@ function adjustRowForLive(game: GamePrediction, row: PlayerPropModelRow): {
       row.statType === "assists"
         ? "Usage & assist opportunities follow live pace (heuristic)."
         : "Shot attempts & foul risk reflected in live repricing (heuristic).",
+    wnba:
+      row.statType === "assists"
+        ? "Usage & assist opportunities follow live pace (heuristic)."
+        : "Shot attempts & foul risk reflected in live repricing (heuristic).",
     nfl: "Snap share, target share & game script direction (heuristic).",
     mlb: "Pitch count, K pace & remaining AB context (heuristic).",
     boxing: "Round-by-round scoring pace & output flags (heuristic).",

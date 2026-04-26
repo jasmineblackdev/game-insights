@@ -449,7 +449,7 @@ function applyNbaNflMlb(
 export async function applyAdvancedIntelligenceToGames(predictions: GamePrediction[]): Promise<GamePrediction[]> {
   if (!predictions.length) return predictions;
 
-  const byLeague: Record<League, GamePrediction[]> = { nba: [], nfl: [], mlb: [], boxing: [], mma: [] };
+  const byLeague: Record<League, GamePrediction[]> = { nba: [], wnba: [], nfl: [], mlb: [], boxing: [], mma: [] };
   for (const g of predictions) {
     byLeague[g.league].push(g);
   }
@@ -522,6 +522,12 @@ export async function applyAdvancedIntelligenceToGames(predictions: GamePredicti
 
     if (league === "boxing" || league === "mma") {
       // Combat sports use a different pipeline — skip team-matchup apply.
+      out.push(g);
+      continue;
+    }
+    if (league === "wnba") {
+      // WNBA shares structure with NBA but uses a separate calibration
+      // bucket; we don't apply NBA-specific team-matchup data here yet.
       out.push(g);
       continue;
     }

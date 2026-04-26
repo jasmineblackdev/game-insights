@@ -9,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { BarChart3, Calendar, ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { BarChart3, Calendar, ClipboardList, Home, ListChecks, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
@@ -979,6 +979,13 @@ const Index = () => {
                     >
                       <Sparkles className="w-3 h-3 shrink-0" />
                       Daily Plan
+                    </Link>
+                    <Link
+                      to="/parlays"
+                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
+                    >
+                      <ListChecks className="w-3 h-3 shrink-0" />
+                      My Bets
                     </Link>
                     <Link
                       to="/edge"

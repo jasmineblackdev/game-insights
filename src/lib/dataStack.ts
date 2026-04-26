@@ -67,6 +67,7 @@ export const SHARED_DB_ENTITIES = [
 /** Extensions per sport (in addition to shared core). */
 export const SPORT_SPECIFIC_DB_ENTITIES: Record<League, readonly string[]> = {
   nba: ["rotations", "usage_trends", "advanced_team_metrics (shared)"],
+  wnba: ["rotations", "usage_trends", "advanced_team_metrics (shared)"],
   nfl: ["depth_charts", "qb_metrics", "advanced_team_metrics (shared)"],
   mlb: ["probable_pitchers", "bullpen_usage", "team_splits", "advanced_team_metrics (shared)"],
   boxing: ["boxing_fighters", "boxing_fights", "boxing_fight_results", "boxing_odds", "boxing_predictions", "boxing_prediction_versions", "boxing_learning_history"],

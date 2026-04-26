@@ -1,7 +1,7 @@
 export type ConfidenceLevel = "high" | "medium" | "low";
 export type PlayerTrend = "hot" | "cold" | "steady";
 export type InjuryStatus = "OUT" | "QUESTIONABLE" | "PROBABLE" | "GTD";
-export type League = "nba" | "nfl" | "mlb" | "boxing" | "mma";
+export type League = "nba" | "wnba" | "nfl" | "mlb" | "boxing" | "mma";
 export type GameDate = "today" | "tomorrow" | "week";
 
 /** "partial" = one pitcher confirmed, the other still unknown. */

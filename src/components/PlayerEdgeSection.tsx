@@ -32,7 +32,7 @@ import {
 
 // ── Sport / Stat filters (Soccer removed, Boxing + MMA added) ─────────────────
 
-const SPORT_FILTERS: PlayerEdgeSportFilter[] = ["all", "NBA", "NFL", "MLB", "Boxing", "MMA"];
+const SPORT_FILTERS: PlayerEdgeSportFilter[] = ["all", "NBA", "WNBA", "NFL", "MLB", "Boxing", "MMA"];
 
 const STAT_FILTERS: PlayerEdgeStatFilter[] = [
   "all",
@@ -256,7 +256,7 @@ function PlayerEdgeCard({
             {riskLabel(pred.risk_tier)}
           </span>
         )}
-        {(pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality && pred.matchup_quality !== "unknown" && (
+        {(pred.sport === "MLB" || pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality && pred.matchup_quality !== "unknown" && (
           <span
             title={pred.matchup_note ?? undefined}
             className={cn(
@@ -270,10 +270,10 @@ function PlayerEdgeCard({
             {pred.sport === "MLB" && pred.matchup_quality === "tough"   && "Tough SP"}
             {pred.sport === "MLB" && pred.matchup_quality === "soft"    && "Soft SP"}
             {pred.sport === "MLB" && pred.matchup_quality === "neutral" && "Neutral SP"}
-            {pred.sport === "NBA" && pred.matchup_quality === "tough"   && "Tough D"}
-            {pred.sport === "NBA" && pred.matchup_quality === "soft"    && "Soft D"}
-            {pred.sport === "NBA" && pred.matchup_quality === "fast"    && "Fast pace"}
-            {pred.sport === "NBA" && pred.matchup_quality === "neutral" && "Neutral D"}
+            {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "tough"   && "Tough D"}
+            {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "soft"    && "Soft D"}
+            {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "fast"    && "Fast pace"}
+            {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "neutral" && "Neutral D"}
           </span>
         )}
       </div>

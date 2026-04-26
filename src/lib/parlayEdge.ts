@@ -47,6 +47,7 @@ export interface TimingConfig {
 
 export const TIMING_CONFIGS: Record<League, TimingConfig> = {
   nba:    { pregameWeight: 0.85, liveWeight: 1.05, liveCheckpoint: "after Q1",    liveUplift: 0.20 },
+  wnba:   { pregameWeight: 0.85, liveWeight: 1.05, liveCheckpoint: "after Q1",    liveUplift: 0.20 },
   nfl:    { pregameWeight: 0.88, liveWeight: 1.04, liveCheckpoint: "after Q1",    liveUplift: 0.16 },
   mlb:    { pregameWeight: 0.95, liveWeight: 1.07, liveCheckpoint: "after 5th",   liveUplift: 0.12 },
   mma:    { pregameWeight: 0.93, liveWeight: 1.08, liveCheckpoint: "after R1",    liveUplift: 0.15 },
@@ -133,6 +134,7 @@ import {
 // Tier 3 (selective value): high finish variance, max 1 per parlay — Boxing / MMA
 export const SPORT_TIERS: Record<League, 1 | 2 | 3> = {
   nba: 1,
+  wnba: 2,
   nfl: 1,
   mlb: 2,
   boxing: 3,

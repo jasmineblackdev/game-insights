@@ -22,6 +22,7 @@ import { TrendingUp, Users, Target, Zap, LineChart } from "lucide-react";
 const DRAFT_EDGE_YEAR: Record<League, number> = {
   nfl: 2026,
   nba: 2026,
+  wnba: 2026,
   mlb: 2026,
   boxing: 2026,
   mma: 2026,

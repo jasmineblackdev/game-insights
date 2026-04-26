@@ -43,6 +43,7 @@ import { supabase } from "@/lib/supabase";
 
 const SPORT_TO_ML: Record<PlayerEdgePrediction["sport"], MLSport> = {
   NBA:    "nba",
+  WNBA:   "wnba",
   NFL:    "nfl",
   MLB:    "mlb",
   Boxing: "boxing",

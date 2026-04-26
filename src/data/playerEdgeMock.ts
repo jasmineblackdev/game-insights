@@ -5,7 +5,7 @@
 
 import type { PlayerPropInput } from "@/lib/edgeCardScoring";
 
-export type PlayerEdgeSportFilter = "all" | "NBA" | "NFL" | "MLB" | "Boxing" | "MMA";
+export type PlayerEdgeSportFilter = "all" | "NBA" | "WNBA" | "NFL" | "MLB" | "Boxing" | "MMA";
 
 export type PlayerEdgeStatFilter =
   | "all"

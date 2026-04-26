@@ -32,7 +32,26 @@
       "Bash(echo \"eslint_exit=$?\")",
       "Bash(npx vitest *)",
       "Bash(echo \"vitest_exit=$?\")",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(supabase --version)",
+      "Bash(supabase projects *)",
+      "Bash(supabase db *)",
+      "Bash(supabase migration *)",
+      "Bash(psql --version)",
+      "Bash(cat)",
+      "Bash(bash /tmp/verify.sh)",
+      "Bash(bun run *)",
+      "Bash(chmod +x scripts/backtest.mjs)",
+      "Bash(node -c scripts/backtest.mjs)",
+      "Bash(echo \"---exit $?---\")",
+      "Bash(wait)",
+      "Bash(tee /tmp/tsc-app.log)",
+      "Bash(curl -s \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=20260426\")",
+      "Bash(python3 -c ' *)",
+      "Bash(node *)",
+      "Bash(curl -s \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/leaders\")",
+      "Bash(curl -s -o /tmp/nba_team.json -w \"HTTP %{http_code} bytes %{size_download}\\\\n\" \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/leaders\")",
+      "Bash(curl -s -o /tmp/nba_roster.json -w \"HTTP %{http_code} bytes %{size_download}\\\\n\" \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/roster\")"
     ]
   }
 }

@@ -87,7 +87,7 @@ function tierColor(sport: string) {
 }
 
 const SPORT_LABELS: Record<League, string> = {
-  nba: "NBA", nfl: "NFL", mlb: "MLB", boxing: "Boxing", mma: "UFC/MMA",
+  nba: "NBA", wnba: "WNBA", nfl: "NFL", mlb: "MLB", boxing: "Boxing", mma: "UFC/MMA",
 };
 
 // ─── Sport Coverage Bar ───────────────────────────────────────────

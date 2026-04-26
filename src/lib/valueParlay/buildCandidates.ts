@@ -532,7 +532,7 @@ export function bestPropValues(candidates: ValueBetCandidate[], n = 5): ValueBet
 // ── ML-enriched prop candidates ───────────────────────────────────────────────
 
 const SPORT_TO_LEAGUE: Record<string, League> = {
-  NBA: "nba", NFL: "nfl", MLB: "mlb", Boxing: "boxing", MMA: "mma",
+  NBA: "nba", WNBA: "wnba", NFL: "nfl", MLB: "mlb", Boxing: "boxing", MMA: "mma",
 };
 
 /** Map ML timing_urgency → continuous timingScore (0–1). */

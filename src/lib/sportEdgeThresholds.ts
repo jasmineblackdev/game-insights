@@ -4,6 +4,7 @@ import { getLearnedEdgeFloor, getSportEngineLearningState } from "@/lib/predicti
 /** Sport floors for “value still alive” / ranking / recommendations (GameLens v2). */
 export const VALUE_GONE_EDGE_BY_SPORT: Record<League, number> = {
   nba: 0.03,
+  wnba: 0.03,
   nfl: 0.03,
   mlb: 0.02,
   boxing: 0.04,
@@ -13,6 +14,7 @@ export const VALUE_GONE_EDGE_BY_SPORT: Record<League, number> = {
 /** Dynamic band ceilings when calibration lifts floors. */
 const EDGE_CEILING: Record<League, number> = {
   nba: 0.05,
+  wnba: 0.05,
   nfl: 0.05,
   mlb: 0.04,
   boxing: 0.06,
@@ -21,6 +23,7 @@ const EDGE_CEILING: Record<League, number> = {
 
 const UNDERPERFORM_MIN_N: Record<League, number> = {
   nba: 42,
+  wnba: 30,
   nfl: 42,
   mlb: 30,
   boxing: 20,
@@ -29,6 +32,7 @@ const UNDERPERFORM_MIN_N: Record<League, number> = {
 
 const UNDERPERFORM_BOOST: Record<League, number> = {
   nba: 0.0035,
+  wnba: 0.0035,
   nfl: 0.0035,
   mlb: 0.005,
   boxing: 0.005,
@@ -38,6 +42,7 @@ const UNDERPERFORM_BOOST: Record<League, number> = {
 /** Hit-rate ceiling before we ask for extra edge (MLB/combat lines are noisier). */
 const UNDERPERFORM_HIT_EMA: Record<League, number> = {
   nba: 0.501,
+  wnba: 0.501,
   nfl: 0.501,
   mlb: 0.508,
   boxing: 0.51,

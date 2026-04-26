@@ -173,6 +173,13 @@ export function StickyParlaySlipDrawer() {
                     </Link>
                   </Button>
                 </SheetClose>
+                <SheetClose asChild>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link to="/parlays">
+                      Log a bet placed elsewhere →
+                    </Link>
+                  </Button>
+                </SheetClose>
               </div>
             </div>
           ) : (

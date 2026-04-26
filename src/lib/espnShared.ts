@@ -116,6 +116,7 @@ export function winProbFromOdds(
  */
 const HOME_BOOST: Record<League, number> = {
   nba: 0.06,
+  wnba: 0.06,
   nfl: 0.055,
   mlb: 0.03,
   boxing: 0, // boxing has no home/away venue advantage

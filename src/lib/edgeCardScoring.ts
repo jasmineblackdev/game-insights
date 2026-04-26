@@ -137,7 +137,7 @@ export interface PlayerPropInput {
   game_id: string;
   player_id: string;
   player_name: string;
-  sport: "NBA" | "NFL" | "MLB" | "Boxing" | "MMA";
+  sport: "NBA" | "WNBA" | "NFL" | "MLB" | "Boxing" | "MMA";
   team: string;
   opponent: string;
   game_time: string;
@@ -603,6 +603,7 @@ const LEAGUE_ORDER: League[] = ["nba", "nfl", "mlb", "boxing", "mma"];
 export function groupCandidatesByLeague(candidates: EdgeCandidate[]): Record<League, EdgeCandidate[]> {
   const acc: Record<League, EdgeCandidate[]> = {
     nba: [],
+    wnba: [],
     nfl: [],
     mlb: [],
     boxing: [],
