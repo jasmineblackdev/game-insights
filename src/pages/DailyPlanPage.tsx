@@ -60,6 +60,7 @@ import { useValueParlay } from "@/context/ValueParlayContext";
 import { useBankroll } from "@/context/BankrollContext";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
+import { Disclosure } from "@/components/ui/disclosure";
 import {
   getPropRiskLevel,
   riskLevelClass,
@@ -580,11 +581,8 @@ export default function DailyPlanPage() {
           </p>
         ) : null}
 
-        <details className="rounded-lg border border-border bg-card/40 px-4 py-3">
-          <summary className="cursor-pointer text-sm font-semibold text-foreground">
-            Why this plan?
-          </summary>
-          <div className="mt-3 text-[12px] text-muted-foreground space-y-2 leading-relaxed">
+        <Disclosure variant="card" title="Why this plan?">
+          <div className="text-[12px] text-muted-foreground space-y-2 leading-relaxed">
             <p>
               <span className="text-foreground font-bold">Primary</span> takes the highest-confidence anchor
               (1–2 legs, no HIGH-risk legs, combat sports only when data quality is strong) and sizes via
@@ -605,7 +603,7 @@ export default function DailyPlanPage() {
               it across Regenerate, and Replace by removing the leg and regenerating.
             </p>
           </div>
-        </details>
+        </Disclosure>
       </main>
     </div>
   );

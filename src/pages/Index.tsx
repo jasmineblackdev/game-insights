@@ -30,6 +30,7 @@ import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSect
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { Disclosure } from "@/components/ui/disclosure";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
@@ -901,19 +902,17 @@ const Index = () => {
                         )}
                         bookOddsLoading={false}
                       />
-                      <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
-                        <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
-                          <span>Best-value picks (individual leg list)</span>
-                          <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
-                        </summary>
-                        <div className="mt-4">
-                          <BestValuePicksSection
-                            games={allGamesWithIntel}
-                            oddsMap={oddsMapAll}
-                            loading={false}
-                          />
-                        </div>
-                      </details>
+                      <Disclosure
+                        variant="card"
+                        title="Best-value picks (individual leg list)"
+                        showHint
+                      >
+                        <BestValuePicksSection
+                          games={allGamesWithIntel}
+                          oddsMap={oddsMapAll}
+                          loading={false}
+                        />
+                      </Disclosure>
                     </div>
                   )}
                 </div>
@@ -925,12 +924,12 @@ const Index = () => {
                 <div className="space-y-10">
                   <DraftEdgeSection league={league} />
                   {draftPicks.length > 0 ? (
-                    <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
-                      <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
-                        <span>Classic pick-by-pick board</span>
-                        <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
-                      </summary>
-                      <p className="text-xs text-muted-foreground mt-2 mb-4">
+                    <Disclosure
+                      variant="card"
+                      title="Classic pick-by-pick board"
+                      showHint
+                    >
+                      <p className="text-xs text-muted-foreground mb-4">
                         Live prospect rankings from ESPN — grades derived from consensus board position.
                       </p>
                       <div className="space-y-3 pb-2">
@@ -938,7 +937,7 @@ const Index = () => {
                           <DraftPickCard key={`${pick.league}-${pick.pickNumber}`} pick={pick} index={i} />
                         ))}
                       </div>
-                    </details>
+                    </Disclosure>
                   ) : (
                     <p className="text-sm text-muted-foreground text-center py-6 rounded-lg border border-border bg-card/40">
                       No classic pick list for {leagueLabel(league)} in this build — Draft Edge cards above cover window /

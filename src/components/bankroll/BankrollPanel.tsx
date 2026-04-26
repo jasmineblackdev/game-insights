@@ -7,6 +7,7 @@
 import { useMemo, useState } from "react";
 import { useBankroll } from "@/context/BankrollContext";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
 import { BankrollQuickActions } from "./BankrollWidget";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -148,12 +149,18 @@ export function BankrollPanel({ onClose }: { onClose?: () => void }) {
       ) : null}
 
       {/* Reset (collapsed by default) */}
-      <details className="rounded-md border border-dashed border-border p-3">
-        <summary className="text-[11px] text-muted-foreground cursor-pointer flex items-center gap-1.5">
-          <Trash2 className="w-3 h-3" />
-          Reset bankroll
-        </summary>
-        <div className="mt-2 space-y-2">
+      <Disclosure
+        variant="dashed"
+        className="p-3"
+        summaryClassName="text-[11px] normal-case tracking-normal text-muted-foreground"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            <Trash2 className="w-3 h-3" />
+            Reset bankroll
+          </span>
+        }
+      >
+        <div className="space-y-2">
           <p className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
             <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
             Wipes all events and resets the starting bankroll to the value below.
@@ -198,7 +205,7 @@ export function BankrollPanel({ onClose }: { onClose?: () => void }) {
             )}
           </div>
         </div>
-      </details>
+      </Disclosure>
     </div>
   );
 }

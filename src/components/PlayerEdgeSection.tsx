@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Star, Clock, Copy, ChevronDown, ChevronUp, TrendingUp, ClipboardList, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
 import { cn } from "@/lib/utils";
 import {
   fetchPlayerEdgePredictions,
@@ -297,13 +298,8 @@ function PlayerEdgeCard({
       </p>
 
       {/* ── Expandable Details (raw stats, full reasons, matchup notes) ── */}
-      <details className="group rounded-md border border-dashed border-border bg-card/40 px-2 py-1.5">
-        <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-muted-foreground font-semibold list-none flex items-center justify-between">
-          <span>Details</span>
-          <span className="text-[9px] group-open:hidden">Show</span>
-          <span className="text-[9px] hidden group-open:inline">Hide</span>
-        </summary>
-        <div className="mt-2 space-y-2 text-[11px]">
+      <Disclosure variant="dashed" title="Details">
+        <div className="space-y-2 text-[11px]">
           {/* Raw projection / edge / form */}
           <div className="flex items-center gap-4">
             <div>
@@ -400,7 +396,7 @@ function PlayerEdgeCard({
             <span className="text-muted-foreground">{pred.risk_factor}</span>
           </div>
         </div>
-      </details>
+      </Disclosure>
 
       {/* ── Actions ──────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-border">
@@ -791,14 +787,13 @@ export function PlayerEdgeSection() {
 
           {/* 5. Props to Avoid (volatile) */}
           {volatile.length > 0 && (
-            <details className="group">
-              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground select-none">
-                <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
-                🔴 Props to Avoid ({volatile.length} volatile)
-              </summary>
-              <p className="text-xs text-muted-foreground mt-2 mb-4">High variance — game script changes or role instability could sink these</p>
+            <Disclosure
+              variant="chevron"
+              title={<>🔴 Props to Avoid ({volatile.length} volatile)</>}
+            >
+              <p className="text-xs text-muted-foreground mb-4">High variance — game script changes or role instability could sink these</p>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-3">
-                {volatile.slice(0, 3).map((pred, i) => (
+                {volatile.slice(0, 3).map((pred) => (
                   <PlayerEdgeCard
                     key={pred.id}
                     pred={pred}
@@ -808,7 +803,7 @@ export function PlayerEdgeSection() {
                   />
                 ))}
               </div>
-            </details>
+            </Disclosure>
           )}
         </div>
       )}
