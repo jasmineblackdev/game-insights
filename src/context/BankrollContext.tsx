@@ -23,8 +23,11 @@ import {
   appendEvent,
   currentBankroll,
   dailyPnl as dailyPnlFromStore,
+  hasTodaysLoss,
   loadBankroll,
+  resultStreaks,
   setStartingBankroll as setStartingBankrollStore,
+  todaysExposure,
   wipeBankroll,
 } from "@/lib/bankroll/store";
 import { suggestAllStakes, suggestStakeForRisk } from "@/lib/bankroll/staking";
@@ -62,6 +65,16 @@ interface BankrollContextValue {
   stakeSuggestions: ReturnType<typeof suggestAllStakes>;
   /** Suggest stake for a specific risk tier. */
   suggestStake: (risk: StakeRiskLevel) => ReturnType<typeof suggestStakeForRisk>;
+  /** Current consecutive-win count from bet_settled events. */
+  winStreak: number;
+  /** Current consecutive-loss count. */
+  lossStreak: number;
+  /** Most recent settled-bet result (or null). */
+  lastResult: "win" | "loss" | "push" | null;
+  /** Sum of stakes on bet_placed events occurring today (ISO day). */
+  todaysExposure: number;
+  /** True when any settled bet today resolved as a loss. */
+  hadLossToday: boolean;
 }
 
 const Ctx = createContext<BankrollContextValue | null>(null);
@@ -160,6 +173,9 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
 
   const stakeSuggestions = useMemo(() => suggestAllStakes(balance), [balance]);
   const suggestStake = useCallback((risk: StakeRiskLevel) => suggestStakeForRisk(balance, risk), [balance]);
+  const streaks = useMemo(() => resultStreaks(snapshot), [snapshot]);
+  const exposure = useMemo(() => todaysExposure(snapshot, todayIsoDay()), [snapshot]);
+  const hadLossToday = useMemo(() => hasTodaysLoss(snapshot, todayIsoDay()), [snapshot]);
 
   const value = useMemo<BankrollContextValue>(() => ({
     isInitialized,
@@ -177,10 +193,17 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
     reset,
     stakeSuggestions,
     suggestStake,
+    winStreak: streaks.winStreak,
+    lossStreak: streaks.lossStreak,
+    lastResult: streaks.lastResult,
+    todaysExposure: exposure,
+    hadLossToday,
   }), [
     isInitialized, snapshot, balance, todayPnl, totalPnl,
     initStartingBankroll, deposit, withdraw, recordBetPlaced, recordBetSettled,
     adjust, reset, stakeSuggestions, suggestStake,
+    streaks.winStreak, streaks.lossStreak, streaks.lastResult,
+    exposure, hadLossToday,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

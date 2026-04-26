@@ -57,6 +57,7 @@ import { replaceWeakestLeg } from "@/lib/dailyPlan/replaceWeakest";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { useBankroll } from "@/context/BankrollContext";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
+import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import {
   getPropRiskLevel,
   riskLevelClass,
@@ -475,6 +476,10 @@ export default function DailyPlanPage() {
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6">
         <BankrollWidget />
+
+        {!loading && plan.length > 0 ? (
+          <AutoProfitCard plan={plan} onReplaceWeakest={replaceWeakestForTier} />
+        ) : null}
 
         {loading ? (
           <div className="grid md:grid-cols-3 gap-4">

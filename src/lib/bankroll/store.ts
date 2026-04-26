@@ -186,6 +186,65 @@ export function groupEventsByDay(s: BankrollSnapshot): Map<string, BankrollEvent
   return out;
 }
 
+/**
+ * Walk the settled-bet events backwards to find the current consecutive
+ * win or loss streak. Pushes break neither streak. Returns 0/0 for a
+ * fresh ledger.
+ */
+export function resultStreaks(s: BankrollSnapshot): {
+  winStreak: number;
+  lossStreak: number;
+  lastResult: "win" | "loss" | "push" | null;
+} {
+  let winStreak = 0;
+  let lossStreak = 0;
+  let lastResult: "win" | "loss" | "push" | null = null;
+  // Reconstruct each settlement's signed delta from balance jumps.
+  for (let i = s.events.length - 1; i >= 0; i--) {
+    const e = s.events[i];
+    if (e.type !== "bet_settled") continue;
+    const prev = i > 0 ? s.events[i - 1].balanceAfter : s.startingBankroll;
+    const delta = e.balanceAfter - prev;
+    const result: "win" | "loss" | "push" =
+      delta > 0 ? "win" : delta < 0 ? "loss" : "push";
+    if (lastResult === null) lastResult = result;
+    if (result === "win") {
+      if (lossStreak > 0) break;
+      winStreak++;
+    } else if (result === "loss") {
+      if (winStreak > 0) break;
+      lossStreak++;
+    } else {
+      // push neither extends nor breaks; keep walking
+      continue;
+    }
+  }
+  return { winStreak, lossStreak, lastResult };
+}
+
+/** Today's total stakes locked in (sum of bet_placed amounts). */
+export function todaysExposure(s: BankrollSnapshot, isoDay: string): number {
+  let total = 0;
+  for (const e of s.events) {
+    if (e.type !== "bet_placed") continue;
+    if (e.occurredAt.slice(0, 10) !== isoDay) continue;
+    total += e.amount;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/** True when at least one bet_settled today resolved as a loss. */
+export function hasTodaysLoss(s: BankrollSnapshot, isoDay: string): boolean {
+  for (let i = 0; i < s.events.length; i++) {
+    const e = s.events[i];
+    if (e.type !== "bet_settled") continue;
+    if (e.occurredAt.slice(0, 10) !== isoDay) continue;
+    const prev = i > 0 ? s.events[i - 1].balanceAfter : s.startingBankroll;
+    if (e.balanceAfter < prev) return true;
+  }
+  return false;
+}
+
 /** Wipe everything — used by the dev "Reset bankroll" button. */
 export function wipeBankroll(): void {
   try {
