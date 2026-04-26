@@ -1,6 +1,12 @@
 import type { ConfidenceLevel, GamePrediction, League } from "@/data/mockGames";
 
-export type ParlayBuildMode = "safe" | "balanced" | "aggressive" | "cashout";
+export type ParlayBuildMode =
+  | "safe"        // Safe Builder    — lower payout, higher hit chance
+  | "balanced"    // Balanced Builder — medium payout, medium risk
+  | "aggressive"  // legacy "anything goes" tier
+  | "cashout"     // Cash-Out friendly: staggered starts, ordered legs
+  | "bigwin"      // Big Win Builder  — targets +800 to +1200; strict per-leg floors
+  | "lotto";      // Lotto Builder    — high payout, clearly risky, no floors
 
 export type ValuePickType = "team_pick" | "spread" | "total" | "player_prop";
 
@@ -156,6 +162,25 @@ export interface SmartParlayResult {
   fragilityScore?: number;
   /** Lowest per-leg score in the parlay (0–1). */
   weakestLegScore?: number;
+  /** ID of the strongest leg by computeLegScore. */
+  strongestLegId?: string;
+  /** ID of the weakest leg by computeLegScore. */
+  weakestLegId?: string;
+  /** Per-leg short reason for inclusion (parallel to legs[]). */
+  legInclusionReasons?: string[];
+  /** Reasons rejected legs were dropped — diagnostic info from the optimizer. */
+  rejectedLegReasons?: { selection: string; reason: string }[];
+  /**
+   * "Would I personally take this?" — yes when:
+   *  - data quality / model_status is reasonable across legs
+   *  - fragilityScore < 55
+   *  - weakestLegScore at or above tier floor
+   *  - hit-rate × payout offers positive EV at vig-adjusted odds
+   * Always false in lotto mode (the mode itself implies "risky on purpose").
+   */
+  wouldITakeIt?: boolean;
+  /** Short rationale for the wouldITakeIt verdict. */
+  wouldITakeItReason?: string;
 }
 
 export interface ParlayTriple {

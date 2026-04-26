@@ -150,6 +150,8 @@ const PARLAY_STRUCTURE: Record<
   balanced:   { targetLegs: 3, maxTier3: 1, maxPerSport: 2, minTier1: 2 },
   aggressive: { targetLegs: 6, maxTier3: 1, maxPerSport: 3, minTier1: 2 },
   cashout:    { targetLegs: 3, maxTier3: 0, maxPerSport: 2, minTier1: 2 },
+  bigwin:     { targetLegs: 4, maxTier3: 1, maxPerSport: 3, minTier1: 2 },
+  lotto:      { targetLegs: 5, maxTier3: 2, maxPerSport: 4, minTier1: 1 },
 };
 
 // ─── Odds sweet-spot bonus ───────────────────────────────────────
@@ -523,6 +525,8 @@ export function parlayModeLabel(mode: ParlayBuildMode): string {
   if (mode === "safe")       return "Safe";
   if (mode === "balanced")   return "Balanced";
   if (mode === "cashout")    return "Cash-Out";
+  if (mode === "bigwin")     return "Big Win";
+  if (mode === "lotto")      return "Lotto";
   return "Aggressive";
 }
 
@@ -535,6 +539,12 @@ export function parlayModeDescription(mode: ParlayBuildMode): string {
   }
   if (mode === "cashout") {
     return "3-leg · staggered starts · high-prob first · upside last";
+  }
+  if (mode === "bigwin") {
+    return "4-leg · +800 to +1200 target · strict per-leg quality · ~$9 → $100";
+  }
+  if (mode === "lotto") {
+    return "5–7 leg · high upside · clearly risky · longshot legs allowed";
   }
   return "6-leg · payout-optimised · max edge · high variance tolerated";
 }

@@ -19,6 +19,7 @@ import EdgeCardPage from "./pages/EdgeCardPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
 import PicksPage from "./pages/PicksPage.tsx";
 import RecommendedParlaysPage from "./pages/RecommendedParlaysPage.tsx";
+import MLPerformancePage from "./pages/MLPerformancePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 /** SPA navigation keeps window scrollY; short pages (e.g. /edge) then look blank until refresh. */
@@ -66,6 +67,7 @@ const App = () => (
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
                     <Route path="/picks" element={<PicksPage />} />
                     <Route path="/parlays" element={<RecommendedParlaysPage />} />
+                    <Route path="/ml-performance" element={<MLPerformancePage />} />
                     {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>

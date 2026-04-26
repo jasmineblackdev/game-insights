@@ -31,6 +31,8 @@ const MODE_LABEL: Record<ParlayBuildMode, string> = {
   balanced: "Balanced (3 legs · +250 to +550)",
   aggressive: "Aggressive (5–6 legs)",
   cashout: "Cash-Out (3 legs, staggered)",
+  bigwin: "Big Win (4 legs · +800 to +1200, strict floors)",
+  lotto: "Lotto (5–7 legs · high upside, clearly risky)",
 };
 
 const HISTORY_KEY = "gamelens-value-parlay-history-v1";
@@ -84,6 +86,53 @@ function TierPerformanceStrip() {
 
 function leagueShort(l: League) {
   return l.toUpperCase();
+}
+
+// ── Per-card transparency widgets ───────────────────────────────────────────
+// "Would I take it" pill + per-card leg breakdown showing the strongest /
+// weakest leg picked by scoreParlay() so the user can see exactly which leg
+// is dragging the card down.
+
+function WouldITakePill({ result }: { result: SmartParlayResult }) {
+  if (result.wouldITakeIt == null) return null;
+  const yes = result.wouldITakeIt;
+  return (
+    <span
+      title={result.wouldITakeItReason ?? ""}
+      className={cn(
+        "text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full border",
+        yes
+          ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+          : "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30"
+      )}
+    >
+      {yes ? "I'd TAKE" : "I'd PASS"}
+    </span>
+  );
+}
+
+function LegBreakdown({ result }: { result: SmartParlayResult }) {
+  if (!result.legs.length) return null;
+  const strongIdx = result.legs.findIndex((l) => l.id === result.strongestLegId);
+  const weakIdx   = result.legs.findIndex((l) => l.id === result.weakestLegId);
+  const strong = strongIdx >= 0 ? result.legs[strongIdx] : null;
+  const weak   = weakIdx   >= 0 ? result.legs[weakIdx]   : null;
+  return (
+    <div className="space-y-0.5 pt-1 border-t border-border/40">
+      {strong && (
+        <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
+          <span className="font-bold">Strongest:</span>{" "}
+          <span className="text-foreground/80">{strong.selectionLabel}</span>
+        </p>
+      )}
+      {weak && weakIdx !== strongIdx && (
+        <p className="text-[10px] text-amber-700 dark:text-amber-400">
+          <span className="font-bold">Weakest:</span>{" "}
+          <span className="text-foreground/80">{weak.selectionLabel}</span>
+        </p>
+      )}
+    </div>
+  );
 }
 
 // ── Cash-Out Parlay section ───────────────────────────────────────────────────
@@ -507,7 +556,7 @@ export function ParlayBuilderSection({
                 Maximise probability all legs hit. Pick a tier:
               </p>
               <div className="inline-flex gap-1 rounded-full bg-muted p-0.5 w-full sm:w-auto">
-                {(["safe", "balanced", "aggressive"] as const).map((m) => (
+                {(["safe", "balanced", "bigwin", "aggressive", "lotto"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -635,26 +684,38 @@ export function ParlayBuilderSection({
               </p>
               <div className="grid md:grid-cols-3 gap-3 text-xs">
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5">
-                  <p className="font-display font-bold text-foreground">Best value parlay</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-display font-bold text-foreground">Best value parlay</p>
+                    <WouldITakePill result={triple.bestValue} />
+                  </div>
                   <p className="text-muted-foreground">{triple.bestValue.legs.length} legs</p>
                   <p className="tabular-nums font-semibold">Score {triple.bestValue.smartParlayScore.toFixed(2)}</p>
                   <p className="tabular-nums text-muted-foreground">Payout {triple.bestValue.projectedPayoutMultiplier.toFixed(2)}x</p>
+                  <LegBreakdown result={triple.bestValue} />
                   {parlayReasons(triple.bestValue).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}
                 </div>
                 <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
-                  <p className="font-display font-bold text-foreground">Safer alternative</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-display font-bold text-foreground">Safer alternative</p>
+                    <WouldITakePill result={triple.safer} />
+                  </div>
                   <p className="text-muted-foreground">{triple.safer.legs.length} legs</p>
                   <p className="tabular-nums font-semibold">Hit {(triple.safer.projectedHitProbability * 100).toFixed(1)}%</p>
+                  <LegBreakdown result={triple.safer} />
                   {parlayReasons(triple.safer).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}
                 </div>
                 <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
-                  <p className="font-display font-bold text-foreground">Higher payout</p>
+                  <div className="flex items-center justify-between">
+                    <p className="font-display font-bold text-foreground">Higher payout</p>
+                    <WouldITakePill result={triple.higherPayout} />
+                  </div>
                   <p className="text-muted-foreground">{triple.higherPayout.legs.length} legs</p>
                   <p className="tabular-nums font-semibold">{triple.higherPayout.projectedPayoutMultiplier.toFixed(2)}x</p>
+                  <LegBreakdown result={triple.higherPayout} />
                   {parlayReasons(triple.higherPayout).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}

@@ -102,6 +102,24 @@ function sportCounts(legs: ValueBetCandidate[]): Record<string, number> {
   return m;
 }
 
+/**
+ * Strict per-leg quality required when a parlay exceeds 4 legs.
+ * Five+ leg parlays only ship if every leg clears these gates — otherwise
+ * the optimizer chops down to a 2-4 leg version. This codifies the
+ * "prefer 2–4 strong legs over 5+ weak legs" rule.
+ */
+function legIsStrongFor5PlusParlay(c: ValueBetCandidate): boolean {
+  if (c.confidence === "low") return false;
+  if ((c.modelProbability ?? 0) < 0.55) return false;
+  if (c.volatilityScore >= 60) return false;
+  if (c.stabilityScore !== undefined && c.stabilityScore < 0.55) return false;
+  if (c.timingUrgency === "wait") return false;
+  if (c.recentHitRate != null
+      && (c.recentHitRateSamples ?? 0) >= 3
+      && c.recentHitRate < 0.45) return false;
+  return true;
+}
+
 function passesHardRules(legs: ValueBetCandidate[], maxPerSport: number): boolean {
   const byGame = new Map<string, number>();
   for (const l of legs) {
@@ -280,6 +298,38 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       minImpliedProbability: 0.52,
     };
   }
+  if (mode === "bigwin") {
+    // Big Win — strict per-leg quality so 4-leg cards reach +800 to +1200
+    // without relying on longshot legs. Each leg still needs to hit at a
+    // realistic clip; the upside comes from compounding good legs, not
+    // praying on a +500 dog.
+    return {
+      maxVolatility: 55,
+      minStability:  0.55,
+      minHitProb:    0.50,
+      minLegScore:   0.54,
+      allowWait:     false,
+      waitMinEdge:   999,
+      maxMediumConfidenceLegs: 2,
+      minRecentHitRate: 0.40,
+      minImpliedProbability: 0.40,
+    };
+  }
+  if (mode === "lotto") {
+    // Lotto — clearly risky, anything goes. Still rejects negative edge
+    // and ultra-low samples but otherwise no floors.
+    return {
+      maxVolatility: 100,
+      minStability:  0,
+      minHitProb:    0,
+      minLegScore:   0,
+      allowWait:     true,
+      waitMinEdge:   0,
+      maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
+      minRecentHitRate: 0,
+      minImpliedProbability: 0,
+    };
+  }
   // aggressive
   return {
     maxVolatility: 100,
@@ -395,6 +445,8 @@ function targetParlayOddsRange(mode: ParlayBuildMode): { lo: number; hi: number 
   if (mode === "safe")     return { lo: 120, hi: 320 };
   if (mode === "balanced") return { lo: 250, hi: 550 };
   if (mode === "cashout")  return { lo: 180, hi: 420 };
+  if (mode === "bigwin")   return { lo: 800, hi: 1200 };
+  if (mode === "lotto")    return { lo: 1500, hi: 5000 };
   return null; // aggressive: no preference
 }
 
@@ -415,6 +467,11 @@ function oddsInRangePerLeg(mode: ParlayBuildMode, odds: number): number {
   }
   if (mode === "balanced" || mode === "cashout") {
     if (odds >= -160 && odds <= 180) return 1;
+    return 0;
+  }
+  if (mode === "bigwin") {
+    // Each leg should pay ~+150 to +250 so 4 legs compound into +800–1200
+    if (odds >= 100 && odds <= 280) return 1;
     return 0;
   }
   return 1;
@@ -716,6 +773,46 @@ function scoreParlay(
   if (avgConf < 0.55 || hit < 0.12) cardConf = "low";
   else if (avgConf < 0.72 || hit < 0.22) cardConf = "medium";
 
+  // Strongest / weakest leg by computed leg score.
+  let strongestIdx = 0, weakestIdx = 0;
+  for (let i = 1; i < perLegScores.length; i++) {
+    if (perLegScores[i] > perLegScores[strongestIdx]) strongestIdx = i;
+    if (perLegScores[i] < perLegScores[weakestIdx])   weakestIdx   = i;
+  }
+
+  // Per-leg short reason (used by the UI to explain "why each leg was included")
+  const legInclusionReasons = legs.map((l, i) => {
+    const score = perLegScores[i];
+    const parts: string[] = [];
+    if (l.confidence === "high") parts.push("HIGH conf");
+    if (l.edge >= 0.06)          parts.push(`edge +${(l.edge * 100).toFixed(1)}%`);
+    if ((l.modelProbability ?? 0) >= 0.62) parts.push(`hit ${((l.modelProbability ?? 0) * 100).toFixed(0)}%`);
+    if ((l.recentHitRate ?? 0) >= 0.6)     parts.push(`L5 ${Math.round((l.recentHitRate ?? 0) * 100)}%`);
+    if (l.timingUrgency === "now")         parts.push("timing now");
+    if (parts.length === 0) parts.push(`leg score ${score.toFixed(2)}`);
+    return parts.join(" · ");
+  });
+
+  // "Would I personally take this?" — strict EV + quality check.
+  // EV per $1: hit * payoutMult − 1. Positive EV is necessary but not
+  // sufficient — also require fragility under threshold and at least
+  // medium card confidence. Lotto mode is always "no" by design.
+  const evPerDollar = hit * mult - 1;
+  const okEV         = evPerDollar > 0.02;
+  const okFragility  = frag.score < 55;
+  const okConfidence = cardConf !== "low";
+  const okWeakest    = perLegScores[weakestIdx] >= floors.minLegScore - 0.05;
+  const noLowConf    = !legs.some((l) => l.confidence === "low");
+  const wouldITakeIt = mode !== "lotto" && okEV && okFragility && okConfidence && okWeakest && noLowConf;
+  const wouldITakeItReason = mode === "lotto"
+    ? "Lotto mode is risky by design — never a personal-take recommendation"
+    : !okEV         ? `EV/$1 = ${evPerDollar.toFixed(3)} — payout doesn't justify hit prob`
+    : !okFragility  ? `Fragility ${frag.score} — too sensitive to one weak leg`
+    : !okConfidence ? `Card confidence ${cardConf} — too uncertain to back`
+    : !okWeakest    ? `Weakest leg below tier floor (${perLegScores[weakestIdx].toFixed(2)} vs ${floors.minLegScore})`
+    : !noLowConf    ? "Includes a LOW confidence leg"
+    : "Hit probability + payout + leg quality all clear";
+
   return {
     legs,
     projectedHitProbability:   Math.round(hit * 1000) / 1000,
@@ -729,6 +826,11 @@ function scoreParlay(
     warnings:                  buildWarnings(legs),
     fragilityScore:            frag.score,
     weakestLegScore:           frag.weakestLegScore,
+    strongestLegId:            legs[strongestIdx]?.id,
+    weakestLegId:              legs[weakestIdx]?.id,
+    legInclusionReasons,
+    wouldITakeIt,
+    wouldITakeItReason,
   };
 }
 
@@ -939,9 +1041,13 @@ function tierConfig(mode: ParlayBuildMode): {
 } {
   // SAFE targets 2-leg parlays at roughly +120 to +320 combined odds.
   // BALANCED targets 3-leg parlays at roughly +250 to +550.
+  // BIG WIN targets 4-leg cards at +800 to +1200 with strict per-leg floors.
+  // LOTTO is 5–7 legs of whatever the user wants, clearly risky.
   if (mode === "safe")       return { min: 2, target: 2, max: 3,  maxPerSport: 2 };
   if (mode === "balanced")   return { min: 3, target: 3, max: 4,  maxPerSport: 3 };
   if (mode === "cashout")    return { min: 3, target: 3, max: 4,  maxPerSport: 2 };
+  if (mode === "bigwin")     return { min: 3, target: 4, max: 4,  maxPerSport: 3 };
+  if (mode === "lotto")      return { min: 4, target: 5, max: 7,  maxPerSport: 4 };
   return                            { min: 4, target: 5, max: 6,  maxPerSport: 4 };
 }
 
@@ -1048,6 +1154,14 @@ export function optimizeSmartParlays(
   }
   if (legsBest.length < 2) {
     legsBest = pool.filter((c) => c.confidence !== "low").slice(0, Math.min(target, Math.max(2, pool.length)));
+  }
+  // 5-leg quality gate: only keep ≥ 5 legs when every single leg passes the
+  // strict "strong leg" check. Otherwise chop down — better to ship a 4-leg
+  // card of strong legs than a 5-leg card with one weak leg.
+  if (mode !== "lotto") {
+    while (legsBest.length >= 5 && !legsBest.every(legIsStrongFor5PlusParlay)) {
+      legsBest = legsBest.slice(0, -1);
+    }
   }
   if (mode === "cashout") legsBest = orderLegsForCashout(legsBest);
   legsBest = swapOutFragileLegs(legsBest, min);

@@ -477,6 +477,8 @@ function ParlayCard({ parlay }: { parlay: AutoParlay }) {
     balanced:   "border-amber-500/30 bg-amber-500/5",
     aggressive: "border-destructive/30 bg-destructive/5",
     cashout:    "border-sky-500/30 bg-sky-500/5",
+    bigwin:     "border-violet-500/30 bg-violet-500/5",
+    lotto:      "border-fuchsia-500/30 bg-fuchsia-500/5",
   };
 
   const sportTags = parlay.sportMix.split(",");
