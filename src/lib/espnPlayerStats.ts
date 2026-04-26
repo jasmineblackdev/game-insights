@@ -23,31 +23,51 @@ const SCOREBOARDS: Record<string, string> = {
 };
 
 // ── Stat maps ─────────────────────────────────────────────────────────────────
+// ESPN's leader category names vary by sport AND by game state:
+//   NBA upcoming: "pointsLeader" / "reboundsLeader" / "assistsLeader"
+//   NBA in-game: "points" / "rebounds" / "assists"
+//   NFL: "passingYards" / "passingLeader" depending on phase
+//   MLB upcoming: "homeRuns" / "strikeouts" / "hits"
+// Matcher is substring-based + case-insensitive so all variants resolve.
 
-const NBA_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  points:   { statType: "points",   unit: "pts" },
-  rebounds: { statType: "rebounds", unit: "reb" },
-  assists:  { statType: "assists",  unit: "ast" },
+interface StatMapEntry { statType: string; unit: string; matches: string[] }
+
+const NBA_STAT_MAP: Record<string, StatMapEntry> = {
+  points:   { statType: "points",   unit: "pts", matches: ["points", "pointsleader", "pts"] },
+  rebounds: { statType: "rebounds", unit: "reb", matches: ["rebounds", "reboundsleader", "reb"] },
+  assists:  { statType: "assists",  unit: "ast", matches: ["assists", "assistsleader", "ast"] },
 };
 
-const MLB_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  homeRuns:   { statType: "total_bases", unit: "HR"   },
-  strikeouts: { statType: "strikeouts",  unit: "K"    },
-  hits:       { statType: "hits",        unit: "hits" },
+const MLB_STAT_MAP: Record<string, StatMapEntry> = {
+  homeRuns:   { statType: "total_bases", unit: "HR",   matches: ["homeruns", "hr", "homerunsleader"] },
+  strikeouts: { statType: "strikeouts",  unit: "K",    matches: ["strikeouts", "strikeoutsleader", "k", "ks"] },
+  hits:       { statType: "hits",        unit: "hits", matches: ["hits", "hitsleader", "h"] },
 };
 
-const NFL_STAT_MAP: Record<string, { statType: string; unit: string }> = {
-  passingYards:   { statType: "passing_yards",   unit: "pass yds" },
-  rushingYards:   { statType: "rushing_yards",   unit: "rush yds" },
-  receivingYards: { statType: "receiving_yards", unit: "rec yds"  },
-  receptions:     { statType: "receptions",      unit: "rec"      },
+const NFL_STAT_MAP: Record<string, StatMapEntry> = {
+  passingYards:   { statType: "passing_yards",   unit: "pass yds", matches: ["passingyards", "passyards", "passingleader", "passing"] },
+  rushingYards:   { statType: "rushing_yards",   unit: "rush yds", matches: ["rushingyards", "rushyards", "rushingleader", "rushing"] },
+  receivingYards: { statType: "receiving_yards", unit: "rec yds",  matches: ["receivingyards", "receivingleader", "receiving"] },
+  receptions:     { statType: "receptions",      unit: "rec",      matches: ["receptions", "receptionsleader", "rec"] },
 };
 
-const SPORT_STAT_MAP: Record<string, typeof NBA_STAT_MAP> = {
+const SPORT_STAT_MAP: Record<string, Record<string, StatMapEntry>> = {
   NBA: NBA_STAT_MAP,
   MLB: MLB_STAT_MAP,
   NFL: NFL_STAT_MAP,
 };
+
+/** Look up the stat-map entry for an ESPN leader category name (case-insensitive). */
+function resolveStatMapping(
+  statMap: Record<string, StatMapEntry>,
+  rawCategory: string,
+): StatMapEntry | undefined {
+  const lc = rawCategory.toLowerCase().replace(/[\s_-]/g, "");
+  for (const entry of Object.values(statMap)) {
+    if (entry.matches.includes(lc)) return entry;
+  }
+  return undefined;
+}
 
 // ── ESPN raw types ────────────────────────────────────────────────────────────
 
@@ -324,7 +344,7 @@ async function fetchSportPlayerEdge(
 
       for (const category of competitor.leaders ?? []) {
         const catName = category.name ?? "";
-        const mapping = statMap[catName];
+        const mapping = resolveStatMapping(statMap, catName);
         if (!mapping) continue;
 
         // Top 5 leaders per category for broader coverage
