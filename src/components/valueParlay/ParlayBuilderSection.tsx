@@ -24,7 +24,7 @@ import { enrichCandidatesWithRecentPerformance } from "@/lib/valueParlay/recentP
 import { snapshotClvForCandidates, sealClvForPredictions } from "@/lib/ml/clvSnapshotter";
 import { loadPlattParams } from "@/lib/ml/plattCalibration";
 import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
-import { logRecommendedParlay } from "@/lib/parlayTracking/recommendedParlayLogger";
+import { logRecommendedParlay, type SaveStatus } from "@/lib/parlayTracking/recommendedParlayLogger";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -92,6 +92,55 @@ function leagueShort(l: League) {
 // "Would I take it" pill + per-card leg breakdown showing the strongest /
 // weakest leg picked by scoreParlay() so the user can see exactly which leg
 // is dragging the card down.
+
+// ── Save Status indicator ───────────────────────────────────────────────────
+// Shows the result of every auto-save so the user can tell when Supabase
+// is rejecting the insert (e.g. table missing) vs everything healthy.
+
+const STATUS_COLOR: Record<SaveStatus, string> = {
+  saved:         "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  duplicate:     "bg-muted text-muted-foreground",
+  failed:        "bg-red-500/15 text-red-600 dark:text-red-400",
+  missing_table: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  waiting:       "bg-sky-500/10 text-sky-700 dark:text-sky-300",
+  no_supabase:   "bg-muted text-muted-foreground",
+};
+
+const STATUS_LABEL: Record<SaveStatus, string> = {
+  saved:         "Saved",
+  duplicate:     "Already saved",
+  failed:        "Failed",
+  missing_table: "DB missing",
+  waiting:       "Saving…",
+  no_supabase:   "No DB",
+};
+
+function SaveStatusIndicator({ statuses }: { statuses: Record<string, SaveStatus> }) {
+  const entries = Object.entries(statuses);
+  if (!entries.length) return null;
+  const missing = entries.some(([, s]) => s === "missing_table");
+  const failed  = entries.some(([, s]) => s === "failed");
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap text-[10px] pt-1">
+      <span className="font-semibold text-muted-foreground tracking-wider">SAVE STATUS</span>
+      {entries.map(([variant, status]) => (
+        <span key={variant} className={cn("px-1.5 py-0.5 rounded font-semibold", STATUS_COLOR[status])}>
+          {variant}: {STATUS_LABEL[status]}
+        </span>
+      ))}
+      {missing && (
+        <span className="ml-2 text-amber-700 dark:text-amber-400 italic">
+          Run the recommended_parlays migration to enable history.
+        </span>
+      )}
+      {failed && !missing && (
+        <span className="ml-2 text-red-600 dark:text-red-400 italic">
+          Auto-save failed — check console.
+        </span>
+      )}
+    </div>
+  );
+}
 
 function WouldITakePill({ result }: { result: SmartParlayResult }) {
   if (result.wouldITakeIt == null) return null;
@@ -422,17 +471,29 @@ export function ParlayBuilderSection({
 
   // Auto-save every recommended parlay to recommended_parlays so the user
   // has a full history regardless of whether they actually placed it.
-  // Session-deduped per (tier, variant, legs-fingerprint) inside the logger.
+  // Status surfaces in the Save Status indicator below.
+  const [saveStatuses, setSaveStatuses] = useState<Record<string, SaveStatus>>({});
   useEffect(() => {
+    const update = (key: string, status: SaveStatus) =>
+      setSaveStatuses((s) => ({ ...s, [key]: status }));
+
+    const fire = (key: string, args: Parameters<typeof logRecommendedParlay>[0]) => {
+      update(key, "waiting");
+      logRecommendedParlay(args).then(
+        (status) => update(key, status),
+        () => update(key, "failed"),
+      );
+    };
+
     if (triple) {
-      logRecommendedParlay({ tier: parlayMode, variant: "best_value",    result: triple.bestValue }).catch(() => {});
-      logRecommendedParlay({ tier: parlayMode, variant: "safer",         result: triple.safer }).catch(() => {});
-      logRecommendedParlay({ tier: parlayMode, variant: "higher_payout", result: triple.higherPayout }).catch(() => {});
+      fire("best_value",    { tier: parlayMode, variant: "best_value",    result: triple.bestValue });
+      fire("safer",         { tier: parlayMode, variant: "safer",         result: triple.safer });
+      fire("higher_payout", { tier: parlayMode, variant: "higher_payout", result: triple.higherPayout });
     }
     if (cashoutTriple) {
-      logRecommendedParlay({ tier: "cashout", variant: "cashout_best",   result: cashoutTriple.bestValue }).catch(() => {});
-      logRecommendedParlay({ tier: "cashout", variant: "cashout_safer",  result: cashoutTriple.safer }).catch(() => {});
-      logRecommendedParlay({ tier: "cashout", variant: "cashout_upside", result: cashoutTriple.higherPayout }).catch(() => {});
+      fire("cashout_best",   { tier: "cashout", variant: "cashout_best",   result: cashoutTriple.bestValue });
+      fire("cashout_safer",  { tier: "cashout", variant: "cashout_safer",  result: cashoutTriple.safer });
+      fire("cashout_upside", { tier: "cashout", variant: "cashout_upside", result: cashoutTriple.higherPayout });
     }
   }, [triple, cashoutTriple, parlayMode]);
 
@@ -675,6 +736,7 @@ export function ParlayBuilderSection({
                 Save to history
               </Button>
             </div>
+            <SaveStatusIndicator statuses={saveStatuses} />
           </div>
 
           {triple ? (

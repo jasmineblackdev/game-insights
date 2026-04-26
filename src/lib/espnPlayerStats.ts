@@ -79,23 +79,80 @@ async function fetchTeamLeaders(
 
 interface StatMapEntry { statType: string; unit: string; matches: string[] }
 
+// NBA matcher expanded for the team-leaders endpoint, which uses
+// averagePoints / averageRebounds / pointsPerGame style names rather
+// than the scoreboard's "pointsLeader" / "points".
 const NBA_STAT_MAP: Record<string, StatMapEntry> = {
-  points:   { statType: "points",   unit: "pts", matches: ["points", "pointsleader", "pts"] },
-  rebounds: { statType: "rebounds", unit: "reb", matches: ["rebounds", "reboundsleader", "reb"] },
-  assists:  { statType: "assists",  unit: "ast", matches: ["assists", "assistsleader", "ast"] },
+  points: {
+    statType: "points", unit: "pts",
+    matches: [
+      "points", "pointsleader", "pts",
+      "averagepoints", "avgpoints", "pointspergame", "ppg",
+    ],
+  },
+  rebounds: {
+    statType: "rebounds", unit: "reb",
+    matches: [
+      "rebounds", "reboundsleader", "reb",
+      "averagerebounds", "avgrebounds", "reboundspergame", "rpg",
+    ],
+  },
+  assists: {
+    statType: "assists", unit: "ast",
+    matches: [
+      "assists", "assistsleader", "ast",
+      "averageassists", "avgassists", "assistspergame", "apg",
+    ],
+  },
 };
 
 const MLB_STAT_MAP: Record<string, StatMapEntry> = {
-  homeRuns:   { statType: "total_bases", unit: "HR",   matches: ["homeruns", "hr", "homerunsleader"] },
-  strikeouts: { statType: "strikeouts",  unit: "K",    matches: ["strikeouts", "strikeoutsleader", "k", "ks"] },
-  hits:       { statType: "hits",        unit: "hits", matches: ["hits", "hitsleader", "h"] },
+  homeRuns: {
+    statType: "total_bases", unit: "HR",
+    matches: ["homeruns", "hr", "homerunsleader", "homerun"],
+  },
+  strikeouts: {
+    statType: "strikeouts", unit: "K",
+    matches: [
+      "strikeouts", "strikeoutsleader", "k", "ks", "so",
+      "pitchingstrikeouts", "pitcherstrikeouts",
+    ],
+  },
+  hits: {
+    statType: "hits", unit: "hits",
+    matches: [
+      "hits", "hitsleader", "h",
+      "battingaverage", "battingavg", "avg",
+    ],
+  },
 };
 
 const NFL_STAT_MAP: Record<string, StatMapEntry> = {
-  passingYards:   { statType: "passing_yards",   unit: "pass yds", matches: ["passingyards", "passyards", "passingleader", "passing"] },
-  rushingYards:   { statType: "rushing_yards",   unit: "rush yds", matches: ["rushingyards", "rushyards", "rushingleader", "rushing"] },
-  receivingYards: { statType: "receiving_yards", unit: "rec yds",  matches: ["receivingyards", "receivingleader", "receiving"] },
-  receptions:     { statType: "receptions",      unit: "rec",      matches: ["receptions", "receptionsleader", "rec"] },
+  passingYards: {
+    statType: "passing_yards", unit: "pass yds",
+    matches: [
+      "passingyards", "passyards", "passingleader", "passing",
+      "passingyardspergame", "yardsperpass", "passing yards",
+    ],
+  },
+  rushingYards: {
+    statType: "rushing_yards", unit: "rush yds",
+    matches: [
+      "rushingyards", "rushyards", "rushingleader", "rushing",
+      "rushingyardspergame", "yardsperrush",
+    ],
+  },
+  receivingYards: {
+    statType: "receiving_yards", unit: "rec yds",
+    matches: [
+      "receivingyards", "receivingleader", "receiving",
+      "receivingyardspergame",
+    ],
+  },
+  receptions: {
+    statType: "receptions", unit: "rec",
+    matches: ["receptions", "receptionsleader", "rec"],
+  },
 };
 
 const SPORT_STAT_MAP: Record<string, Record<string, StatMapEntry>> = {

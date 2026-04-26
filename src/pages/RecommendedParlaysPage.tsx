@@ -9,15 +9,16 @@
  *   app_recommended_and_placed  — promoted via "mark as placed"
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ClipboardList, ListChecks, Plus, RefreshCw, Trophy } from "lucide-react";
+import { ArrowLeft, AlertTriangle, ClipboardList, ListChecks, Plus, RefreshCw, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ManualParlayEntryForm } from "@/components/parlayTracking/ManualParlayEntryForm";
+import { probeRecommendedParlaysTable, setLegOutcome } from "@/lib/parlayTracking/recommendedParlayLogger";
 
 type ParlayOutcome = "won" | "lost" | "push" | "pending" | "partial";
 type ParlaySource =
@@ -208,8 +209,26 @@ function ParlayRowCard({
         <ol className="space-y-1 text-[11px]">
           {row.legs.map((leg, i) => {
             const l = leg as Record<string, unknown>;
+            const legId = String(l.id ?? `idx-${i}`);
+            const legOutcome = String(l.leg_outcome ?? "pending");
+            const legCls =
+              legOutcome === "won"  ? "border-emerald-500/40 bg-emerald-500/[0.05]"
+              : legOutcome === "lost" ? "border-red-500/40 bg-red-500/[0.05]"
+              : legOutcome === "push" ? "border-muted-foreground/30 bg-muted/40"
+              :                          "border-border/60 bg-background/40";
+
+            const setLeg = async (out: "won" | "lost" | "push" | "pending") => {
+              const ok = await setLegOutcome(row.id, legId, out);
+              if (ok) {
+                toast.success(`Leg #${i + 1} → ${out}`);
+                onUpdate();
+              } else {
+                toast.error("Couldn't update leg");
+              }
+            };
+
             return (
-              <li key={i} className="flex items-start gap-2 rounded border border-border/60 bg-background/40 px-2 py-1.5">
+              <li key={i} className={cn("flex items-start gap-2 rounded border px-2 py-1.5", legCls)}>
                 <span className="font-bold tabular-nums text-muted-foreground shrink-0 mt-0.5">
                   #{i + 1}
                 </span>
@@ -220,10 +239,17 @@ function ParlayRowCard({
                   <p className="text-[10px] text-muted-foreground tabular-nums">
                     {String(l.sport ?? "").toUpperCase()} ·{" "}
                     {americanFmt((l.american_odds as number | null) ?? null)} ·{" "}
-                    {String(l.confidence ?? "")}
+                    {String(l.confidence ?? "")} · {legOutcome}
                     {l.reason_excluded ? ` · skipped: ${String(l.reason_excluded)}` : ""}
                   </p>
                 </div>
+                {row.outcome !== "pending" && (
+                  <div className="flex gap-1 shrink-0">
+                    <button onClick={() => setLeg("won")}  className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20">W</button>
+                    <button onClick={() => setLeg("lost")} className="text-[9px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20">L</button>
+                    <button onClick={() => setLeg("push")} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80">P</button>
+                  </div>
+                )}
               </li>
             );
           })}
@@ -254,6 +280,13 @@ export default function RecommendedParlaysPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("pending");
   const [showManualForm, setShowManualForm] = useState(false);
+  const [tableExists, setTableExists] = useState<boolean | null>(null);
+
+  // Probe whether recommended_parlays exists; surfaces a deploy-warning
+  // banner instead of misleading the user with empty state.
+  useEffect(() => {
+    probeRecommendedParlaysTable().then(setTableExists);
+  }, []);
 
   const { data: rows = [], isFetching, refetch } = useQuery({
     queryKey: ["recommended-parlays"],
@@ -301,6 +334,23 @@ export default function RecommendedParlaysPage() {
           Manual entry
         </Button>
       </div>
+
+      {tableExists === false && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+          <div className="text-xs">
+            <p className="font-bold text-amber-700 dark:text-amber-400">
+              Parlay tracking database is not deployed yet.
+            </p>
+            <p className="text-muted-foreground mt-0.5">
+              Run the Supabase migration:{" "}
+              <code className="bg-muted px-1.5 py-0.5 rounded">supabase db push</code>{" "}
+              (or apply <code className="bg-muted px-1.5 py-0.5 rounded">20260430200000_recommended_parlays.sql</code> in the dashboard).
+              Until then auto-saves and manual entries can't persist.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1 rounded-full bg-muted p-0.5 w-fit">
         {(Object.keys(TAB_LABELS) as Tab[]).map((t) => {
