@@ -24,6 +24,7 @@ import {
 import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type PredictionVersion } from "@/lib/predictionVersions";
 import { Switch } from "@/components/ui/switch";
 import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/mlbStarterConfirm";
+import { stagePendingTeamMoneyline } from "@/lib/predictionLearningIntelligence";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -65,6 +66,18 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
     game.status === "upcoming" &&
     !!game.mlb?.homeProbablePitcher &&
     !!game.mlb?.awayProbablePitcher;
+
+  // Stage the model's recommended pickSide on first-open of an upcoming
+  // game. Idempotent via the unique index on
+  // (external_game_id, market_type, pick_side) — covers the case where a
+  // user reads the game detail without slip-adding so backtest still has
+  // a sample. No-op if bettingIntel hasn't computed a pickSide yet.
+  useEffect(() => {
+    if (game.status !== "upcoming") return;
+    const side = game._meta?.bettingIntel?.pickSide;
+    if (side !== "home" && side !== "away" && side !== "draw") return;
+    void stagePendingTeamMoneyline(game, side);
+  }, [game]);
 
   return (
     <motion.div
@@ -255,7 +268,10 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                 }
                 const r = addValueLeg(leg);
                 const abbr = favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
-                if (r.ok) toast.success(`Added ${abbr} ML to parlay slip`);
+                if (r.ok) {
+                  toast.success(`Added ${abbr} ML to parlay slip`);
+                  void stagePendingTeamMoneyline(game, favoredSide);
+                }
                 else toast.message(r.message ?? "Could not add");
               }}
             >
@@ -278,7 +294,10 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
                 }
                 const r = addValueLeg(leg);
                 const abbr = other === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
-                if (r.ok) toast.success(`Added ${abbr} (contrarian)`);
+                if (r.ok) {
+                  toast.success(`Added ${abbr} (contrarian)`);
+                  void stagePendingTeamMoneyline(game, other);
+                }
                 else toast.message(r.message ?? "Could not add");
               }}
             >

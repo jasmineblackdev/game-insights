@@ -7,10 +7,7 @@ import {
 import { fetchLivePlayerEdgePredictions } from "@/lib/espnPlayerStats";
 import { fetchCombatPlayerEdgePredictions } from "@/lib/combatPlayerEdge";
 import { isSupabaseConfigured } from "@/lib/supabase";
-import {
-  enrichPredictions,
-  logSurfacedPredictions,
-} from "@/lib/ml/playerEdgeEnrichment";
+import { enrichPredictions } from "@/lib/ml/playerEdgeEnrichment";
 
 export type PlayerEdgeAccuracyRollup = {
   window: string;
@@ -119,8 +116,6 @@ export async function fetchPlayerEdgePredictions(
       if (stat !== "all") params.statType = stat;
       const { items, accuracy } = await fetchPlayerEdgeJson(dataUrl, params);
       const enriched = enrichPredictions(ensureGameSort(items));
-      // Fire-and-forget: log surfaced predictions for ML feedback loop
-      logSurfacedPredictions(enriched).catch(() => {});
       return { items: enriched, accuracy, source: "api" };
     } catch (e) {
       console.warn("[GameLens] Player Edge API unavailable, falling back to ESPN stats:", e);
@@ -141,8 +136,6 @@ export async function fetchPlayerEdgePredictions(
       return true;
     });
     const enriched = enrichPredictions(ensureGameSort(filtered));
-    // Fire-and-forget: log surfaced predictions for ML feedback loop
-    logSurfacedPredictions(enriched).catch(() => {});
     return { items: enriched, source: "api" };
   } catch (e) {
     console.warn("[GameLens] Player stats unavailable:", e);

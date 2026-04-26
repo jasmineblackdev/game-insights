@@ -187,3 +187,71 @@ export async function submitTeamMoneylineLearningRecord(
     if (import.meta.env.DEV) console.warn("[learning]", e);
   }
 }
+
+/**
+ * Stage a pick-time team moneyline snapshot. Called when a user adds a
+ * leg to the parlay slip or first opens GameDetailView for a game with
+ * an unstaged pickSide. Idempotent via the unique index on
+ * (external_game_id, market_type, pick_side) — repeated calls upsert.
+ *
+ * The post-game settler reads these rows, computes outcome from final
+ * score, calls submit_prediction_learning_record, and deletes the
+ * pending row. This preserves the model_probability the user actually
+ * saw at pick time, which is what Brier scoring needs.
+ */
+export async function stagePendingTeamMoneyline(
+  game: GamePrediction,
+  pickedSide: "home" | "away" | "draw"
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+
+  const bi = game._meta?.bettingIntel;
+  const useBi = bi && bi.pickSide === pickedSide;
+
+  const american = useBi ? bi.americanOdds : null;
+  const implied = useBi ? bi.impliedProbability : null;
+  const modelP = useBi ? bi.modelProbability : modelProbForPickedSide(game, pickedSide);
+  const edge = useBi ? bi.edge : null;
+
+  const pickLabel =
+    pickedSide === "home"
+      ? game.homeTeam.abbreviation
+      : pickedSide === "away"
+        ? game.awayTeam.abbreviation
+        : "Draw";
+
+  const row: Record<string, unknown> = {
+    external_game_id: game.id,
+    sport: game.league,
+    market_type: "team_moneyline",
+    pick_side: pickedSide,
+    pick_label: pickLabel,
+    american_odds: american != null ? Math.round(american) : null,
+    implied_probability: implied,
+    model_probability: modelP,
+    edge,
+    confidence: game.confidence,
+    risk_score: riskScoreFromGame(game),
+    reason_tags: JSON.parse(JSON.stringify(game.topReasons.slice(0, 6))),
+    prediction_phase: predictionPhaseForGame(game),
+    extra: learningExtra(game),
+  };
+
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.user?.id) row.user_id = session.user.id;
+  } catch {
+    /* ignore */
+  }
+
+  try {
+    const { error } = await supabase
+      .from("prediction_history_pending")
+      .upsert(row, { onConflict: "external_game_id,market_type,pick_side" });
+    if (error && import.meta.env.DEV) console.warn("[learning][stage]", error.message);
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn("[learning][stage]", e);
+  }
+}

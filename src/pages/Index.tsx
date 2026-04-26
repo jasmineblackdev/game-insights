@@ -31,6 +31,7 @@ import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { Disclosure } from "@/components/ui/disclosure";
+import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
@@ -425,6 +426,14 @@ const Index = () => {
       setSelectedGame(next);
     }
   }, [leagueGamesWithIntel, selectedGame]);
+
+  // Settle pending team-moneyline picks into prediction_history once the
+  // game finals. settleFinalGames has its own per-session dedupe so this
+  // effect can fire on every render without DB pressure.
+  useEffect(() => {
+    if (allGamesWithIntel.length === 0) return;
+    void settleFinalGames(allGamesWithIntel);
+  }, [allGamesWithIntel]);
 
   // Auto-advance to "week" if no today fights exist (non-fight nights)
   useEffect(() => {

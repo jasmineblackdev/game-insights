@@ -15,7 +15,7 @@
  * Supabase tables: `prediction_history`, `model_learning_metrics`, `model_weights`
  */
 
-import type { FeedbackRecord, MLSport, MLContext } from "@/lib/ml/types";
+import type { MLSport, MLContext } from "@/lib/ml/types";
 import { updateWeights, getAdaptiveWeightsSync } from "@/lib/ml/weights";
 import { estimatePlattParams, savePlattParams, defaultPlattParams } from "@/lib/ml/calibration";
 import { clampAlpha, getAlphaRange } from "@/lib/ml/alphaConfig";
@@ -47,9 +47,10 @@ export interface AlphaAdjustmentLog {
  * given sport. Used as a tie-breaker in alpha adjustment when the
  * direct hit-rate diff is in the ±2pp dead zone.
  *
- * Reads from prediction_history.clv_pp which the CLV snapshotter
- * fills via sealClvForPredictions(). Returns null when there's no
- * sealed data yet (Supabase not configured, no resolved bets, etc).
+ * Live schema doesn't have a clv_pp column — values are stashed in
+ * `extra->>'clv_pp'` by the snapshotter and read back here. Returns
+ * null when there's no sealed data yet (Supabase not configured, no
+ * resolved bets, fewer than 10 samples, etc).
  */
 async function fetchAvgClvForSport(sport: string, lookbackDays: number): Promise<number | null> {
   if (!supabase) return null;
@@ -57,14 +58,16 @@ async function fetchAvgClvForSport(sport: string, lookbackDays: number): Promise
     const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from("prediction_history")
-      .select("clv_pp")
+      .select("extra")
       .eq("sport", sport.toLowerCase())
-      .gte("predicted_at", since)
-      .not("clv_pp", "is", null);
+      .gte("settled_at", since);
     if (error || !data || data.length === 0) return null;
-    const values = (data as Array<{ clv_pp: number | null }>)
-      .map((r) => r.clv_pp)
-      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const values = (data as Array<{ extra: Record<string, unknown> | null }>)
+      .map((r) => {
+        const v = r.extra?.clv_pp;
+        return typeof v === "number" ? v : typeof v === "string" ? Number(v) : null;
+      })
+      .filter((v): v is number => v != null && Number.isFinite(v));
     // Need at least 10 sealed CLV samples before we trust the average
     // — otherwise random variance dominates.
     if (values.length < 10) return null;
@@ -99,47 +102,6 @@ export function readAlphaAdjustmentLog(sport: string): AlphaAdjustmentLog | null
 const RECALIBRATION_THRESHOLD = 50;
 const PLATT_CALIBRATION_THRESHOLD = 100;
 
-// ── Outcome recording ─────────────────────────────────────────────────────────
-
-/**
- * Record a single resolved prediction outcome to Supabase.
- * Call this after a pick's result is known.
- */
-export async function recordOutcome(record: FeedbackRecord): Promise<void> {
-  const { error } = await supabase
-    .from("prediction_history")
-    .upsert(
-      {
-        prediction_id:              record.prediction_id,
-        sport:                      record.sport,
-        stat_type:                  record.stat_type,
-        market_type:                record.market_type,
-        context:                    record.context,
-        line_value:                 record.line_value,
-        projected_value:            record.projected_value,
-        direction:                  record.direction,
-        confidence:                 record.confidence,
-        edge_at_prediction:         record.edge_at_prediction,
-        hit_probability_at_prediction: record.hit_probability_at_prediction,
-        alpha_at_prediction:        record.alpha_at_prediction,
-        actual_value:               record.actual_value,
-        outcome:                    record.outcome,
-        feature_snapshot:           record.feature_snapshot,
-        predicted_at:               record.predicted_at,
-        resolved_at:                record.resolved_at,
-      },
-      { onConflict: "prediction_id" },
-    );
-
-  if (error) {
-    console.error("[feedbackLoop] Failed to record outcome:", error.message);
-    return;
-  }
-
-  // Check if we've crossed the recalibration threshold for this sport
-  await maybeRecalibrate(record.sport, record.context);
-}
-
 // ── Recalibration trigger ─────────────────────────────────────────────────────
 
 /**
@@ -150,10 +112,10 @@ async function maybeRecalibrate(sport: MLSport, context: MLContext): Promise<voi
   try {
     const { count } = await supabase
       .from("prediction_history")
-      .select("prediction_id", { count: "exact", head: true })
+      .select("id", { count: "exact", head: true })
       .eq("sport", sport)
-      .eq("context", context)
-      .not("outcome", "is", null);
+      .eq("prediction_phase", context)
+      .in("outcome", ["win", "loss"]);
 
     const totalResolved = count ?? 0;
 
@@ -190,11 +152,11 @@ async function recalibrateWeights(
 ): Promise<void> {
   const { data: records, error } = await supabase
     .from("prediction_history")
-    .select("feature_snapshot, outcome, edge_at_prediction, hit_probability_at_prediction")
+    .select("extra, outcome, edge, model_probability")
     .eq("sport", sport)
-    .eq("context", context)
-    .not("outcome", "is", null)
-    .order("resolved_at", { ascending: false })
+    .eq("prediction_phase", context)
+    .in("outcome", ["win", "loss"])
+    .order("settled_at", { ascending: false })
     .limit(500); // Last 500 resolved outcomes
 
   if (error || !records || records.length < RECALIBRATION_THRESHOLD) return;
@@ -238,10 +200,10 @@ async function recalibratePlatt(
 ): Promise<void> {
   const { data: records, error } = await supabase
     .from("prediction_history")
-    .select("hit_probability_at_prediction, outcome")
+    .select("model_probability, outcome")
     .eq("sport", sport)
-    .not("outcome", "is", null)
-    .order("resolved_at", { ascending: false })
+    .in("outcome", ["win", "loss"])
+    .order("settled_at", { ascending: false })
     .limit(1000);
 
   if (error || !records || records.length < PLATT_CALIBRATION_THRESHOLD) return;
@@ -249,7 +211,7 @@ async function recalibratePlatt(
   const trainingData = records
     .filter(r => r.outcome === "win" || r.outcome === "loss")
     .map(r => ({
-      p_raw: r.hit_probability_at_prediction as number,
+      p_raw: r.model_probability as number,
       outcome: (r.outcome === "win" ? 1 : 0) as 0 | 1,
     }));
 
@@ -543,18 +505,6 @@ export async function maybeAdjustConfidenceFromCalibration(): Promise<void> {
   }
 }
 
-// ── Batch resolve utility ─────────────────────────────────────────────────────
-
-/**
- * Bulk-record outcomes for a batch of predictions (e.g., end of game day).
- * Triggers recalibration after all records are written.
- */
-export async function recordOutcomeBatch(records: FeedbackRecord[]): Promise<void> {
-  for (const record of records) {
-    await recordOutcome(record);
-  }
-}
-
 // ── picks_log → prediction_history bridge ────────────────────────────────────
 
 const _SPORT_TO_ML: Record<string, MLSport> = {
@@ -563,18 +513,33 @@ const _SPORT_TO_ML: Record<string, MLSport> = {
 };
 
 /**
- * Sync a resolved picks_log outcome into prediction_history.
+ * The live prediction_history schema (from migration
+ * 20260421100000_gamelens_learning_intelligence.sql) constrains sport
+ * to ('nba', 'nfl', 'mlb', 'soccer'). Other sports get skipped here so
+ * we don't trip the check. Lifting MMA/Boxing into the schema is a
+ * separate migration.
+ */
+const _PROP_BRIDGE_ALLOWED_SPORTS = new Set(["nba", "nfl", "mlb", "soccer"]);
+
+const _CONFIDENCE_TO_HIT_PROB: Record<string, number> = {
+  HIGH: 0.65, MED: 0.55, LOW: 0.5,
+  high: 0.65, medium: 0.55, low: 0.5,
+};
+
+/**
+ * Sync a resolved picks_log outcome into prediction_history via the
+ * submit_prediction_learning_record RPC. Bridges user-facing picks
+ * into the ML analytics pipeline.
  *
- * This is the critical bridge between the user-facing picks system and the
- * ML analytics/feedback pipeline. Call this whenever a pick resolves —
- * either manually (markPickOutcome) or via ESPN auto-resolve (resolveOutcomes).
+ * The picks_log row is fetched here (rather than passed in) so the
+ * caller signature stays minimal and existing call sites don't need
+ * to change.
  *
- * Behavior:
- *  - No-ops if prediction_id doesn't exist in prediction_history (row may not have
- *    been logged yet — that's OK, not all user picks come from the ML pipeline).
- *  - Only updates if outcome is currently null (idempotent re-calls are safe).
- *  - After update, triggers maybeRecalibrate for the sport so the feedback loop
- *    runs automatically once enough outcomes accumulate.
+ * For player props the schema's "pick_side" doesn't map cleanly, so we
+ * use direction (MORE / LESS) as the side and pack stat_type/line_value
+ * /projected_value into `extra` for backtest replay. model_probability
+ * is a confidence-tier heuristic until picks_log captures the real
+ * pick-time hit probability.
  */
 export async function syncPickResolution(
   propId: string,
@@ -584,17 +549,103 @@ export async function syncPickResolution(
 ): Promise<void> {
   if (!supabase) return;
 
-  const { error } = await supabase
-    .from("prediction_history")
-    .update({
-      outcome,
-      actual_value: actualValue ?? null,
-      resolved_at: new Date().toISOString(),
-    })
-    .eq("prediction_id", propId)
-    .is("outcome", null); // Idempotent: only update unresolved rows
+  const sportLower = sport.toLowerCase();
+  if (!_PROP_BRIDGE_ALLOWED_SPORTS.has(sportLower)) return;
 
-  if (error) return; // Silently skip — row may not exist for non-ML picks
+  // Fetch the pick-time snapshot from picks_log. This is what the user
+  // saw at copy/lock time — the values we want in prediction_history.
+  let row: {
+    prop_id: string;
+    player_name: string;
+    sport: string;
+    stat_type: string;
+    line_value: number;
+    projected_value: number;
+    direction: "MORE" | "LESS";
+    confidence: "HIGH" | "MED" | "LOW";
+    game_id: string;
+  } | null = null;
+  try {
+    const { data, error } = await supabase
+      .from("picks_log")
+      .select("prop_id, player_name, sport, stat_type, line_value, projected_value, direction, confidence, game_id")
+      .eq("prop_id", propId)
+      .maybeSingle();
+    if (error || !data) return;
+    row = data as typeof row;
+  } catch {
+    return;
+  }
+  if (!row) return;
+
+  // Idempotency: a previous call may have already inserted. Use
+  // extra->>'prop_id' as the dedupe key since the schema's unique
+  // index only covers team moneylines.
+  try {
+    const { data: existing } = await supabase
+      .from("prediction_history")
+      .select("id")
+      .eq("market_type", "player_prop")
+      .eq("external_game_id", row.game_id)
+      .filter("extra->>prop_id", "eq", row.prop_id)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      const mlSport = _SPORT_TO_ML[sport];
+      if (mlSport) maybeRecalibrate(mlSport, "pregame").catch(() => {});
+      return;
+    }
+  } catch {
+    // Treat read-back failure as "may not exist" and proceed; the
+    // RPC has its own write semantics.
+  }
+
+  const modelP = _CONFIDENCE_TO_HIT_PROB[row.confidence] ?? 0.5;
+  const dirLabel = row.direction === "MORE" ? "Over" : "Under";
+  const pickLabel = `${row.player_name} ${dirLabel} ${row.line_value} ${row.stat_type}`;
+
+  const p_history: Record<string, unknown> = {
+    external_game_id: row.game_id,
+    sport: sportLower,
+    market_type: "player_prop",
+    pick_side: row.direction.toLowerCase(),
+    pick_label: pickLabel,
+    american_odds: "",
+    implied_probability: "",
+    model_probability: String(modelP),
+    edge: "",
+    confidence: row.confidence.toLowerCase(),
+    risk_score: "",
+    reason_tags: [],
+    checkpoint_stage: "",
+    prediction_phase: "pregame",
+    final_home_score: "",
+    final_away_score: "",
+    outcome,
+    error_size: String(Math.abs(modelP - (outcome === "win" ? 1 : outcome === "loss" ? 0 : 0.5))),
+    odds_range_bucket: "unknown",
+    stat_type: row.stat_type,
+    source: "gamelens_picks_bridge_v1",
+    learning_phase: "1",
+    extra: {
+      prop_id: row.prop_id,
+      player_name: row.player_name,
+      stat_type: row.stat_type,
+      line_value: row.line_value,
+      projected_value: row.projected_value,
+      direction: row.direction,
+      actual_value: actualValue,
+    },
+  };
+
+  try {
+    const { error: rpcErr } = await supabase.rpc("submit_prediction_learning_record", {
+      p_history,
+      p_error_tags: [],
+    });
+    if (rpcErr) return;
+  } catch {
+    return;
+  }
 
   const mlSport = _SPORT_TO_ML[sport];
   if (mlSport) {

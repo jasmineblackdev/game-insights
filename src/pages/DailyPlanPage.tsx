@@ -61,6 +61,7 @@ import { useBankroll } from "@/context/BankrollContext";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import { Disclosure } from "@/components/ui/disclosure";
+import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import {
   getPropRiskLevel,
   riskLevelClass,
@@ -385,6 +386,13 @@ export default function DailyPlanPage() {
     () => enrichGamesWithBettingIntelligence(allGames, oddsMap),
     [allGames, oddsMap],
   );
+
+  // Settle pending team-moneyline picks into prediction_history. The
+  // settler dedupes per session so this can fire on every render.
+  useEffect(() => {
+    if (enrichedGames.length === 0) return;
+    void settleFinalGames(enrichedGames);
+  }, [enrichedGames]);
 
   const candidates = useMemo<ValueBetCandidate[]>(() => {
     const teamCandidates = buildAllValueCandidates(enrichedGames, oddsMap);
