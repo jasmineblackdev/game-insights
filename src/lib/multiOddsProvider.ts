@@ -178,7 +178,18 @@ interface PinnacleOdds {
   }>;
 }
 
+/**
+ * Feature flag — disabled by default because guest.api.pinnacle.com
+ * is unreachable from the Supabase Edge runtime (DNS resolution
+ * fails), and every call generates a 502 in the production console.
+ * Set VITE_PINNACLE_PROVIDER_ENABLED=true in your env once the
+ * egress path is fixed to flip this back on.
+ */
+const PINNACLE_PROVIDER_ENABLED =
+  (import.meta.env.VITE_PINNACLE_PROVIDER_ENABLED ?? "").toLowerCase() === "true";
+
 async function fromPinnacle(sport: "mma" | "boxing"): Promise<CombatOddsEvent[] | null> {
+  if (!PINNACLE_PROVIDER_ENABLED) return null;
   // Fetch fixtures + odds in parallel via Edge proxy (server-side avoids CORS)
   const [fixtureRes, oddsRes] = await Promise.all([
     proxyGet({ provider: "pinnacle", sport, subroute: "fixtures" }),

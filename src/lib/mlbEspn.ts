@@ -26,7 +26,6 @@ import {
   nextCalendarYmd,
 } from "@/lib/espnShared";
 import { enrichGamePredictions } from "@/lib/espnEnrichment";
-import { ODDS_API_MLB_LEG_MARKETS } from "@/lib/oddsSportKeys";
 import { mergeTheOddsApiNotes } from "@/lib/theOddsApi";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
 import { fetchMlbProbablePitchers, type MlbProbableMatchup } from "@/lib/mlbStatsApi";
@@ -378,7 +377,14 @@ export async function fetchMlbEnrichedGames(): Promise<GamePrediction[]> {
   predictions.sort((a, b) => (a._meta?.sortTime ?? 0) - (b._meta?.sortTime ?? 0));
 
   const out = await enrichGamePredictions(predictions, "mlb");
-  return mergeTheOddsApiNotes(out, "baseball_mlb", { extraMarkets: ODDS_API_MLB_LEG_MARKETS });
+  // F5 markets (h2h_1st_5_innings / spreads_1st_5_innings /
+  // totals_1st_5_innings) are only valid on the per-event endpoint
+  // /events/{eventId}/odds. Passing them to the league-level
+  // /sports/baseball_mlb/odds returns INVALID_MARKET 422 and tanks
+  // the whole call — including the standard h2h / spreads / totals
+  // we actually need. Drop the extras here; the F5 fetch can be
+  // bolted on per-event in a follow-up if we want it back.
+  return mergeTheOddsApiNotes(out, "baseball_mlb");
 }
 
 export async function fetchMlbGamePredictions(): Promise<GamePrediction[]> {

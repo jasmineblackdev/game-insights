@@ -8,8 +8,14 @@
 
 import { fetchOddsForSport, isOddsApiAvailable } from "@/lib/oddsApiFetch";
 
-/** The Odds API sport key for boxing moneylines. */
-export const BOXING_ODDS_SPORT_KEY = "boxing";
+/**
+ * The Odds API sport key for boxing moneylines.
+ *
+ * Was "boxing" — returns UNKNOWN_SPORT 404 from the-odds-api, which
+ * silently broke every boxing odds fetch in production. The correct
+ * key is "boxing_boxing".
+ */
+export const BOXING_ODDS_SPORT_KEY = "boxing_boxing";
 
 export interface BoxingOddsLine {
   fightId: string;      // Odds API event ID

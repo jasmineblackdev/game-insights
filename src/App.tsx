@@ -16,6 +16,8 @@ import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { queryClient } from "@/lib/queryClient.ts";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { pullMlbStarterConfirmationsFromSupabase } from "@/lib/mlbStarterConfirm";
+import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
+import { StaleLinesBanner } from "@/components/StaleLinesBanner";
 import Index from "./pages/Index.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
 import DailyPlanPage from "./pages/DailyPlanPage.tsx";
@@ -44,6 +46,21 @@ function MlbStarterSupabaseSync() {
   return null;
 }
 
+/**
+ * One-shot sync of nightly-fitted Platt calibration params from
+ * Supabase into the client-side cache. Closes the loop between the
+ * ml-recalibrate cron (writes to platt_params) and calibrateProbability
+ * (reads from the cache). Without this the nightly recalibration was
+ * dead from the user's perspective.
+ */
+function PlattParamsSync() {
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    void syncPlattParamsFromSupabase();
+  }, []);
+  return null;
+}
+
 function LiveEdgeNotificationRunner() {
   useLiveEdgeNotifications();
   return null;
@@ -53,6 +70,7 @@ const App = () => (
   <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <MlbStarterSupabaseSync />
+      <PlattParamsSync />
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
         <EdgeCardProvider>
           <ValueParlayProvider>
@@ -62,6 +80,7 @@ const App = () => (
             <Sonner />
             <BrowserRouter>
               <ScrollToTop />
+              <StaleLinesBanner />
               <LiveEdgeNotificationProvider>
                 <LiveEdgeNotificationRunner />
                 <ErrorBoundary>

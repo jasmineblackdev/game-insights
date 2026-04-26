@@ -3,6 +3,8 @@
  * or (3) legacy `VITE_THE_ODDS_API_KEY`. Dev proxy is tried first so local `.env.local` works without deploying Edge.
  */
 
+import { trackOddsResponse } from "@/lib/oddsApiHealth";
+
 // Production fallback values — VITE_ prefix means these are intentionally public (client-bundled).
 // Used when Vercel build doesn't inject the env vars from .env.production.
 const _FB_URL  = "https://rxnqjdclqyazferbseeq.supabase.co";
@@ -123,20 +125,33 @@ export async function fetchOddsForSport(params: {
 
   if (devProxyEnabled()) {
     const dev = await fetchViaDevProxy(path);
-    if (dev) return dev;
+    if (dev) {
+      void trackOddsResponse(dev, sportKey);
+      return dev;
+    }
   }
 
   const edgeParams: Record<string, string> = { sportKey, markets, regions, oddsFormat };
   if (eventIds?.trim()) edgeParams.eventIds = eventIds.trim();
   const edge = await fetchViaEdge("odds", edgeParams);
   // Only use Edge response if it succeeded — fall through to direct if Edge errors
-  if (edge?.ok) return edge;
+  if (edge?.ok) {
+    void trackOddsResponse(edge, sportKey);
+    return edge;
+  }
 
   const direct = await fetchViaDirect(path);
-  if (direct) return direct;
+  if (direct) {
+    // Track the final response (edge errored, direct is the truth).
+    void trackOddsResponse(direct, sportKey);
+    return direct;
+  }
 
-  return new Response(JSON.stringify({ message: "odds_api_not_configured" }), {
+  // No path worked — surface as a network failure so the banner shows.
+  const fallback = new Response(JSON.stringify({ message: "odds_api_not_configured" }), {
     status: 503,
     headers: { "Content-Type": "application/json" },
   });
+  void trackOddsResponse(fallback, sportKey);
+  return fallback;
 }
