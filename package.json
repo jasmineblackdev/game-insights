@@ -20,6 +20,7 @@
     "backtest": "node scripts/backtest.mjs",
     "backtest:json": "node scripts/backtest.mjs --json",
     "backfill:prediction-history": "node scripts/backfill-prediction-history.mjs",
+    "backfill:parlay-legs": "node scripts/backfill-recommended-parlays-to-history.mjs",
     "mlb:sync-pitcher-recent-form": "node scripts/refresh-mlb-pitcher-recent-form.mjs",
     "mlb:refresh-derivatives": "node scripts/refresh-mlb-derivative-tables.mjs",
     "odds:list-sports": "node scripts/list-odds-sports.mjs",

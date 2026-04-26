@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/lib/supabase";
 import { useValueParlay } from "@/context/ValueParlayContext";
+import { bridgeParlayLegs } from "@/lib/learning/parlayLegBridge";
 
 const MAX_SCREENSHOTS = 4;
 const MAX_BYTES_PER_IMAGE = 5 * 1024 * 1024; // 5 MB cap per image
@@ -257,47 +258,79 @@ export function ManualParlayEntryForm({
     const stakeNum  = Number(stake)  || null;
     const payoutNum = Number(payout) || null;
 
+    // Per-leg outcomes: when parlay won, every leg necessarily won
+    // (parlay logic). For lost / push / pending we don't know which
+    // legs hit, so leave them pending — the bridge will skip them
+    // until the user edits per-leg detail.
+    const inferredLegOutcome: "win" | "pending" = result === "won" ? "win" : "pending";
+
+    const builtLegs = cleanLegs.map((l) => ({
+      selection:     l.selection,
+      sport:         l.sport,
+      market_type:   l.bet_type || "manual",
+      american_odds: Number(l.odds),
+      implied_prob:  americanToImplied(Number(l.odds)),
+      confidence:    "MED",
+      model_status:  "user_manual",
+      reason_included: "User manual entry",
+      leg_outcome:   inferredLegOutcome,
+    }));
+
     setBusy(true);
     try {
-      await supabase.from("recommended_parlays").insert([{
-        source:                  "user_manual",
-        recommended_at:          new Date().toISOString(),
-        date:                    new Date().toISOString().slice(0, 10),
-        model_version:           "manual",
-        rules_only:              false,
-        ml_active:               false,
-        tier:                    "manual",
-        variant:                 "user_manual",
-        sport_mix:               sportMix,
-        market_mix:              [...new Set(cleanLegs.map((l) => l.bet_type || "manual"))].join(","),
-        legs: cleanLegs.map((l) => ({
-          selection:     l.selection,
-          sport:         l.sport,
-          market_type:   l.bet_type || "manual",
-          american_odds: Number(l.odds),
-          implied_prob:  americanToImplied(Number(l.odds)),
-          confidence:    "MED",
-          model_status:  "user_manual",
-          reason_included: "User manual entry",
-          leg_outcome:   "pending",
-        })),
-        leg_count:               cleanLegs.length,
-        combined_american_odds:  combined,
-        payout_multiplier:       Math.round(oddsNumbers.reduce((acc, a) => acc * (a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a)), 1) * 100) / 100,
-        combined_probability:    Math.round(combinedProb * 10000) / 10000,
-        card_score:              null,
-        card_confidence:         null,
-        warnings:                [],
-        reasons:                 ["User manual entry"],
-        user_placed:             true,
-        user_stake:              stakeNum,
-        user_payout:             payoutNum,
-        user_notes:              notes || null,
-        outcome:                 result,
-        resolved_at:             result !== "pending" ? new Date().toISOString() : null,
-        session_dedup_key:       `manual:${Date.now()}:${cleanLegs.map((l) => l.selection).join("|")}`,
-      }]);
+      const { data: inserted, error: insertErr } = await supabase
+        .from("recommended_parlays")
+        .insert([{
+          source:                  "user_manual",
+          recommended_at:          new Date().toISOString(),
+          date:                    new Date().toISOString().slice(0, 10),
+          model_version:           "manual",
+          rules_only:              false,
+          ml_active:               false,
+          tier:                    "manual",
+          variant:                 "user_manual",
+          sport_mix:               sportMix,
+          market_mix:              [...new Set(cleanLegs.map((l) => l.bet_type || "manual"))].join(","),
+          legs:                    builtLegs,
+          leg_count:               cleanLegs.length,
+          combined_american_odds:  combined,
+          payout_multiplier:       Math.round(oddsNumbers.reduce((acc, a) => acc * (a >= 0 ? 1 + a / 100 : 1 + 100 / Math.abs(a)), 1) * 100) / 100,
+          combined_probability:    Math.round(combinedProb * 10000) / 10000,
+          card_score:              null,
+          card_confidence:         null,
+          warnings:                [],
+          reasons:                 ["User manual entry"],
+          user_placed:             true,
+          user_stake:              stakeNum,
+          user_payout:             payoutNum,
+          user_notes:              notes || null,
+          outcome:                 result,
+          resolved_at:             result !== "pending" ? new Date().toISOString() : null,
+          session_dedup_key:       `manual:${Date.now()}:${cleanLegs.map((l) => l.selection).join("|")}`,
+        }])
+        .select("id, source, date, recommended_at, resolved_at, user_id")
+        .single();
+
+      if (insertErr) throw insertErr;
       toast.success("Manual parlay saved");
+
+      // Bridge settled legs into prediction_history so the ML
+      // feedback loop can learn from this parlay. Fire-and-forget;
+      // a bridge failure shouldn't block the save UX.
+      if (inserted && (result === "won" || result === "push")) {
+        void bridgeParlayLegs({
+          id: inserted.id as string,
+          source: inserted.source as string,
+          date: inserted.date as string,
+          recommended_at: inserted.recommended_at as string,
+          resolved_at: inserted.resolved_at as string | null,
+          user_id: (inserted.user_id as string | null) ?? null,
+          legs: builtLegs,
+        }).then((r) => {
+          if (r.inserted > 0) toast.message(`ML training: bridged ${r.inserted} leg${r.inserted === 1 ? "" : "s"} into prediction_history`);
+        }).catch(() => { /* swallow — non-critical */ });
+      }
+
       onSaved();
     } catch (e) {
       toast.error("Save failed");
