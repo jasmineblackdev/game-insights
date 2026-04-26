@@ -1017,27 +1017,29 @@ const Index = () => {
                 />
               ) : viewMode === "parlay_builder" ? (
                 <div className="space-y-10">
+                  {/*
+                    Render the builder as soon as ANY sport has games loaded.
+                    Previously we waited for all five sport queries (NBA, NFL,
+                    MLB, Boxing, MMA) to resolve before showing anything; an
+                    offseason sport (NFL in spring, MMA on weekdays) would
+                    keep the page in skeleton state indefinitely. Now we only
+                    show skeletons when we genuinely have zero games yet.
+                  */}
                   <BestValuePicksSection
                     games={allGamesWithIntel}
                     oddsMap={oddsMapAll}
-                    loading={
+                    loading={allGamesWithIntel.length === 0 && (
                       nbaFastQuery.isPending ||
-                      nflQuery.isPending ||
-                      mlbFastQuery.isPending ||
-                      boxingQuery.isPending ||
-                      mmaQuery.isPending
-                    }
+                      mlbFastQuery.isPending
+                    )}
                   />
                   <ParlayBuilderSection
                     games={allGamesWithIntel}
                     oddsMap={oddsMapAll}
-                    gamesLoading={
+                    gamesLoading={allGamesWithIntel.length === 0 && (
                       nbaFastQuery.isPending ||
-                      nflQuery.isPending ||
-                      mlbFastQuery.isPending ||
-                      boxingQuery.isPending ||
-                      mmaQuery.isPending
-                    }
+                      mlbFastQuery.isPending
+                    )}
                     bookOddsLoading={false}
                   />
                   <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">

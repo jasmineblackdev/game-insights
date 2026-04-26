@@ -116,6 +116,14 @@ function applyPreConfirmationDowngrade(
   };
 }
 
+export function buildMoneylineLeg(
+  game: GamePrediction,
+  side: EdgeSide,
+  bundle?: GameOddsBundle | undefined,
+): ValueBetCandidate | null {
+  return moneylineCandidate(game, side, bundle);
+}
+
 function moneylineCandidate(
   game: GamePrediction,
   side: EdgeSide,

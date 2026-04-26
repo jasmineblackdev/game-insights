@@ -3,8 +3,9 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { GamePrediction } from "@/data/mockGames";
-import { useEdgeCardOptional } from "@/context/EdgeCardContext";
+import { useValueParlay } from "@/context/ValueParlayContext";
 import { getFavoredSide, type EdgeSide } from "@/lib/edgeCardScoring";
+import { buildMoneylineLeg } from "@/lib/valueParlay/buildCandidates";
 import { showModelMarketEdgeBadge } from "@/lib/modelMarketEdge";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,16 @@ interface GameDetailViewProps {
 }
 
 export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: GameDetailViewProps) {
-  const edge = useEdgeCardOptional();
+  const { addValueLeg, isValueLegAdded, builderLegs } = useValueParlay();
   const tw = game.threeWay;
   const favoredSide = getFavoredSide(game);
   const favored = game.winProbability.home >= game.winProbability.away ? "home" : "away";
   const favoredTeam = favored === "home" ? game.homeTeam : game.awayTeam;
   const favoredProb = favored === "home" ? game.winProbability.home : game.winProbability.away;
+  const homeLegId = `vp-${game.id}-ml-home`;
+  const awayLegId = `vp-${game.id}-ml-away`;
+  const favoredLegId = favored === "home" ? homeLegId : awayLegId;
+  const otherLegId = favored === "home" ? awayLegId : homeLegId;
   const ringProb = tw ? Math.max(tw.home, tw.away) : favoredProb;
 
   const updatedAt = new Date(game.lastUpdated);
@@ -236,45 +241,55 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
           </div>
         ) : null}
 
-        {edge && game.status === "upcoming" ? (
+        {game.status === "upcoming" ? (
           <div className="mt-5 pt-4 border-t border-border flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2">
             <Button
               size="sm"
               className="gap-1.5 font-semibold"
-              disabled={edge.isOnSlip(game.id)}
+              disabled={isValueLegAdded(favoredLegId) || builderLegs.length >= 12}
               onClick={() => {
-                const r = edge.addPick(game, favoredSide);
-                if (r.ok) {
-                  toast.success(
-                    `Added ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`
-                  );
-                } else toast.message(r.message ?? "Could not add");
+                const leg = buildMoneylineLeg(game, favoredSide);
+                if (!leg) {
+                  toast.message("No usable line for this side yet");
+                  return;
+                }
+                const r = addValueLeg(leg);
+                const abbr = favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+                if (r.ok) toast.success(`Added ${abbr} ML to parlay slip`);
+                else toast.message(r.message ?? "Could not add");
               }}
             >
               <Plus className="w-3.5 h-3.5" />
-              {edge.isOnSlip(game.id) ? "On Edge Card" : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to Edge Card`}
+              {isValueLegAdded(favoredLegId)
+                ? "On parlay slip"
+                : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to parlay`}
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5 text-xs"
-              disabled={edge.isOnSlip(game.id) || edge.slipFull}
+              disabled={isValueLegAdded(otherLegId) || builderLegs.length >= 12}
               onClick={() => {
                 const other: EdgeSide = favoredSide === "home" ? "away" : "home";
-                const r = edge.addPick(game, other);
-                if (r.ok) {
-                  toast.success(`Added ${other === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} (contrarian)`);
-                } else toast.message(r.message ?? "Could not add");
+                const leg = buildMoneylineLeg(game, other);
+                if (!leg) {
+                  toast.message("No usable line for this side yet");
+                  return;
+                }
+                const r = addValueLeg(leg);
+                const abbr = other === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation;
+                if (r.ok) toast.success(`Added ${abbr} (contrarian)`);
+                else toast.message(r.message ?? "Could not add");
               }}
             >
               Add other side
             </Button>
             <Link
-              to="/edge"
+              to="/?view=parlay_builder"
               className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-primary hover:underline px-2 py-1.5"
             >
               <Layers className="w-3.5 h-3.5" />
-              Open Edge Card builder
+              Open parlay builder
             </Link>
           </div>
         ) : null}
