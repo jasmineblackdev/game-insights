@@ -14,11 +14,12 @@
  * point of that surface.
  */
 
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Layers, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetHeader,
   SheetTitle,
@@ -166,15 +167,17 @@ export function StickyParlaySlipDrawer() {
             <Trash2 className="w-3.5 h-3.5" />
             Clear
           </Button>
-          <Button
-            asChild
-            variant="default"
-            size="sm"
-            className="flex-1"
-            disabled={!count}
-          >
-            <a href="/?view=parlay_builder">Open builder</a>
-          </Button>
+          <SheetClose asChild>
+            <Button
+              asChild
+              variant="default"
+              size="sm"
+              className="flex-1"
+              disabled={!count}
+            >
+              <Link to="/?view=parlay_builder">Open builder</Link>
+            </Button>
+          </SheetClose>
         </div>
       </SheetContent>
     </Sheet>

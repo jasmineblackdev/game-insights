@@ -27,6 +27,7 @@ import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/odds
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
+import { useSearchParams } from "react-router-dom";
 import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { OddsDebugBadge } from "@/components/OddsDebugBadge";
@@ -461,7 +462,18 @@ const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
-  const [viewMode, setViewMode] = useState<ViewMode>("home");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    // Allow deep links like /?view=parlay_builder so the slip drawer's
+    // "Open builder" button (and any future external links) land on the
+    // correct tab instead of falling back to "home".
+    const v = searchParams.get("view");
+    const valid: ViewMode[] = [
+      "home", "best_picks", "player_props", "parlay_builder",
+      "live", "draft", "college_futures", "tomorrow",
+    ];
+    return (v && (valid as string[]).includes(v)) ? (v as ViewMode) : "home";
+  });
   const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
   const { setParlayMode } = useValueParlay();
 
@@ -718,12 +730,19 @@ const Index = () => {
   const handleViewModeChange = (m: ViewMode) => {
     setViewMode(m);
     setSelectedGame(null);
+    // Keep ?view= in sync so refresh / share preserves the active tab
+    // and the sticky drawer's hide-on-builder logic stays accurate.
+    setSearchParams((sp) => {
+      const next = new URLSearchParams(sp);
+      if (m === "home") next.delete("view");
+      else next.set("view", m);
+      return next;
+    }, { replace: true });
   };
 
   const handleNavigateToParlay = (mode: ParlayBuildMode) => {
     setParlayMode(mode);
-    setViewMode("parlay_builder");
-    setSelectedGame(null);
+    handleViewModeChange("parlay_builder");
   };
 
   const handleDateChange = (d: GameDate) => {

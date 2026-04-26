@@ -18,6 +18,11 @@ import {
   pitcherMultiplier,
   type MlbOppContext,
 } from "@/lib/ml/opponentContext/mlbOpponentContext";
+import {
+  getNbaOpponentContext,
+  nbaOpponentMultiplier,
+  type NbaOppContext,
+} from "@/lib/ml/opponentContext/nbaOpponentContext";
 
 // ── ESPN scoreboard endpoints ─────────────────────────────────────────────────
 
@@ -552,6 +557,8 @@ async function fetchSportPlayerEdge(
     stats: Record<string, number>;
     /** MLB only — opposing SP context, used by combined-pick emitter. */
     mlbOpposingSp?: MlbOppContext | null;
+    /** NBA only — opposing team-defense context, used by combined-pick emitter. */
+    nbaOpposingDef?: NbaOppContext | null;
   };
   const athleteStatMap = new Map<string, AthleteAcc>();
 
@@ -615,6 +622,20 @@ async function fetchSportPlayerEdge(
       mlbAwaySpCtx = aCtx;
     }
 
+    // NBA team-defense context — resolve each side's full team-stats
+    // payload (pace, def rating, opponent stats allowed) in parallel.
+    // Cached per teamId so every player on a roster shares one fetch.
+    let nbaHomeDefCtx: NbaOppContext | null = null;
+    let nbaAwayDefCtx: NbaOppContext | null = null;
+    if (sport === "NBA") {
+      const [hCtx, aCtx] = await Promise.all([
+        getNbaOpponentContext(home.team?.id),
+        getNbaOpponentContext(away.team?.id),
+      ]);
+      nbaHomeDefCtx = hCtx;
+      nbaAwayDefCtx = aCtx;
+    }
+
     for (const competitor of [home, away]) {
       const teamAbbr = competitor.team?.abbreviation ?? "";
       const teamId   = competitor.team?.id;
@@ -626,6 +647,11 @@ async function fetchSportPlayerEdge(
       // For MLB hitters on team A, the opposing SP is team B's pitcher.
       const opposingSpCtx: MlbOppContext | null = sport === "MLB"
         ? (isHome ? mlbAwaySpCtx : mlbHomeSpCtx)
+        : null;
+
+      // For NBA players on team A, opposing team-defense is team B's.
+      const opposingNbaDefCtx: NbaOppContext | null = sport === "NBA"
+        ? (isHome ? nbaAwayDefCtx : nbaHomeDefCtx)
         : null;
 
       // Scoreboard often omits leaders for upcoming games (especially NBA
@@ -692,6 +718,7 @@ async function fetchSportPlayerEdge(
               opponent: oppAbbr, isHome, oppWinPct, eventId, gameTime, propSource,
               stats: {},
               mlbOpposingSp: sport === "MLB" ? opposingSpCtx : undefined,
+              nbaOpposingDef: sport === "NBA" ? opposingNbaDefCtx : undefined,
             };
             if (acc.stats[mapping.statType] == null) {
               acc.stats[mapping.statType] = value;
@@ -703,7 +730,10 @@ async function fetchSportPlayerEdge(
           const pitcherMult = sport === "MLB" && opposingSpCtx
             ? pitcherMultiplier(mapping.statType, opposingSpCtx)
             : 1.0;
-          const projectedRaw = baseProjection * pitcherMult;
+          const nbaDefMult = sport === "NBA" && opposingNbaDefCtx
+            ? nbaOpponentMultiplier(mapping.statType, opposingNbaDefCtx)
+            : 1.0;
+          const projectedRaw = baseProjection * pitcherMult * nbaDefMult;
           const projected    = Math.round(projectedRaw * 10) / 10;          // 1-decimal display
           const lineValue    = snapToHalfPoint(value);                       // sportsbook .5 line
           const edge         = projected - lineValue;
@@ -718,11 +748,14 @@ async function fetchSportPlayerEdge(
             name, mapping.statType, mapping.unit, value, projected,
             oppAbbr, oppWinPct, direction, sport, homeAbbr, weather
           );
-          // For MLB, append the pitcher-matchup note to reason_2 so the
-          // user sees why the projection nudged.
-          const reason_2 = sport === "MLB" && opposingSpCtx
-            ? `${built.reason_2} ${opposingSpCtx.matchupNote}`
-            : built.reason_2;
+          // Append the matchup note to reason_2 so the user sees why
+          // the projection nudged.
+          const matchupSuffix = sport === "MLB" && opposingSpCtx
+            ? ` ${opposingSpCtx.matchupNote}`
+            : sport === "NBA" && opposingNbaDefCtx?.hasData
+              ? ` ${opposingNbaDefCtx.matchupNote}`
+              : "";
+          const reason_2 = matchupSuffix ? `${built.reason_2}${matchupSuffix}` : built.reason_2;
 
           predictions.push({
             id,
@@ -764,9 +797,17 @@ async function fetchSportPlayerEdge(
             trend_note: edgeMag >= t.high
               ? (direction === "MORE" ? `Trending ↑ vs ${oppAbbr}` : `Fade vs ${oppAbbr}`)
               : undefined,
-            // MLB pitcher-matchup badge fields
-            matchup_quality: opposingSpCtx?.matchupQuality,
-            matchup_note:    opposingSpCtx?.matchupNote,
+            // Matchup badge fields — MLB pitcher / NBA team-defense
+            matchup_quality: sport === "MLB"
+              ? opposingSpCtx?.matchupQuality
+              : sport === "NBA"
+                ? opposingNbaDefCtx?.matchupQuality
+                : undefined,
+            matchup_note: sport === "MLB"
+              ? opposingSpCtx?.matchupNote
+              : sport === "NBA"
+                ? opposingNbaDefCtx?.matchupNote
+                : undefined,
           });
         }
       }
@@ -793,17 +834,24 @@ async function fetchSportPlayerEdge(
         const dupKey = `espn-nba-${acc.eventId}-${acc.athleteId}-${stat}`;
         if (predictions.some((p) => p.id === dupKey)) continue;
 
-        const projectedRaw = projectValue(value, acc.oppWinPct, acc.isHome, "NBA", "");
+        const baseProjection = projectValue(value, acc.oppWinPct, acc.isHome, "NBA", "");
+        const nbaDefMult = acc.nbaOpposingDef
+          ? nbaOpponentMultiplier(stat, acc.nbaOpposingDef)
+          : 1.0;
+        const projectedRaw = baseProjection * nbaDefMult;
         const projected    = Math.round(projectedRaw * 10) / 10;
         const lineValue    = snapToHalfPoint(value);
         const edge         = projected - lineValue;
         const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
         const edgeMag      = Math.abs(edge);
         const confidence   = edgeToConfidence(edgeMag, "NBA");
-        const { reason_1, reason_2, risk_factor } = buildReasons(
+        const { reason_1, reason_2: rawReason2, risk_factor } = buildReasons(
           acc.name, stat, unit, value, projected,
           acc.opponent, acc.oppWinPct, direction, "NBA", "",
         );
+        const reason_2 = acc.nbaOpposingDef?.hasData
+          ? `${rawReason2} ${acc.nbaOpposingDef.matchupNote}`
+          : rawReason2;
 
         predictions.push({
           id: dupKey,
@@ -819,6 +867,8 @@ async function fetchSportPlayerEdge(
           recent_form: edgeMag >= t.high ? (direction === "MORE" ? "hot" : "cold") : "steady",
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high ? "stable" : edgeMag >= t.med ? "medium" : "volatile",
+          matchup_quality: acc.nbaOpposingDef?.matchupQuality,
+          matchup_note: acc.nbaOpposingDef?.matchupNote,
         });
       }
 
@@ -829,7 +879,11 @@ async function fetchSportPlayerEdge(
         const sumVal = combo.parts.reduce((s, p) => s + acc.stats[p]!, 0);
         if (!Number.isFinite(sumVal) || sumVal <= 0) continue;
 
-        const projectedRaw = projectValue(sumVal, acc.oppWinPct, acc.isHome, "NBA", "");
+        const baseProjection = projectValue(sumVal, acc.oppWinPct, acc.isHome, "NBA", "");
+        const nbaDefMult = acc.nbaOpposingDef
+          ? nbaOpponentMultiplier(combo.statType, acc.nbaOpposingDef)
+          : 1.0;
+        const projectedRaw = baseProjection * nbaDefMult;
         const projected    = Math.round(projectedRaw * 10) / 10;
         const lineValue    = snapToHalfPoint(sumVal);
         const edge         = projected - lineValue;
@@ -841,6 +895,10 @@ async function fetchSportPlayerEdge(
           edgeMag >= t.high * 2.5 ? "HIGH"
           : edgeMag >= t.med * 2.5 ? "MED" : "LOW";
 
+        const matchupSuffix = acc.nbaOpposingDef?.hasData
+          ? ` ${acc.nbaOpposingDef.matchupNote}`
+          : "";
+
         predictions.push({
           id: `espn-nba-${acc.eventId}-${acc.athleteId}-${combo.statType}`,
           game_id: acc.eventId, player_id: acc.athleteId, player_name: acc.name,
@@ -848,7 +906,7 @@ async function fetchSportPlayerEdge(
           stat_type: combo.statType, line_value: lineValue, projected_value: projected,
           prediction_direction: direction, edge: Math.round(edge * 10) / 10, confidence,
           reason_1: `${combo.unit} season avg ${sumVal.toFixed(1)} — projected vs ${acc.opponent}.`,
-          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.`,
+          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.${matchupSuffix}`,
           risk_factor: `Combined-stat lines move with usage shifts; monitor late lineup news.`,
           game_sort: sortBase + predictions.length,
           confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
@@ -857,6 +915,8 @@ async function fetchSportPlayerEdge(
           recent_form: edgeMag >= t.high * 2.5 ? (direction === "MORE" ? "hot" : "cold") : "steady",
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high * 2.5 ? "stable" : edgeMag >= t.med * 2.5 ? "medium" : "volatile",
+          matchup_quality: acc.nbaOpposingDef?.matchupQuality,
+          matchup_note: acc.nbaOpposingDef?.matchupNote,
         });
       }
     }

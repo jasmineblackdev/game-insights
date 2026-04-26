@@ -271,8 +271,8 @@ function PlayerEdgeCard({
         )}
       </div>
 
-      {/* ── Timing + line movement + MLB pitcher matchup ─── */}
-      {(pred.best_time_to_bet || pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1) || (pred.sport === "MLB" && pred.matchup_quality)) && (
+      {/* ── Timing + line movement + opponent matchup ─── */}
+      {(pred.best_time_to_bet || pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1) || ((pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality)) && (
         <div className="flex flex-wrap items-center gap-2">
           {/* ML timing recommendation — prefer best_time_to_bet, fall back to timing_note */}
           {(pred.best_time_to_bet || pred.timing_note) && (
@@ -292,21 +292,27 @@ function PlayerEdgeCard({
               Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
             </span>
           )}
-          {pred.sport === "MLB" && pred.matchup_quality && (
+          {(pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality && (
             <span
               title={pred.matchup_note ?? undefined}
               className={cn(
                 "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border",
                 pred.matchup_quality === "tough"   && "bg-red-500/10 text-red-500 border-red-500/20",
                 pred.matchup_quality === "soft"    && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+                pred.matchup_quality === "fast"    && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
                 pred.matchup_quality === "neutral" && "bg-muted text-muted-foreground border-border",
                 pred.matchup_quality === "unknown" && "bg-muted/40 text-muted-foreground border-dashed border-border",
               )}
             >
-              {pred.matchup_quality === "tough"   && "Tough SP"}
-              {pred.matchup_quality === "soft"    && "Soft SP"}
-              {pred.matchup_quality === "neutral" && "Neutral SP"}
-              {pred.matchup_quality === "unknown" && "SP TBA"}
+              {pred.sport === "MLB" && pred.matchup_quality === "tough"   && "Tough SP"}
+              {pred.sport === "MLB" && pred.matchup_quality === "soft"    && "Soft SP"}
+              {pred.sport === "MLB" && pred.matchup_quality === "neutral" && "Neutral SP"}
+              {pred.sport === "MLB" && pred.matchup_quality === "unknown" && "SP TBA"}
+              {pred.sport === "NBA" && pred.matchup_quality === "tough"   && "Tough D"}
+              {pred.sport === "NBA" && pred.matchup_quality === "soft"    && "Soft D"}
+              {pred.sport === "NBA" && pred.matchup_quality === "fast"    && "Fast pace"}
+              {pred.sport === "NBA" && pred.matchup_quality === "neutral" && "Neutral D"}
+              {pred.sport === "NBA" && pred.matchup_quality === "unknown" && "Team data TBA"}
             </span>
           )}
         </div>
