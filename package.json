@@ -17,6 +17,8 @@
     "test:e2e:ui": "playwright test --ui",
     "verify:dist": "node scripts/verify-spa-dist.mjs",
     "verify:odds-draft": "node scripts/verify-odds-nfl-draft.mjs",
+    "backtest": "node scripts/backtest.mjs",
+    "backtest:json": "node scripts/backtest.mjs --json",
     "mlb:sync-pitcher-recent-form": "node scripts/refresh-mlb-pitcher-recent-form.mjs",
     "mlb:refresh-derivatives": "node scripts/refresh-mlb-derivative-tables.mjs",
     "odds:list-sports": "node scripts/list-odds-sports.mjs",

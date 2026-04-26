@@ -1,0 +1,92 @@
+name: backtest
+
+# Replays resolved prediction_history rows through scripts/backtest.mjs and
+# publishes Brier / log-loss / calibration / CLV metrics as a JSON artifact.
+# Runs weekly on Mondays at 09:00 UTC (4am ET) so a fresh report is waiting
+# at the start of the week, plus on-demand via workflow_dispatch when
+# someone wants to spot-check after a model change.
+#
+# Required repo secrets:
+#   SUPABASE_URL                — https://<ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY   — service-role key (read-only use here)
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      window_days:
+        description: "Lookback window in days (default 90)"
+        required: false
+        default: "90"
+      sport:
+        description: "Optional sport filter (nba, nfl, mlb, mma, boxing, wnba)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run backtest (human log)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WINDOW_DAYS: ${{ inputs.window_days || '90' }}
+          SPORT_INPUT: ${{ inputs.sport }}
+        run: |
+          ARGS="--window-days=${WINDOW_DAYS}"
+          if [ -n "${SPORT_INPUT}" ]; then
+            ARGS="${ARGS} --sport=${SPORT_INPUT}"
+          fi
+          node scripts/backtest.mjs ${ARGS}
+
+      - name: Run backtest (JSON report)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WINDOW_DAYS: ${{ inputs.window_days || '90' }}
+          SPORT_INPUT: ${{ inputs.sport }}
+        run: |
+          ARGS="--window-days=${WINDOW_DAYS} --json"
+          if [ -n "${SPORT_INPUT}" ]; then
+            ARGS="${ARGS} --sport=${SPORT_INPUT}"
+          fi
+          node scripts/backtest.mjs ${ARGS} > backtest-report.json
+
+      - name: Append summary to job page
+        if: always()
+        run: |
+          if [ -s backtest-report.json ]; then
+            {
+              echo "### Backtest summary"
+              echo ""
+              echo '```json'
+              node -e "const r=require('./backtest-report.json'); console.log(JSON.stringify(r.overall, null, 2))"
+              echo '```'
+              echo ""
+              echo "_Per-slice rollups in the artifact._"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-report
+          path: backtest-report.json
+          retention-days: 90

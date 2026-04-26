@@ -181,28 +181,50 @@ async function main() {
 
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
 
+  // Live schema (gamelens_learning_intelligence). Older shape with
+  // prediction_id/resolved_at/hit_probability_at_prediction/clv_pp was
+  // superseded; we read the new columns and map them to the internal
+  // names the metric helpers expect so the rest of the script is
+  // schema-agnostic. CLV columns aren't yet in this schema — those
+  // metrics surface as null until a CLV migration lands.
   let query = supabase
     .from("prediction_history")
     .select(
-      "prediction_id, sport, market_type, context, confidence, " +
-      "hit_probability_at_prediction, edge_at_prediction, " +
-      "outcome, resolved_at, clv_pp, closing_line_american, opening_line_american, " +
-      "pre_confirmation_flag"
+      "id, sport, market_type, prediction_phase, confidence, " +
+      "model_probability, edge, outcome, settled_at, " +
+      "american_odds, implied_probability"
     )
-    .gte("resolved_at", cutoff)
+    .gte("settled_at", cutoff)
     .in("outcome", ["win", "loss"])
     .limit(10_000);
   if (SPORT_FILTER) query = query.eq("sport", SPORT_FILTER);
 
-  const { data, error } = await query;
+  const { data: raw, error } = await query;
   if (error) {
     console.error("Supabase error:", error.message);
     process.exit(1);
   }
-  if (!data?.length) {
+  if (!raw?.length) {
     console.error(`No resolved predictions found in last ${WINDOW_DAYS} days.`);
     process.exit(0);
   }
+
+  // Normalize to the field names the metric helpers + group key use.
+  const data = raw.map((r) => ({
+    prediction_id:                  r.id,
+    sport:                          r.sport,
+    market_type:                    r.market_type,
+    context:                        r.prediction_phase,
+    confidence:                     r.confidence,
+    hit_probability_at_prediction:  r.model_probability,
+    edge_at_prediction:             r.edge,
+    outcome:                        r.outcome,
+    resolved_at:                    r.settled_at,
+    clv_pp:                         null,
+    closing_line_american:          null,
+    opening_line_american:          null,
+    pre_confirmation_flag:          false,
+  }));
 
   const overall = {
     window_days:        WINDOW_DAYS,
