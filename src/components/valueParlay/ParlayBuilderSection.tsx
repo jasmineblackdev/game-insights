@@ -355,6 +355,7 @@ export function ParlayBuilderSection({
     higherPayoutSwap,
     triplePreview,
     builderMetrics,
+    publishCandidatePool,
   } = useValueParlay();
 
   const [tripleOpen, setTripleOpen] = useState(false);
@@ -443,6 +444,12 @@ export function ParlayBuilderSection({
   // Use enriched candidates when available; fall back to raw until fetch lands.
   // First render shows raw (no recentHitRate), then updates once gamelogs resolve.
   const candidates = enrichedCandidates ?? rawCandidates;
+
+  // Publish to context so the sticky slip drawer's Replace Weakest can
+  // search this pool when the user taps Replace from the slip.
+  useEffect(() => {
+    publishCandidatePool(candidates);
+  }, [candidates, publishCandidatePool]);
 
   // ML training coverage: log every prop impression, every rejected candidate
   // for the current mode, and every pre-game team pick. Fire-and-forget —

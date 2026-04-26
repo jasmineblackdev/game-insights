@@ -1277,6 +1277,20 @@ export function optimizeForMode(
 }
 
 /**
+ * Re-score an arbitrary list of legs as if they were a parlay built
+ * by the optimizer. Used by callers (e.g. /daily replace-weakest)
+ * that swap one leg in an already-built card and need fresh metrics
+ * (combined odds, hit prob, fragility, weakest-leg id, warnings).
+ */
+export function rescoreParlay(
+  legs: ValueBetCandidate[],
+  mode: ParlayBuildMode = "balanced",
+  weights: AnalyticsWeights = {},
+): SmartParlayResult {
+  return scoreParlay(legs, mode, weights);
+}
+
+/**
  * Best-effort fixed-size parlay from a pre-filtered pool (e.g. ranked-live presets).
  */
 export function optimizeFixedLegCount(

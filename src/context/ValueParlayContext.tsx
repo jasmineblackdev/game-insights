@@ -34,6 +34,14 @@ interface ValueParlayContextValue {
   triplePreview: (candidates: ValueBetCandidate[]) => ReturnType<typeof optimizeSmartParlays>;
   builderMetrics: SmartParlayResult | null;
   isValueLegAdded: (id: string) => boolean;
+  /**
+   * Cross-sport candidate pool published by whichever surface most
+   * recently built it (parlay builder section, /daily page, etc).
+   * Used by the slip drawer's Replace Weakest action so it has a
+   * non-empty pool to pick a replacement from.
+   */
+  candidatePool: ValueBetCandidate[];
+  publishCandidatePool: (candidates: ValueBetCandidate[]) => void;
 }
 
 const ValueParlayContext = createContext<ValueParlayContextValue | null>(null);
@@ -79,6 +87,26 @@ function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
   }
   for (const w of riskRules.warnings) warnings.push(w);
 
+  // Identify weakest leg by a lightweight quality score so the slip
+  // drawer's "Replace weakest" knows which leg to swap. Mirrors the
+  // optimizer's intuition without re-running its full scorer.
+  let weakestLegId: string | undefined;
+  let strongestLegId: string | undefined;
+  if (legs.length > 0) {
+    const score = (c: typeof legs[number]) =>
+      c.edge
+      + (c.confidence === "high" ? 0.20 : c.confidence === "medium" ? 0.08 : 0)
+      + ((c.stabilityScore ?? 0.5) * 0.10)
+      + ((c.recentHitRate ?? 0) * 0.08);
+    let weakest = legs[0], strongest = legs[0];
+    for (const l of legs) {
+      if (score(l) < score(weakest)) weakest = l;
+      if (score(l) > score(strongest)) strongest = l;
+    }
+    weakestLegId = weakest.id;
+    strongestLegId = strongest.id;
+  }
+
   return {
     legs,
     projectedHitProbability: Math.round(hit * 1000) / 1000,
@@ -91,6 +119,8 @@ function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
     smartParlayScore: legs.reduce((s, l) => s + l.valueScore, 0),
     warnings,
     riskLevelCounts: countByRiskLevel(legs),
+    weakestLegId,
+    strongestLegId,
   };
 }
 
@@ -98,6 +128,10 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
   const [parlayMode, setParlayMode] = useState<ParlayBuildMode>("balanced");
   const [builderLegs, setBuilderLegs] = useState<ValueBetCandidate[]>([]);
   const [analyticsWeights, setAnalyticsWeights] = useState<AnalyticsWeights>({});
+  const [candidatePool, setCandidatePool] = useState<ValueBetCandidate[]>([]);
+  const publishCandidatePool = useCallback((candidates: ValueBetCandidate[]) => {
+    setCandidatePool(candidates);
+  }, []);
 
   const addValueLeg = useCallback((c: ValueBetCandidate): { ok: boolean; message?: string } => {
     if (builderLegs.some((x) => x.id === c.id)) {
@@ -188,6 +222,8 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
       triplePreview,
       builderMetrics,
       isValueLegAdded,
+      candidatePool,
+      publishCandidatePool,
     }),
     [
       parlayMode,
@@ -204,6 +240,8 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
       triplePreview,
       builderMetrics,
       isValueLegAdded,
+      candidatePool,
+      publishCandidatePool,
     ]
   );
 

@@ -26,6 +26,7 @@ import {
   Sparkles,
   AlertTriangle,
   Layers,
+  Shuffle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ import {
   tierLabel,
   type DailyPlanCard,
 } from "@/lib/dailyPlan/dailyPlanGenerator";
+import { replaceWeakestLeg } from "@/lib/dailyPlan/replaceWeakest";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { useBankroll } from "@/context/BankrollContext";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
@@ -85,9 +87,10 @@ interface PlanCardProps {
   onToggleLock: (id: string) => void;
   onRegenerate: () => void;
   onPlaced: () => void;
+  onReplaceWeakest: () => void;
 }
 
-function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced }: PlanCardProps) {
+function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onReplaceWeakest }: PlanCardProps) {
   const { addValueLeg } = useValueParlay();
   const { suggestStake, recordBetPlaced } = useBankroll();
   const stakeRec = suggestStake(card.stakeRisk);
@@ -267,6 +270,22 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced }: Pla
           <CheckCircle2 className="w-3.5 h-3.5" />
           {placed ? "Placed" : "Mark as placed"}
         </Button>
+        {card.legs.length > 1 && card.weakestLegId ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onReplaceWeakest}
+            disabled={lockedIds.has(card.weakestLegId)}
+            title={
+              lockedIds.has(card.weakestLegId)
+                ? "Weakest leg is locked — unlock to swap"
+                : "Replace the weakest leg with the next-best alternative"
+            }
+          >
+            <Shuffle className="w-3.5 h-3.5" />
+            Replace weakest
+          </Button>
+        ) : null}
         <Button size="sm" variant="ghost" onClick={onRegenerate}>
           <RefreshCw className="w-3.5 h-3.5" />
           Regenerate
@@ -336,18 +355,33 @@ export default function DailyPlanPage() {
     return [...teamCandidates, ...propCandidates];
   }, [enrichedGames, oddsMap, propsQuery.data]);
 
+  // Publish to context so the sticky slip drawer's Replace Weakest can
+  // search this pool when the user taps it from the slip on /daily.
+  const { publishCandidatePool } = useValueParlay();
+  useEffect(() => {
+    publishCandidatePool(candidates);
+  }, [candidates, publishCandidatePool]);
+
   // ── Plan state ───────────────────────────────────────────────────
   const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
   const [regenerateTick, setRegenerateTick] = useState(0);
   const [placedTier, setPlacedTier] = useState<Set<DailyPlanCard["tier"]>>(new Set());
+  /** Per-tier overrides applied over the generator's output (e.g. after a Replace-weakest swap). */
+  const [tierOverrides, setTierOverrides] = useState<Partial<Record<DailyPlanCard["tier"], DailyPlanCard>>>({});
 
-  const plan = useMemo<DailyPlanCard[]>(
+  const generated = useMemo<DailyPlanCard[]>(
     () => generateDailyPlan({ candidates, lockedLegIds: lockedIds }),
     // regenerateTick forces recompute when user hits Regenerate even if
     // candidates/lockedIds haven't changed; useful when the optimizer's
     // output is stable across the same input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [candidates, lockedIds, regenerateTick],
+  );
+
+  /** Apply any per-tier overrides on top of the generator's plan. */
+  const plan = useMemo<DailyPlanCard[]>(
+    () => generated.map((c) => tierOverrides[c.tier] ?? c),
+    [generated, tierOverrides],
   );
 
   const toggleLock = (id: string) => {
@@ -361,7 +395,48 @@ export default function DailyPlanPage() {
 
   const regenerateAll = () => {
     setRegenerateTick((t) => t + 1);
+    setTierOverrides({});
     toast.success("Plan regenerated");
+  };
+
+  const replaceWeakestForTier = (tier: DailyPlanCard["tier"]) => {
+    const card = plan.find((c) => c.tier === tier);
+    if (!card || !card.result || !card.weakestLegId) {
+      toast.message("No weakest leg to swap");
+      return;
+    }
+    // Build the exclusion set: every leg already used in OTHER tiers
+    // so the swap doesn't dup across the Daily Plan.
+    const exclude = new Set<string>();
+    for (const other of plan) {
+      if (other.tier === tier) continue;
+      for (const l of other.legs) exclude.add(l.id);
+    }
+    const r = replaceWeakestLeg({
+      legs: card.legs,
+      pool: candidates,
+      weakestLegId: card.weakestLegId,
+      lockedLegIds: lockedIds,
+      excludeIds: exclude,
+      mode: tier === "primary" ? "safe" : tier === "balanced" ? "balanced" : "aggressive",
+    });
+    if (!r.ok || !r.legs || !r.result || !r.removed || !r.added) {
+      toast.message(r.reason ?? "Could not replace weakest leg");
+      return;
+    }
+    const newCard: DailyPlanCard = {
+      ...card,
+      legs: r.legs,
+      result: r.result,
+      weakestLegId: r.result.weakestLegId,
+      whyThisBet: [
+        ...card.whyThisBet,
+        `Removed ${r.removed.selectionLabel} (was weakest).`,
+        `Added ${r.added.selectionLabel} — ${r.whyAdded}.`,
+      ],
+    };
+    setTierOverrides((prev) => ({ ...prev, [tier]: newCard }));
+    toast.success(`Swapped weakest leg → ${r.added.selectionLabel}`);
   };
 
   const loading = candidates.length === 0 && (
@@ -417,6 +492,7 @@ export default function DailyPlanPage() {
                 onToggleLock={toggleLock}
                 onRegenerate={regenerateAll}
                 onPlaced={() => setPlacedTier((s) => new Set([...s, card.tier]))}
+                onReplaceWeakest={() => replaceWeakestForTier(card.tier)}
               />
             ))}
           </div>

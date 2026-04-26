@@ -15,7 +15,7 @@
  */
 
 import { Link, useLocation } from "react-router-dom";
-import { Layers, X, Trash2 } from "lucide-react";
+import { Layers, X, Trash2, Shuffle } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -33,6 +33,7 @@ import {
   riskLevelClass,
   riskLevelLabel,
 } from "@/lib/valueParlay/propRiskLevels";
+import { replaceWeakestLeg } from "@/lib/dailyPlan/replaceWeakest";
 
 function formatAmerican(o: number): string {
   return o > 0 ? `+${o}` : `${o}`;
@@ -40,7 +41,14 @@ function formatAmerican(o: number): string {
 
 export function StickyParlaySlipDrawer() {
   const { pathname, search } = useLocation();
-  const { builderLegs, builderMetrics, removeValueLeg, clearValueBuilder } = useValueParlay();
+  const {
+    builderLegs,
+    builderMetrics,
+    removeValueLeg,
+    clearValueBuilder,
+    setBuilderLegs,
+    candidatePool,
+  } = useValueParlay();
   const { currentBankroll, suggestStake, isInitialized: bankrollReady } = useBankroll();
   // Slip-level risk = highest-risk leg. Drives the suggested stake.
   const slipRisk: "low" | "medium" | "high" = builderLegs.length === 0
@@ -205,11 +213,45 @@ export function StickyParlaySlipDrawer() {
           </ul>
         ) : null}
 
-        <div className="mt-4 pt-3 border-t border-border flex items-center gap-2">
+        <div className="mt-4 pt-3 border-t border-border flex flex-wrap items-center gap-2">
+          {count >= 2 && builderMetrics?.weakestLegId ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 min-w-0"
+              disabled={candidatePool.length === 0}
+              title={
+                candidatePool.length === 0
+                  ? "Open the parlay builder or /daily once for the candidate pool to populate"
+                  : "Swap the lowest-quality leg with the next-best alternative"
+              }
+              onClick={() => {
+                if (!builderMetrics?.weakestLegId) return;
+                if (candidatePool.length === 0) {
+                  toast.message("Candidate pool empty — open the parlay builder first");
+                  return;
+                }
+                const r = replaceWeakestLeg({
+                  legs: builderLegs,
+                  pool: candidatePool,
+                  weakestLegId: builderMetrics.weakestLegId,
+                });
+                if (!r.ok || !r.legs || !r.added || !r.removed) {
+                  toast.message(r.reason ?? "Could not replace weakest leg");
+                  return;
+                }
+                setBuilderLegs(r.legs);
+                toast.success(`Removed ${r.removed.selectionLabel} → added ${r.added.selectionLabel}`);
+              }}
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              Replace weakest
+            </Button>
+          ) : null}
           <Button
             variant="ghost"
             size="sm"
-            className="flex-1"
+            className="flex-1 min-w-0"
             onClick={() => {
               if (!count) return;
               clearValueBuilder();
@@ -225,7 +267,7 @@ export function StickyParlaySlipDrawer() {
               asChild
               variant="default"
               size="sm"
-              className="flex-1"
+              className="flex-1 min-w-0"
               disabled={!count}
             >
               <Link to="/?view=parlay_builder">Open builder</Link>
