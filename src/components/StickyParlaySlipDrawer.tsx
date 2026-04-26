@@ -34,6 +34,11 @@ import {
   riskLevelLabel,
 } from "@/lib/valueParlay/propRiskLevels";
 import { replaceWeakestLeg } from "@/lib/dailyPlan/replaceWeakest";
+import {
+  pickActionForCandidate,
+  pickActionLabel,
+  pickActionClass,
+} from "@/lib/dailyPlan/pickAction";
 
 function formatAmerican(o: number): string {
   return o > 0 ? `+${o}` : `${o}`;
@@ -49,7 +54,13 @@ export function StickyParlaySlipDrawer() {
     setBuilderLegs,
     candidatePool,
   } = useValueParlay();
-  const { currentBankroll, suggestStake, isInitialized: bankrollReady } = useBankroll();
+  const {
+    currentBankroll,
+    suggestStake,
+    isInitialized: bankrollReady,
+    lossStreak,
+    hadLossToday,
+  } = useBankroll();
   // Slip-level risk = highest-risk leg. Drives the suggested stake.
   const slipRisk: "low" | "medium" | "high" = builderLegs.length === 0
     ? "medium"
@@ -185,6 +196,7 @@ export function StickyParlaySlipDrawer() {
           ) : (
             builderLegs.map((l) => {
               const risk = getPropRiskLevel(l);
+              const action = pickActionForCandidate(l, { lossStreak, hadLossToday });
               return (
                 <div
                   key={l.id}
@@ -194,6 +206,9 @@ export function StickyParlaySlipDrawer() {
                     <div className="min-w-0">
                       <p className="font-bold text-foreground truncate">{l.selectionLabel}</p>
                       <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className={`inline-flex items-center text-[9px] font-black px-1.5 py-0.5 rounded uppercase ${pickActionClass(action)}`}>
+                          {pickActionLabel(action)}
+                        </span>
                         <span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${riskLevelClass(risk)}`}>
                           {riskLevelLabel(risk)}
                         </span>

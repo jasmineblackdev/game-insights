@@ -7,7 +7,9 @@
  */
 
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
+import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { type AutoProfitAction } from "./autoProfit";
+import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
 
 interface PickActionContext {
   /** Current consecutive-loss streak from bankroll. */
@@ -56,6 +58,42 @@ export function pickActionForPrediction(
   if (ctx.hadLossToday) return "SMALL_BET";
 
   // BET NOW — HIGH confidence, soft matchup, no bankroll concerns
+  return "BET_NOW";
+}
+
+/**
+ * Adapter that resolves the action label for a slip leg
+ * (ValueBetCandidate). Slip legs have confidence + risk_band but
+ * lack the model_status / matchup_quality / timing_urgency fields
+ * the prop-level helper uses. We approximate from what's available:
+ *
+ *   SKIP   — LOW confidence OR high risk band with negative edge
+ *   WAIT   — bankroll exposure cap or 2-loss streak
+ *   SMALL  — MED confidence OR HIGH risk leg OR loss streak
+ *   BET NOW — HIGH confidence + LOW/MED risk + clean bankroll state
+ */
+export function pickActionForCandidate(
+  c: ValueBetCandidate,
+  ctx: PickActionContext = {},
+): AutoProfitAction {
+  const risk = getPropRiskLevel(c);
+
+  // SKIP — bad signal regardless of bankroll
+  if (c.confidence === "low") return "SKIP";
+  if (c.edge <= 0 && risk === "high") return "SKIP";
+
+  // WAIT — bankroll constraints
+  if (ctx.exposureCapHit) return "WAIT";
+  if ((ctx.lossStreak ?? 0) >= 2) return "WAIT";
+  if (c.timingUrgency === "wait") return "WAIT";
+
+  // SMALL BET — anything not strong enough for a full bet
+  if (c.confidence === "medium") return "SMALL_BET";
+  if (risk === "high") return "SMALL_BET";
+  if ((ctx.lossStreak ?? 0) >= 1) return "SMALL_BET";
+  if (ctx.hadLossToday) return "SMALL_BET";
+
+  // BET NOW
   return "BET_NOW";
 }
 

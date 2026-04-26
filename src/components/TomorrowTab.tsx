@@ -43,6 +43,7 @@ import { mlbPropCategory, mlbPropPriorityAdjustment } from "@/lib/valueParlay/ml
 
 const TOMORROW_ALLOWED_SPORTS = new Set([
   "nba",
+  "wnba",
   "nfl",
   "mlb",
   "boxing",
@@ -264,7 +265,7 @@ function TomorrowEmptyState() {
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <Calendar className="w-10 h-10 text-muted-foreground/30 mb-4" />
       <p className="text-muted-foreground text-sm max-w-sm">
-        No NBA, NFL, MLB, Boxing, or UFC/MMA games scheduled for tomorrow yet.
+        No NBA, WNBA, NFL, MLB, Boxing, or UFC/MMA games scheduled for tomorrow yet.
       </p>
       <p className="text-xs text-muted-foreground/60 mt-2 max-w-xs">
         Schedules typically post 12–24 hours in advance. Tomorrow tab scans
@@ -371,7 +372,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={TrendingUp}
           title="AI best picks tomorrow"
-          subtitle="Top-ranked edges across NBA, NFL, MLB, Boxing, and UFC/MMA — spreads, totals, and moneylines scored by the same edge model used today."
+          subtitle="Top-ranked edges across NBA, WNBA, NFL, MLB, Boxing, and UFC/MMA — spreads, totals, and moneylines scored by the same edge model used today."
           count={tomorrowGames.length}
         />
         <BestValuePicksSection
@@ -386,7 +387,7 @@ export function TomorrowTab({
         <SectionHeader
           icon={Sparkles}
           title="AI player props tomorrow"
-          subtitle="Top props across NBA, NFL, MLB, Boxing, and UFC/MMA. Pregame ranking: stability weighted higher than intraday. Excludes 'wait' timing."
+          subtitle="Top props across NBA, WNBA, NFL, MLB, Boxing, and UFC/MMA. Pregame ranking: stability weighted higher than intraday. Excludes 'wait' timing."
         />
 
         {!tomorrowProps.length ? (

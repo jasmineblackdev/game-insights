@@ -1012,6 +1012,13 @@ const Index = () => {
                       <BarChart3 className="w-3 h-3 shrink-0" />
                       Analytics
                     </Link>
+                    <Link
+                      to="/ml-performance"
+                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
+                    >
+                      <TrendingUp className="w-3 h-3 shrink-0" />
+                      ML Perf
+                    </Link>
                   </div>
                 </div>
 
@@ -1035,8 +1042,11 @@ const Index = () => {
                 )}
               </div>
 
-              {/* Bankroll widget — visible on Home + Parlay Builder per spec */}
-              {(viewMode === "home" || viewMode === "parlay_builder") ? (
+              {/* Bankroll widget — only on Home. The Parlay Builder
+                  view already shows bankroll/stake math inside the
+                  sticky slip drawer header, so rendering it here too
+                  double-counts the same numbers on screen. */}
+              {viewMode === "home" ? (
                 <div className="mb-5">
                   <BankrollWidget />
                 </div>
