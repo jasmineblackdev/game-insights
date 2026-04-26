@@ -18,6 +18,7 @@
 
 import { supabase } from "@/lib/supabase";
 import type { ParlayBuildMode, SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
+import { writeTrainingSamplesFromLegs, type TrainingSampleSource } from "@/lib/ml/trainingSamples";
 
 /**
  * Per-render save status surfaced to the UI as a small indicator on the
@@ -186,6 +187,20 @@ export async function logRecommendedParlay(input: LogRecommendedParlayInput): Pr
       return "failed";
     }
     _tableExists = true;
+    // Fire-and-forget: also write per-leg training samples so the ML
+    // training set captures every recommended parlay's legs at the
+    // moment of recommendation. Source maps from the parlay reasons
+    // when the caller hinted (e.g. auto_profit_mode=...).
+    const reasonHint = (input.reasons ?? []).find((r) => r.startsWith("auto_profit_mode="));
+    const trainingSource: TrainingSampleSource = reasonHint
+      ? "auto_profit"
+      : "app_recommended";
+    void writeTrainingSamplesFromLegs({
+      legs,
+      source: trainingSource,
+      modelVersion: input.modelVersion ?? "v1",
+      placedByUser: false,
+    });
     return "saved";
   } catch (e) {
     console.warn("[parlay-tracking] insert threw:", (e as Error).message);

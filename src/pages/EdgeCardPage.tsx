@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import { useEdgeCard } from "@/context/EdgeCardContext";
 import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashboard";
 import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
+import { TrainingDataHealthPanel } from "@/components/ml/TrainingDataHealthPanel";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -88,6 +89,14 @@ function EdgeCardPageInner() {
             Parlay performance
           </h2>
           <ParlayPerformanceDashboard />
+        </section>
+
+        <section className="space-y-3 border-t border-border pt-8">
+          <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-primary" />
+            ML training coverage
+          </h2>
+          <TrainingDataHealthPanel />
         </section>
 
         <section className="space-y-3 border-t border-border pt-8">
