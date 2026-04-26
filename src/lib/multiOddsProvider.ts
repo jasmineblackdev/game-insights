@@ -96,7 +96,9 @@ export function fuzzyNameMatch(a: string, b: string): boolean {
 
 const THE_ODDS_API_SPORT: Record<string, string> = {
   mma: "mma_mixed_martial_arts",
-  boxing: "boxing",
+  // The-Odds-API key is "boxing_boxing" (not "boxing" — that returns
+  // UNKNOWN_SPORT 404, see boxingOddsApi.ts comment).
+  boxing: "boxing_boxing",
 };
 
 async function fromTheOddsApi(sport: "mma" | "boxing"): Promise<CombatOddsEvent[] | null> {
