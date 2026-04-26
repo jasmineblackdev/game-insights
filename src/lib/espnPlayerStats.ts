@@ -22,6 +22,53 @@ const SCOREBOARDS: Record<string, string> = {
   NFL: "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard",
 };
 
+const TEAM_LEADERS_URLS: Record<string, (teamId: string) => string> = {
+  NBA: (id) => `https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/${id}/leaders`,
+  MLB: (id) => `https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/teams/${id}/leaders`,
+  NFL: (id) => `https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/${id}/leaders`,
+};
+
+/** Per-session cache so we don't refetch the same team repeatedly. */
+const _teamLeadersCache = new Map<string, EspnLeaderCategory[]>();
+
+/**
+ * Fetch a team's season-leader categories. Used as a fallback when the
+ * scoreboard event doesn't carry per-game leaders (common for upcoming
+ * NBA / NFL games before tip / kickoff). Cached per session.
+ */
+async function fetchTeamLeaders(
+  sport: "NBA" | "MLB" | "NFL",
+  teamId: string,
+): Promise<EspnLeaderCategory[]> {
+  const cacheKey = `${sport}:${teamId}`;
+  const cached = _teamLeadersCache.get(cacheKey);
+  if (cached) return cached;
+
+  const url = TEAM_LEADERS_URLS[sport]?.(teamId);
+  if (!url) {
+    _teamLeadersCache.set(cacheKey, []);
+    return [];
+  }
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      _teamLeadersCache.set(cacheKey, []);
+      return [];
+    }
+    const data = (await res.json()) as {
+      categories?: EspnLeaderCategory[];
+      team?: { categories?: EspnLeaderCategory[] };
+    };
+    const cats = data.categories ?? data.team?.categories ?? [];
+    _teamLeadersCache.set(cacheKey, cats);
+    return cats;
+  } catch {
+    _teamLeadersCache.set(cacheKey, []);
+    return [];
+  }
+}
+
 // ── Stat maps ─────────────────────────────────────────────────────────────────
 // ESPN's leader category names vary by sport AND by game state:
 //   NBA upcoming: "pointsLeader" / "reboundsLeader" / "assistsLeader"
@@ -337,12 +384,21 @@ async function fetchSportPlayerEdge(
 
     for (const competitor of [home, away]) {
       const teamAbbr = competitor.team?.abbreviation ?? "";
+      const teamId   = competitor.team?.id;
       const isHome   = competitor === home;
       const oppAbbr  = isHome ? awayAbbr : homeAbbr;
       const oppComp  = isHome ? away : home;
       const oppWinPct = overallWinPct(oppComp);
 
-      for (const category of competitor.leaders ?? []) {
+      // Scoreboard often omits leaders for upcoming games (especially NBA
+      // pre-tip). Fall back to the team's season leaders endpoint so the
+      // prop pool isn't empty just because tipoff hasn't happened yet.
+      let leaderCategories = competitor.leaders ?? [];
+      if (!leaderCategories.length && teamId) {
+        leaderCategories = await fetchTeamLeaders(sport, teamId);
+      }
+
+      for (const category of leaderCategories) {
         const catName = category.name ?? "";
         const mapping = resolveStatMapping(statMap, catName);
         if (!mapping) continue;
@@ -392,6 +448,14 @@ async function fetchSportPlayerEdge(
             game_sort:          sortBase + predictions.length,
             confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
             risk_tier:   confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
+            // Game-state features for the ML feature vector — these flow into
+            // extractMinimalPropFeatures so the model has signal beyond the
+            // current projection vs line.
+            is_home:               isHome,
+            opponent_win_pct:      oppWinPct,
+            recent_form:           edgeMag >= t.high
+              ? (direction === "MORE" ? "hot" : "cold")
+              : "steady",
             consistency_label:
               edgeMag >= t.high ? "stable" :
               edgeMag >= t.med  ? "medium" :

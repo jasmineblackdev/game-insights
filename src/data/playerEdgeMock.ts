@@ -75,6 +75,14 @@ export type PlayerEdgePrediction = PlayerPropInput & {
    * proxy. Missing → fall back to marketProbProxy().
    */
   american_odds?: number;
+  /** True when the player's team is the home team. */
+  is_home?: boolean;
+  /** Opponent's overall season win pct (0–1) — proxy for opponent strength. */
+  opponent_win_pct?: number;
+  /** Opponent defensive rating when known (sport-specific units). */
+  opponent_defensive_rating?: number;
+  /** Player's recent form vs season baseline: "hot" | "cold" | "steady". */
+  recent_form?: "hot" | "cold" | "steady";
   /** 80% confidence interval lower bound from propProjection model. */
   projection_ci_low?: number;
   /** 80% confidence interval upper bound from propProjection model. */

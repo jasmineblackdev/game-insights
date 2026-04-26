@@ -135,7 +135,10 @@ function getAlphaForSport(sport: MLSport): number {
 export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePrediction {
   const sport = SPORT_TO_ML[pred.sport];
 
-  // 1. Build feature vector from minimal prediction data (lightweight path)
+  // 1. Build feature vector from minimal prediction data (lightweight path).
+  //    Now passes game-state features (home/away, opp strength, recent form,
+  //    injury flag) so the ML feature vector reflects historical context the
+  //    fetcher has already pulled.
   const fv = extractMinimalPropFeatures({
     sport,
     stat_type: pred.stat_type,
@@ -144,6 +147,11 @@ export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePredicti
     edge: pred.edge,
     confidence: pred.confidence,
     market_probability: marketProbProxy(pred),
+    is_home: pred.is_home,
+    opponent_win_pct: pred.opponent_win_pct,
+    opponent_defensive_rating: pred.opponent_defensive_rating,
+    recent_form: pred.recent_form,
+    has_injury_flag: pred.has_injury_flag,
   });
 
   // 2. Package rules engine output
