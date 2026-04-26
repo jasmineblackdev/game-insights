@@ -237,7 +237,7 @@ export async function fetchOddsBundlesForLeague(
         : league === "mma"
           ? "mma_mixed_martial_arts"
           : league === "boxing"
-            ? "boxing"
+            ? "boxing_boxing"
             : "baseball_mlb";
   const events = await fetchJsonForSport(sportKey);
   for (const p of predictions) {
