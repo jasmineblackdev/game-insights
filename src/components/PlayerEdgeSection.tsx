@@ -256,13 +256,13 @@ function PlayerEdgeCard({
             {riskLabel(pred.risk_tier)}
           </span>
         )}
-        {(pred.sport === "MLB" || pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality && pred.matchup_quality !== "unknown" && (
+        {(pred.sport === "MLB" || pred.sport === "NBA" || pred.sport === "WNBA" || pred.sport === "NFL") && pred.matchup_quality && pred.matchup_quality !== "unknown" && (
           <span
             title={pred.matchup_note ?? undefined}
             className={cn(
               "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border",
-              pred.matchup_quality === "tough"   && "bg-red-500/10 text-red-500 border-red-500/20",
-              pred.matchup_quality === "soft"    && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+              (pred.matchup_quality === "tough" || pred.matchup_quality === "tough_pass" || pred.matchup_quality === "tough_rush") && "bg-red-500/10 text-red-500 border-red-500/20",
+              (pred.matchup_quality === "soft"  || pred.matchup_quality === "soft_pass"  || pred.matchup_quality === "soft_rush")  && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
               pred.matchup_quality === "fast"    && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
               pred.matchup_quality === "neutral" && "bg-muted text-muted-foreground border-border",
             )}
@@ -274,6 +274,11 @@ function PlayerEdgeCard({
             {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "soft"    && "Soft D"}
             {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "fast"    && "Fast pace"}
             {(pred.sport === "NBA" || pred.sport === "WNBA") && pred.matchup_quality === "neutral" && "Neutral D"}
+            {pred.sport === "NFL" && pred.matchup_quality === "tough_pass" && "Tough Pass D"}
+            {pred.sport === "NFL" && pred.matchup_quality === "tough_rush" && "Tough Rush D"}
+            {pred.sport === "NFL" && pred.matchup_quality === "soft_pass"  && "Soft Pass D"}
+            {pred.sport === "NFL" && pred.matchup_quality === "soft_rush"  && "Soft Rush D"}
+            {pred.sport === "NFL" && pred.matchup_quality === "neutral"    && "Neutral D"}
           </span>
         )}
       </div>

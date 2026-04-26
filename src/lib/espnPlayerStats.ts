@@ -28,6 +28,11 @@ import {
   wnbaOpponentMultiplier,
   type WnbaOppContext,
 } from "@/lib/ml/opponentContext/wnbaOpponentContext";
+import {
+  getNflOpponentContext,
+  nflOpponentMultiplier,
+  type NflOppContext,
+} from "@/lib/ml/opponentContext/nflOpponentContext";
 
 // ── ESPN scoreboard endpoints ─────────────────────────────────────────────────
 
@@ -659,6 +664,19 @@ async function fetchSportPlayerEdge(
       wnbaAwayDefCtx = aCtx;
     }
 
+    // NFL defense-by-phase context — pass/rush yds allowed, sacks,
+    // takeaways, plays per game.
+    let nflHomeDefCtx: NflOppContext | null = null;
+    let nflAwayDefCtx: NflOppContext | null = null;
+    if (sport === "NFL") {
+      const [hCtx, aCtx] = await Promise.all([
+        getNflOpponentContext(home.team?.id),
+        getNflOpponentContext(away.team?.id),
+      ]);
+      nflHomeDefCtx = hCtx;
+      nflAwayDefCtx = aCtx;
+    }
+
     for (const competitor of [home, away]) {
       const teamAbbr = competitor.team?.abbreviation ?? "";
       const teamId   = competitor.team?.id;
@@ -678,6 +696,9 @@ async function fetchSportPlayerEdge(
         : null;
       const opposingWnbaDefCtx: WnbaOppContext | null = sport === "WNBA"
         ? (isHome ? wnbaAwayDefCtx : wnbaHomeDefCtx)
+        : null;
+      const opposingNflDefCtx: NflOppContext | null = sport === "NFL"
+        ? (isHome ? nflAwayDefCtx : nflHomeDefCtx)
         : null;
 
       // Scoreboard often omits leaders for upcoming games (especially NBA
@@ -763,7 +784,10 @@ async function fetchSportPlayerEdge(
           const wnbaDefMult = sport === "WNBA" && opposingWnbaDefCtx
             ? wnbaOpponentMultiplier(mapping.statType, opposingWnbaDefCtx)
             : 1.0;
-          const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult;
+          const nflDefMult = sport === "NFL" && opposingNflDefCtx
+            ? nflOpponentMultiplier(mapping.statType, opposingNflDefCtx)
+            : 1.0;
+          const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult * nflDefMult;
           const projected    = Math.round(projectedRaw * 10) / 10;          // 1-decimal display
           const lineValue    = snapToHalfPoint(value);                       // sportsbook .5 line
           const edge         = projected - lineValue;
@@ -786,7 +810,9 @@ async function fetchSportPlayerEdge(
               ? ` ${opposingNbaDefCtx.matchupNote}`
               : sport === "WNBA" && opposingWnbaDefCtx?.hasData
                 ? ` ${opposingWnbaDefCtx.matchupNote}`
-                : "";
+                : sport === "NFL" && opposingNflDefCtx?.hasData
+                  ? ` ${opposingNflDefCtx.matchupNote}`
+                  : "";
           const reason_2 = matchupSuffix ? `${built.reason_2}${matchupSuffix}` : built.reason_2;
 
           predictions.push({
@@ -829,21 +855,25 @@ async function fetchSportPlayerEdge(
             trend_note: edgeMag >= t.high
               ? (direction === "MORE" ? `Trending ↑ vs ${oppAbbr}` : `Fade vs ${oppAbbr}`)
               : undefined,
-            // Matchup badge fields — MLB pitcher / NBA / WNBA team-defense
+            // Matchup badge fields — MLB pitcher / NBA / WNBA / NFL team-defense
             matchup_quality: sport === "MLB"
               ? opposingSpCtx?.matchupQuality
               : sport === "NBA"
                 ? opposingNbaDefCtx?.matchupQuality
                 : sport === "WNBA"
                   ? opposingWnbaDefCtx?.matchupQuality
-                  : undefined,
+                  : sport === "NFL"
+                    ? opposingNflDefCtx?.matchupQuality
+                    : undefined,
             matchup_note: sport === "MLB"
               ? opposingSpCtx?.matchupNote
               : sport === "NBA"
                 ? opposingNbaDefCtx?.matchupNote
                 : sport === "WNBA"
                   ? opposingWnbaDefCtx?.matchupNote
-                  : undefined,
+                  : sport === "NFL"
+                    ? opposingNflDefCtx?.matchupNote
+                    : undefined,
           });
         }
       }

@@ -112,14 +112,21 @@ export type PlayerEdgePrediction = PlayerPropInput & {
    *     "soft"    — high-HR/9 / weak SP inflates hitter output
    *     "neutral" — SP near league average
    *     "unknown" — SP unannounced or insufficient sample size
-   *   NBA:
+   *   NBA / WNBA:
    *     "tough"   — top-tier defense (low DRtg, low PPG allowed)
    *     "soft"    — bottom-tier defense (high APG/PPG allowed)
    *     "fast"    — fast pace boost (POSS/48 ≥ league + 2.5)
    *     "neutral" — near league average
    *     "unknown" — team data unavailable
+   *   NFL:
+   *     "tough_pass" — pass yds allowed ≤ league − 10%
+   *     "tough_rush" — rush yds allowed ≤ league − 10%
+   *     "soft_pass"  — pass yds allowed ≥ league + 10%
+   *     "soft_rush"  — rush yds allowed ≥ league + 10%
+   *     "neutral"    — near league average
+   *     "unknown"    — team data unavailable
    */
-  matchup_quality?: "tough" | "neutral" | "soft" | "fast" | "unknown";
+  matchup_quality?: "tough" | "neutral" | "soft" | "fast" | "unknown" | "tough_pass" | "tough_rush" | "soft_pass" | "soft_rush";
   /** Human-readable matchup note (also appended to reason_2). */
   matchup_note?: string;
   /** Internal debug snapshot — not surfaced in the UI, used for logging only. */
