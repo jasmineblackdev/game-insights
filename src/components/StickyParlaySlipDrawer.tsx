@@ -27,6 +27,11 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useValueParlay } from "@/context/ValueParlayContext";
+import {
+  getPropRiskLevel,
+  riskLevelClass,
+  riskLevelLabel,
+} from "@/lib/valueParlay/propRiskLevels";
 
 function formatAmerican(o: number): string {
   return o > 0 ? `+${o}` : `${o}`;
@@ -80,20 +85,36 @@ export function StickyParlaySlipDrawer() {
         </SheetHeader>
 
         {builderMetrics ? (
-          <div className="mt-3 rounded-md border border-border bg-muted/40 p-3 grid grid-cols-3 gap-2 text-center">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Combined</p>
-              <p className="text-sm font-bold tabular-nums">{formatAmerican(builderMetrics.combinedAmericanOdds)}</p>
+          <>
+            <div className="mt-3 rounded-md border border-border bg-muted/40 p-3 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Combined</p>
+                <p className="text-sm font-bold tabular-nums">{formatAmerican(builderMetrics.combinedAmericanOdds)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Hit prob</p>
+                <p className="text-sm font-bold tabular-nums">{Math.round(builderMetrics.projectedHitProbability * 100)}%</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Payout x</p>
+                <p className="text-sm font-bold tabular-nums">{builderMetrics.projectedPayoutMultiplier.toFixed(2)}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Hit prob</p>
-              <p className="text-sm font-bold tabular-nums">{Math.round(builderMetrics.projectedHitProbability * 100)}%</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Payout x</p>
-              <p className="text-sm font-bold tabular-nums">{builderMetrics.projectedPayoutMultiplier.toFixed(2)}</p>
-            </div>
-          </div>
+            {builderMetrics.riskLevelCounts ? (
+              <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px]">
+                <span className="text-muted-foreground">Risk mix:</span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 font-bold">
+                  {builderMetrics.riskLevelCounts.low} LOW
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/20 font-bold">
+                  {builderMetrics.riskLevelCounts.medium} MED
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded border bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/20 font-bold">
+                  {builderMetrics.riskLevelCounts.high} HIGH
+                </span>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <div className="mt-4 flex-1 overflow-y-auto space-y-2 -mx-2 px-2">
@@ -103,44 +124,52 @@ export function StickyParlaySlipDrawer() {
               <p className="mt-1">Tap "Add to parlay" on any pick to start your slip.</p>
             </div>
           ) : (
-            builderLegs.map((l) => (
-              <div
-                key={l.id}
-                className="rounded-md border border-border bg-card/60 p-3 text-xs space-y-1"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-bold text-foreground truncate">{l.selectionLabel}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
-                      {String(l.sport).toUpperCase()} · {formatAmerican(l.americanOdds)} · edge {(l.edge * 100).toFixed(1)}% ·{" "}
-                      <span
-                        className={
-                          l.confidence === "high"
-                            ? "text-confidence-high"
-                            : l.confidence === "medium"
-                              ? "text-confidence-medium"
-                              : "text-confidence-low"
-                        }
-                      >
-                        {l.confidence}
-                      </span>
-                    </p>
+            builderLegs.map((l) => {
+              const risk = getPropRiskLevel(l);
+              return (
+                <div
+                  key={l.id}
+                  className="rounded-md border border-border bg-card/60 p-3 text-xs space-y-1"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-foreground truncate">{l.selectionLabel}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                        <span className={`inline-flex items-center text-[9px] font-bold px-1.5 py-0.5 rounded border ${riskLevelClass(risk)}`}>
+                          {riskLevelLabel(risk)}
+                        </span>
+                        <p className="text-[11px] text-muted-foreground tabular-nums">
+                          {String(l.sport).toUpperCase()} · {formatAmerican(l.americanOdds)} · edge {(l.edge * 100).toFixed(1)}% ·{" "}
+                          <span
+                            className={
+                              l.confidence === "high"
+                                ? "text-confidence-high"
+                                : l.confidence === "medium"
+                                  ? "text-confidence-medium"
+                                  : "text-confidence-low"
+                            }
+                          >
+                            {l.confidence}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={() => removeValueLeg(l.id)}
+                      aria-label="Remove leg"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 shrink-0"
-                    onClick={() => removeValueLeg(l.id)}
-                    aria-label="Remove leg"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </Button>
+                  {l.riskNote ? (
+                    <p className="text-[10px] text-muted-foreground line-clamp-2">{l.riskNote}</p>
+                  ) : null}
                 </div>
-                {l.riskNote ? (
-                  <p className="text-[10px] text-muted-foreground line-clamp-2">{l.riskNote}</p>
-                ) : null}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 

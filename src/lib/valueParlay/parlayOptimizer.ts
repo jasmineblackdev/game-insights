@@ -13,6 +13,28 @@ import {
   recordHitterPick,
   sameTeamHitterPenaltyFor,
 } from "@/lib/valueParlay/mlbPropRanking";
+import {
+  applyRiskRules,
+  countByRiskLevel,
+  getPropRiskLevel,
+} from "@/lib/valueParlay/propRiskLevels";
+
+/**
+ * Same-game dependent stat pairs — when both are present in the same
+ * gameId, the joint outcome is correlated (not independent), so the
+ * optimizer rejects adding the second.
+ */
+const DEPENDENT_PAIRS_FLAT: Array<[string, string]> = [
+  ["rbis", "runs"],
+  ["home_runs", "rbis"],
+  ["home_runs", "runs"],
+  ["hits", "total_bases"],
+  ["hits_runs", "hits_runs_rbis"],
+  ["runs_rbis", "hits_runs_rbis"],
+];
+const DEPENDENT_PAIR_LOOKUP = new Set<string>(
+  DEPENDENT_PAIRS_FLAT.flatMap(([a, b]) => [`${a}|${b}`, `${b}|${a}`]),
+);
 
 // ── Analytics weights ─────────────────────────────────────────────────────────
 
@@ -492,6 +514,12 @@ function buildWarnings(legs: ValueBetCandidate[]): string[] {
   if (mlbPitch) w.push("MLB leg(s) may still be moving on pitcher confirmation.");
   const vol = legs.filter((l) => l.volatilityScore >= 58).length;
   if (vol >= 2) w.push("Volatility stack — card is sensitive to late news.");
+
+  // Structural risk rules: HIGH-risk leg cap, stat-type stacking,
+  // dependent MLB pairs (RBI+Runs etc), variance flag.
+  const r = applyRiskRules(legs);
+  for (const msg of r.warnings) w.push(msg);
+
   return w;
 }
 
@@ -831,6 +859,7 @@ function scoreParlay(
     legInclusionReasons,
     wouldITakeIt,
     wouldITakeItReason,
+    riskLevelCounts:           countByRiskLevel(legs),
   };
 }
 
@@ -900,8 +929,15 @@ function greedyBuild(
   const sportC: Record<string, number> = {};
   const hittersByTeam = new Map<string, number>();
   const propsByTeam = new Map<string, number>();
+  const statTypeCounts = new Map<string, number>();
   let combatCount = 0;
   let mediumConfCount = 0;
+  let highRiskCount = 0;
+  // Lotto mode is risky-on-purpose; everywhere else, hard cap at 1 HIGH-risk leg.
+  const maxHighRiskLegs = opts.mode === "lotto" ? 99 : 1;
+  // Stat-type stacking cap — never allow 3+ legs of identical stat in
+  // any mode. Lotto allows 2 (lottery feel), others cap at 2.
+  const maxSameStatType = opts.mode === "lotto" ? 3 : 2;
 
   const isMlbHitterProp = (c: ValueBetCandidate): boolean => {
     if ((c.sport ?? "").toLowerCase() !== "mlb") return false;
@@ -918,6 +954,32 @@ function greedyBuild(
     if (sc > opts.maxPerSport) return false;
     if (isCombatSport(c.sport) && combatCount >= maxCombatLegs) return false;
     if (c.confidence === "medium" && mediumConfCount >= maxMediumConfLegs) return false;
+
+    // Risk-tier cap — at most 1 HIGH-risk leg per parlay (RBIs, runs,
+    // home runs, stolen bases, blocks, steals, doubles, triples,
+    // walks, leader bets, KO/Sub markets). Lotto mode bypasses.
+    const risk = getPropRiskLevel(c);
+    if (risk === "high" && highRiskCount >= maxHighRiskLegs) return false;
+
+    // Stat-type stacking cap — block when adding this leg would create
+    // 3+ legs of the same stat type. Stops "5 player-points props" parlays.
+    const statKey = (c.statType ?? "").toLowerCase();
+    if (statKey) {
+      const next = (statTypeCounts.get(statKey) ?? 0) + 1;
+      if (next > maxSameStatType) return false;
+    }
+
+    // Dependent-pair guard — block adding a leg whose stat forms a
+    // known dependent pair with an already-picked leg in the same game
+    // (RBI+Runs, HR+RBI, Hits+TB). Lotto bypasses.
+    if (opts.mode !== "lotto" && statKey) {
+      for (const p of picked) {
+        if (p.gameId !== c.gameId) continue;
+        const pStat = (p.statType ?? "").toLowerCase();
+        if (!pStat) continue;
+        if (DEPENDENT_PAIR_LOOKUP.has(`${statKey}|${pStat}`)) return false;
+      }
+    }
 
     // Same-team player-prop cap — all sports
     if (c.pickType === "player_prop" && c.teamId) {
@@ -947,6 +1009,10 @@ function greedyBuild(
     sportC[c.sport] = sc;
     if (isCombatSport(c.sport)) combatCount++;
     if (c.confidence === "medium") mediumConfCount++;
+    if (risk === "high") highRiskCount++;
+    if (statKey) {
+      statTypeCounts.set(statKey, (statTypeCounts.get(statKey) ?? 0) + 1);
+    }
     if (c.pickType === "player_prop" && c.teamId) {
       const teamKey = `${c.sport}:${c.teamId}`;
       propsByTeam.set(teamKey, (propsByTeam.get(teamKey) ?? 0) + 1);

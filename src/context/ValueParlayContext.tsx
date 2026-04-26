@@ -14,6 +14,7 @@ import {
   payoutMultiplierFromAmerican,
 } from "@/lib/valueParlay/oddsMath";
 import { correlatedParlayHitProbability } from "@/lib/valueParlay/correlatedParlayProbability";
+import { applyRiskRules, countByRiskLevel } from "@/lib/valueParlay/propRiskLevels";
 
 interface ValueParlayContextValue {
   parlayMode: ParlayBuildMode;
@@ -70,6 +71,13 @@ function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
   if (legs.some((l) => l.volatilityScore >= 58)) {
     warnings.push("Volatility elevated on one or more legs.");
   }
+  // Structural risk-rule warnings (high-risk cap, stat-stacking,
+  // dependent MLB pairs, "consider 1+ hit", small-stake hint).
+  const riskRules = applyRiskRules(legs);
+  if (riskRules.hardFail && riskRules.hardFailReason) {
+    warnings.push(`⚠ ${riskRules.hardFailReason}.`);
+  }
+  for (const w of riskRules.warnings) warnings.push(w);
 
   return {
     legs,
@@ -82,6 +90,7 @@ function scoreBuilder(legs: ValueBetCandidate[]): SmartParlayResult | null {
     uncertaintyPenalty: Math.round(uncPen),
     smartParlayScore: legs.reduce((s, l) => s + l.valueScore, 0),
     warnings,
+    riskLevelCounts: countByRiskLevel(legs),
   };
 }
 

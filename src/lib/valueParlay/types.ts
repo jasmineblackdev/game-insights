@@ -181,6 +181,12 @@ export interface SmartParlayResult {
   wouldITakeIt?: boolean;
   /** Short rationale for the wouldITakeIt verdict. */
   wouldITakeItReason?: string;
+  /**
+   * Per-tier risk-level distribution across the parlay's legs.
+   * Used by the UI to render a "1 HIGH · 2 MED · 0 LOW" summary and
+   * to flag overall card aggressiveness. See propRiskLevels.ts.
+   */
+  riskLevelCounts?: { low: number; medium: number; high: number };
 }
 
 export interface ParlayTriple {
