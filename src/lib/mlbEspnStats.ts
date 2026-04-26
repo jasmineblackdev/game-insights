@@ -16,6 +16,7 @@ export interface PitcherStats {
   whip: number | null;
   k9: number | null;    // Strikeouts per 9 IP
   bb9: number | null;   // Walks per 9 IP — command quality signal
+  hr9: number | null;   // Home runs allowed per 9 IP — power-suppression signal
   kbb: number | null;   // K/BB ratio — compound command indicator (higher = sharper)
   ip: number | null;    // Innings pitched (sample-size guard)
 }
@@ -38,7 +39,7 @@ export async function fetchPitcherStats(athleteId: string): Promise<PitcherStats
   try {
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
-    if (!res.ok) return { athleteId, era: null, whip: null, k9: null, bb9: null, kbb: null, ip: null };
+    if (!res.ok) return { athleteId, era: null, whip: null, k9: null, bb9: null, hr9: null, kbb: null, ip: null };
 
     const json = (await res.json()) as {
       splits?: {
@@ -55,12 +56,13 @@ export async function fetchPitcherStats(athleteId: string): Promise<PitcherStats
     const ip   = findStat(stats, "inningsPitched", "IP");
     const k9   = findStat(stats, "strikeoutsPerNineInnings", "K/9", "kPer9");
     const bb9  = findStat(stats, "walksPerNineInnings", "BB/9", "bbPer9", "walksAllowed");
+    const hr9  = findStat(stats, "homeRunsPerNineInnings", "HR/9", "hrPer9");
     const kbb  = k9 != null && bb9 != null && bb9 > 0 ? Math.round((k9 / bb9) * 100) / 100 : null;
 
-    return { athleteId, era, whip, k9, bb9, kbb, ip };
+    return { athleteId, era, whip, k9, bb9, hr9, kbb, ip };
   } catch {
     clearTimeout(timer);
-    return { athleteId, era: null, whip: null, k9: null, bb9: null, kbb: null, ip: null };
+    return { athleteId, era: null, whip: null, k9: null, bb9: null, hr9: null, kbb: null, ip: null };
   }
 }
 

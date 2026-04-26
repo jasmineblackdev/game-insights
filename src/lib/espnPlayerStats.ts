@@ -13,6 +13,11 @@
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { MLB_PARK_FACTORS, MLB_OUTDOOR_PARKS } from "@/lib/mlbConstants";
 import { easternYmd, nextCalendarYmd, ymdToParam } from "@/lib/espnShared";
+import {
+  getMlbOpponentContext,
+  pitcherMultiplier,
+  type MlbOppContext,
+} from "@/lib/ml/opponentContext/mlbOpponentContext";
 
 // ── ESPN scoreboard endpoints ─────────────────────────────────────────────────
 
@@ -266,10 +271,45 @@ interface EspnCompetitorRaw {
   leaders?: EspnLeaderCategory[];
 }
 
+interface EspnProbablePitcherRaw {
+  homeAway?: string;
+  athlete?: { id?: string; displayName?: string; fullName?: string };
+  statistics?: { name?: string; displayValue?: unknown; value?: unknown }[];
+}
+
 interface EspnCompetitionRaw {
   date?: string;
   status?: { type?: { state?: string } };
   competitors?: EspnCompetitorRaw[];
+  /** MLB only — pre-game starters with athlete IDs and handedness. */
+  probables?: EspnProbablePitcherRaw[];
+}
+
+/** Parse MLB probable pitchers from a competition. Returns one entry per side. */
+function parseMlbProbables(comp: EspnCompetitionRaw): {
+  id?: string;
+  name: string;
+  hand?: "L" | "R";
+  homeAway: "home" | "away";
+}[] {
+  const raw = comp.probables;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((p) => {
+    const name = (p.athlete?.displayName ?? p.athlete?.fullName ?? "").trim();
+    if (!name) return [];
+    const id = p.athlete?.id;
+    const homeAway = p.homeAway === "home" ? "home" : "away";
+    const throwingStat = p.statistics?.find(
+      (s) => s.name === "throws" || s.name === "throwingHand",
+    );
+    const rawHandRaw = throwingStat?.displayValue ?? throwingStat?.value ?? "";
+    const rawHand = typeof rawHandRaw === "string" ? rawHandRaw : "";
+    const hand: "L" | "R" | undefined =
+      rawHand.toLowerCase().startsWith("l") ? "L"
+      : rawHand.toLowerCase().startsWith("r") ? "R"
+      : undefined;
+    return [{ id, name, hand, homeAway }];
+  });
 }
 
 interface EspnEventRaw {
@@ -510,6 +550,8 @@ async function fetchSportPlayerEdge(
     gameTime: string;
     propSource: "scoreboard" | "team_leaders" | "unavailable";
     stats: Record<string, number>;
+    /** MLB only — opposing SP context, used by combined-pick emitter. */
+    mlbOpposingSp?: MlbOppContext | null;
   };
   const athleteStatMap = new Map<string, AthleteAcc>();
 
@@ -554,6 +596,25 @@ async function fetchSportPlayerEdge(
       ? await fetchMlbWeather(homeAbbr).catch(() => ({ tempF: null, windMph: null }))
       : undefined;
 
+    // MLB pitcher context — parse probable starters from the competition,
+    // then resolve each side's full SP context (ERA/WHIP/K9/BB9/HR9) in
+    // parallel. The context cache makes repeat fetches free across games
+    // when an SP is reused (rare) and across all hitters on the opposing
+    // team (common — every hitter on team A faces team B's same SP).
+    let mlbHomeSpCtx: MlbOppContext | null = null;
+    let mlbAwaySpCtx: MlbOppContext | null = null;
+    if (sport === "MLB") {
+      const probables = parseMlbProbables(comp);
+      const homeSp = probables.find((p) => p.homeAway === "home");
+      const awaySp = probables.find((p) => p.homeAway === "away");
+      const [hCtx, aCtx] = await Promise.all([
+        homeSp ? getMlbOpponentContext({ spId: homeSp.id, spName: homeSp.name, spHand: homeSp.hand }) : Promise.resolve(null),
+        awaySp ? getMlbOpponentContext({ spId: awaySp.id, spName: awaySp.name, spHand: awaySp.hand }) : Promise.resolve(null),
+      ]);
+      mlbHomeSpCtx = hCtx;
+      mlbAwaySpCtx = aCtx;
+    }
+
     for (const competitor of [home, away]) {
       const teamAbbr = competitor.team?.abbreviation ?? "";
       const teamId   = competitor.team?.id;
@@ -561,6 +622,11 @@ async function fetchSportPlayerEdge(
       const oppAbbr  = isHome ? awayAbbr : homeAbbr;
       const oppComp  = isHome ? away : home;
       const oppWinPct = overallWinPct(oppComp);
+
+      // For MLB hitters on team A, the opposing SP is team B's pitcher.
+      const opposingSpCtx: MlbOppContext | null = sport === "MLB"
+        ? (isHome ? mlbAwaySpCtx : mlbHomeSpCtx)
+        : null;
 
       // Scoreboard often omits leaders for upcoming games (especially NBA
       // pre-tip). Fall back to the team's season leaders endpoint so the
@@ -625,6 +691,7 @@ async function fetchSportPlayerEdge(
               athleteId: aid, name, team: teamAbbr,
               opponent: oppAbbr, isHome, oppWinPct, eventId, gameTime, propSource,
               stats: {},
+              mlbOpposingSp: sport === "MLB" ? opposingSpCtx : undefined,
             };
             if (acc.stats[mapping.statType] == null) {
               acc.stats[mapping.statType] = value;
@@ -632,7 +699,11 @@ async function fetchSportPlayerEdge(
             athleteStatMap.set(accKey, acc);
           }
 
-          const projectedRaw = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather);
+          const baseProjection = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather);
+          const pitcherMult = sport === "MLB" && opposingSpCtx
+            ? pitcherMultiplier(mapping.statType, opposingSpCtx)
+            : 1.0;
+          const projectedRaw = baseProjection * pitcherMult;
           const projected    = Math.round(projectedRaw * 10) / 10;          // 1-decimal display
           const lineValue    = snapToHalfPoint(value);                       // sportsbook .5 line
           const edge         = projected - lineValue;
@@ -643,10 +714,15 @@ async function fetchSportPlayerEdge(
             ?? `ath-${catName}-${name.replace(/\s+/g, "-")}`;
           const id = `espn-${sport.toLowerCase()}-${eventId}-${athleteId}-${catName}`;
 
-          const { reason_1, reason_2, risk_factor } = buildReasons(
+          const built = buildReasons(
             name, mapping.statType, mapping.unit, value, projected,
             oppAbbr, oppWinPct, direction, sport, homeAbbr, weather
           );
+          // For MLB, append the pitcher-matchup note to reason_2 so the
+          // user sees why the projection nudged.
+          const reason_2 = sport === "MLB" && opposingSpCtx
+            ? `${built.reason_2} ${opposingSpCtx.matchupNote}`
+            : built.reason_2;
 
           predictions.push({
             id,
@@ -663,9 +739,9 @@ async function fetchSportPlayerEdge(
             prediction_direction: direction,
             edge:               Math.round(edge * 10) / 10,
             confidence,
-            reason_1,
+            reason_1:           built.reason_1,
             reason_2,
-            risk_factor,
+            risk_factor:        built.risk_factor,
             game_sort:          sortBase + predictions.length,
             confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
             risk_tier:   confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
@@ -688,6 +764,9 @@ async function fetchSportPlayerEdge(
             trend_note: edgeMag >= t.high
               ? (direction === "MORE" ? `Trending ↑ vs ${oppAbbr}` : `Fade vs ${oppAbbr}`)
               : undefined,
+            // MLB pitcher-matchup badge fields
+            matchup_quality: opposingSpCtx?.matchupQuality,
+            matchup_note:    opposingSpCtx?.matchupNote,
           });
         }
       }
@@ -793,7 +872,11 @@ async function fetchSportPlayerEdge(
         const sumVal = combo.parts.reduce((s, p) => s + acc.stats[p]!, 0);
         if (!Number.isFinite(sumVal) || sumVal <= 0) continue;
 
-        const projectedRaw = projectValue(sumVal, acc.oppWinPct, acc.isHome, "MLB", "");
+        const baseProjection = projectValue(sumVal, acc.oppWinPct, acc.isHome, "MLB", "");
+        const pitcherMult = acc.mlbOpposingSp
+          ? pitcherMultiplier(combo.statType, acc.mlbOpposingSp)
+          : 1.0;
+        const projectedRaw = baseProjection * pitcherMult;
         const projected    = Math.round(projectedRaw * 10) / 10;
         const lineValue    = snapToHalfPoint(sumVal);
         const edge         = projected - lineValue;
@@ -803,6 +886,10 @@ async function fetchSportPlayerEdge(
           edgeMag >= t.high * 2.0 ? "HIGH"
           : edgeMag >= t.med * 2.0 ? "MED" : "LOW";
 
+        const matchupSuffix = acc.mlbOpposingSp
+          ? ` ${acc.mlbOpposingSp.matchupNote}`
+          : "";
+
         predictions.push({
           id: `espn-mlb-${acc.eventId}-${acc.athleteId}-${combo.statType}`,
           game_id: acc.eventId, player_id: acc.athleteId, player_name: acc.name,
@@ -810,7 +897,7 @@ async function fetchSportPlayerEdge(
           stat_type: combo.statType, line_value: lineValue, projected_value: projected,
           prediction_direction: direction, edge: Math.round(edge * 10) / 10, confidence,
           reason_1: `${combo.unit} season avg ${sumVal.toFixed(1)} — projected vs ${acc.opponent}.`,
-          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.`,
+          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.${matchupSuffix}`,
           risk_factor: `Combined-stat lines move with lineup spot and pitcher matchup; monitor late SP confirmation.`,
           game_sort: sortBase + predictions.length,
           confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
@@ -819,6 +906,8 @@ async function fetchSportPlayerEdge(
           recent_form: edgeMag >= t.high * 2.0 ? (direction === "MORE" ? "hot" : "cold") : "steady",
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high * 2.0 ? "stable" : edgeMag >= t.med * 2.0 ? "medium" : "volatile",
+          matchup_quality: acc.mlbOpposingSp?.matchupQuality,
+          matchup_note:    acc.mlbOpposingSp?.matchupNote,
         });
       }
     }

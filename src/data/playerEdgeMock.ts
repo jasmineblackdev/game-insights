@@ -104,6 +104,17 @@ export type PlayerEdgePrediction = PlayerPropInput & {
   projection_ci_low?: number;
   /** 80% confidence interval upper bound from propProjection model. */
   projection_ci_high?: number;
+  /**
+   * MLB-only: quality of the opposing starting pitcher matchup. Drives
+   * the Pitcher Matchup badge on prop cards.
+   *   "tough"   — high-K / low-ERA SP suppresses hitter output
+   *   "soft"    — high-HR/9 / weak SP inflates hitter output
+   *   "neutral" — SP near league average
+   *   "unknown" — SP unannounced or insufficient sample size
+   */
+  matchup_quality?: "tough" | "neutral" | "soft" | "unknown";
+  /** MLB-only: human-readable matchup note (also fed into reason_2). */
+  matchup_note?: string;
   /** Internal debug snapshot — not surfaced in the UI, used for logging only. */
   ml_debug?: MLDebugSnapshot;
 };
