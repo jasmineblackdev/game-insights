@@ -15,6 +15,7 @@
  */
 
 import { SPORT_CONFIG } from "@/lib/oddsProviderConfig";
+import { isOddsSportLocked } from "@/lib/oddsApiHealth";
 
 // ── Normalized event shape ────────────────────────────────────────────────────
 
@@ -103,6 +104,10 @@ const THE_ODDS_API_SPORT: Record<string, string> = {
 
 async function fromTheOddsApi(sport: "mma" | "boxing"): Promise<CombatOddsEvent[] | null> {
   const sportKey = THE_ODDS_API_SPORT[sport];
+  // Per-sport lockout — same wire-up as oddsApiFetch. Skip the
+  // round-trip during the 5-minute backoff so we don't hammer a
+  // dead endpoint and burn retries.
+  if (isOddsSportLocked(sportKey)) return null;
   const res = await proxyGet({
     provider: "the-odds-api",
     route: "odds",

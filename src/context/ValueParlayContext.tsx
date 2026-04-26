@@ -15,6 +15,8 @@ import {
 } from "@/lib/valueParlay/oddsMath";
 import { correlatedParlayHitProbability } from "@/lib/valueParlay/correlatedParlayProbability";
 import { applyRiskRules, countByRiskLevel } from "@/lib/valueParlay/propRiskLevels";
+import { defaultMinEdgeForRecommend } from "@/lib/sportEdgeThresholds";
+import type { League } from "@/data/mockGames";
 
 interface ValueParlayContextValue {
   parlayMode: ParlayBuildMode;
@@ -143,6 +145,18 @@ export function ValueParlayProvider({ children }: { children: ReactNode }) {
     const byGame = builderLegs.filter((x) => x.gameId === c.gameId).length;
     if (byGame >= 2) {
       return { ok: false, message: "Max 2 legs per game in smart parlay" };
+    }
+    // Sport-edge floor — the candidate builder already filters by this
+    // for the recommended pool, but manual "Add to parlay" buttons
+    // bypass that filter. Block at the slip layer so a sub-threshold
+    // negative-EV leg never lands in the user's slip.
+    const sport = String(c.sport).toLowerCase() as League;
+    const minEdge = defaultMinEdgeForRecommend(sport);
+    if (Number.isFinite(c.edge) && c.edge < minEdge) {
+      return {
+        ok: false,
+        message: `Edge ${(c.edge * 100).toFixed(1)}% below ${sport.toUpperCase()} floor ${(minEdge * 100).toFixed(1)}% — skip this leg`,
+      };
     }
     setBuilderLegs((s) => [...s, c]);
     return { ok: true };

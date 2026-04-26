@@ -82,3 +82,100 @@ export function exceedsRecommendedCap(stake: number, bankroll: number): boolean 
   if (!Number.isFinite(bankroll) || bankroll <= 0) return false;
   return stake > bankroll * MAX_STAKE_PCT;
 }
+
+// ── Fractional Kelly ──────────────────────────────────────────────
+// Risk-tier-flat staking treats every bet at a tier the same. Kelly
+// criterion sizes by edge × odds: bigger when the edge is fat at +200,
+// smaller at heavy chalk where the same edge buys less expected value.
+// Full Kelly is too volatile in practice — fractional Kelly (0.25× is
+// the sharp standard) cuts variance ~94% while keeping ~60% of the
+// long-run growth. Net effect: better growth, lower drawdowns.
+
+/** Convert American odds → decimal price (the "1 + b" form). */
+function americanToDecimal(o: number): number {
+  if (!Number.isFinite(o) || o === 0) return 1;
+  return o >= 0 ? 1 + o / 100 : 1 + 100 / Math.abs(o);
+}
+
+/**
+ * Kelly criterion fraction (full Kelly). f* = (b·p − q) / b
+ * where b = decimal − 1, p = win prob, q = 1 − p.
+ *
+ * Returns 0 when there's no edge (negative or zero f*) — never bet
+ * negative-EV propositions.
+ */
+export function kellyFraction(modelProb: number, americanOdds: number): number {
+  if (modelProb <= 0 || modelProb >= 1) return 0;
+  if (!Number.isFinite(americanOdds) || americanOdds === 0) return 0;
+  const decimal = americanToDecimal(americanOdds);
+  const b = decimal - 1;
+  if (b <= 0) return 0;
+  const fStar = (b * modelProb - (1 - modelProb)) / b;
+  return Math.max(0, fStar);
+}
+
+/**
+ * Suggested stake from a fractional Kelly fit, clamped to the same
+ * 5% per-bet cap as the risk-tier sizer. fractionScale defaults to
+ * 0.25 (quarter-Kelly) — matches the "sharps' rule of thumb".
+ *
+ * Returns null when modelProb / odds aren't usable so the caller can
+ * fall through to the risk-tier sizer. Never negative.
+ */
+export function suggestKellyStake(args: {
+  bankroll: number;
+  modelProb: number;
+  americanOdds: number;
+  fractionScale?: number;
+}): { stake: number; pctOfBankroll: number; kellyFraction: number; capped: boolean } | null {
+  const { bankroll, modelProb, americanOdds, fractionScale = 0.25 } = args;
+  if (!Number.isFinite(bankroll) || bankroll <= 0) return null;
+  const f = kellyFraction(modelProb, americanOdds);
+  if (f <= 0) return null; // no edge → Kelly says don't bet
+  const cap = bankroll * MAX_STAKE_PCT;
+  const raw = Math.min(bankroll * f * fractionScale, cap);
+  if (raw < MIN_STAKE) return { stake: 0, pctOfBankroll: 0, kellyFraction: f, capped: false };
+  const stake = roundStake(raw);
+  return {
+    stake,
+    pctOfBankroll: bankroll > 0 ? stake / bankroll : 0,
+    kellyFraction: f,
+    capped: stake >= Math.floor(cap),
+  };
+}
+
+/**
+ * Smart stake — uses fractional Kelly when modelProb + odds are
+ * available, falls back to the risk-tier flat allocation when not.
+ * Risk tier still bounds the result: low→Kelly with 5% cap, medium→
+ * Kelly with 2.5% cap, high→Kelly with 1% cap. So Kelly never
+ * pushes a high-risk bet past 1% of bankroll.
+ */
+export function suggestSmartStake(args: {
+  bankroll: number;
+  risk: StakeRiskLevel;
+  modelProb?: number;
+  americanOdds?: number;
+}): { stake: number; pctOfBankroll: number; capped: boolean; method: "kelly" | "flat" } {
+  const { bankroll, risk, modelProb, americanOdds } = args;
+  if (modelProb != null && americanOdds != null) {
+    const tierCapPct = RISK_PCT[risk] ?? RISK_PCT.medium;
+    const k = suggestKellyStake({ bankroll, modelProb, americanOdds });
+    if (k && k.stake > 0) {
+      // Apply the tier ceiling (so high-risk Kelly can't exceed 1%).
+      const tierCap = bankroll * tierCapPct;
+      if (k.stake <= tierCap) {
+        return { stake: k.stake, pctOfBankroll: k.pctOfBankroll, capped: k.capped, method: "kelly" };
+      }
+      const cappedStake = roundStake(tierCap);
+      return {
+        stake: cappedStake,
+        pctOfBankroll: bankroll > 0 ? cappedStake / bankroll : 0,
+        capped: true,
+        method: "kelly",
+      };
+    }
+  }
+  const flat = suggestStakeForRisk(bankroll, risk);
+  return { ...flat, method: "flat" };
+}
