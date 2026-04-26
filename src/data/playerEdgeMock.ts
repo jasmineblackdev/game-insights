@@ -83,6 +83,17 @@ export type PlayerEdgePrediction = PlayerPropInput & {
   opponent_defensive_rating?: number;
   /** Player's recent form vs season baseline: "hot" | "cold" | "steady". */
   recent_form?: "hot" | "cold" | "steady";
+  /**
+   * Where the leader data for this prop came from:
+   *   "scoreboard"     — competitor.leaders on the scoreboard event
+   *   "team_leaders"   — fallback /teams/{id}/leaders endpoint
+   *   "unavailable"    — neither path returned data
+   */
+  prop_source?: "scoreboard" | "team_leaders" | "unavailable";
+  /** ML feature-vector data quality (0–1). Mirrors fv.data_quality. */
+  data_quality?: number;
+  /** Computed transparency badge — see deriveModelStatus(). */
+  model_status?: "rules_mode" | "ml_active" | "calibrating" | "low_data_quality";
   /** 80% confidence interval lower bound from propProjection model. */
   projection_ci_low?: number;
   /** 80% confidence interval upper bound from propProjection model. */

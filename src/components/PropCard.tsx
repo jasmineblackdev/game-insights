@@ -135,6 +135,45 @@ function RecentGamesStrip({
   );
 }
 
+// ── Model status badge ───────────────────────────────────────────────────────
+// Single transparency badge per pick: shows whether probability is rules-only,
+// ML-blended, calibrating, or low-data-quality. Hovering reveals sample size
+// + data quality + leader source so the user can audit each pick.
+
+function ModelStatusPill({ pred }: { pred: PlayerEdgePrediction }) {
+  if (!pred.model_status) return null;
+  const tone = pred.model_status;
+  const sampleSize = pred.ml_debug?.ml_sample_size ?? 0;
+  const dq = pred.data_quality;
+  const source = pred.prop_source;
+
+  const cls =
+    tone === "ml_active"        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30"
+    : tone === "calibrating"    ? "bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/30"
+    : tone === "low_data_quality" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30"
+    :                             "bg-muted text-muted-foreground border border-border";
+
+  const short =
+    tone === "ml_active"        ? "ML ACTIVE"
+    : tone === "calibrating"    ? "CALIBRATING"
+    : tone === "low_data_quality" ? "LOW DATA"
+    :                             "RULES";
+
+  const tip =
+    `${pred.sport} ${pred.stat_type} · n=${sampleSize}` +
+    (dq != null ? ` · DQ ${dq.toFixed(2)}` : "") +
+    (source ? ` · src: ${source}` : "");
+
+  return (
+    <span
+      className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full tracking-wider", cls)}
+      title={tip}
+    >
+      {short}
+    </span>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function PropCard({
@@ -196,6 +235,7 @@ export function PropCard({
         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
           {pred.confidence}
         </span>
+        <ModelStatusPill pred={pred} />
         {pred.volatility_flag && pred.consistency_label !== "volatile" && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
             Volatile

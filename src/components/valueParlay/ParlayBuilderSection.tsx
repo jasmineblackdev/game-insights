@@ -24,6 +24,7 @@ import { enrichCandidatesWithRecentPerformance } from "@/lib/valueParlay/recentP
 import { snapshotClvForCandidates, sealClvForPredictions } from "@/lib/ml/clvSnapshotter";
 import { loadPlattParams } from "@/lib/ml/plattCalibration";
 import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
+import { logRecommendedParlay } from "@/lib/parlayTracking/recommendedParlayLogger";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -369,6 +370,22 @@ export function ParlayBuilderSection({
     () => (candidates.length ? optimizeSmartParlays(candidates, "cashout", analyticsWeights) : null),
     [candidates, analyticsWeights]
   );
+
+  // Auto-save every recommended parlay to recommended_parlays so the user
+  // has a full history regardless of whether they actually placed it.
+  // Session-deduped per (tier, variant, legs-fingerprint) inside the logger.
+  useEffect(() => {
+    if (triple) {
+      logRecommendedParlay({ tier: parlayMode, variant: "best_value",    result: triple.bestValue }).catch(() => {});
+      logRecommendedParlay({ tier: parlayMode, variant: "safer",         result: triple.safer }).catch(() => {});
+      logRecommendedParlay({ tier: parlayMode, variant: "higher_payout", result: triple.higherPayout }).catch(() => {});
+    }
+    if (cashoutTriple) {
+      logRecommendedParlay({ tier: "cashout", variant: "cashout_best",   result: cashoutTriple.bestValue }).catch(() => {});
+      logRecommendedParlay({ tier: "cashout", variant: "cashout_safer",  result: cashoutTriple.safer }).catch(() => {});
+      logRecommendedParlay({ tier: "cashout", variant: "cashout_upside", result: cashoutTriple.higherPayout }).catch(() => {});
+    }
+  }, [triple, cashoutTriple, parlayMode]);
 
   const shareText = useMemo(
     () => (builderLegs.length ? formatBuilderParlayShare(builderLegs, builderMetrics) : ""),

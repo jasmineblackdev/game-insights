@@ -393,9 +393,16 @@ async function fetchSportPlayerEdge(
       // Scoreboard often omits leaders for upcoming games (especially NBA
       // pre-tip). Fall back to the team's season leaders endpoint so the
       // prop pool isn't empty just because tipoff hasn't happened yet.
+      // Track which source we used so we can surface it in the UI badge.
       let leaderCategories = competitor.leaders ?? [];
-      if (!leaderCategories.length && teamId) {
-        leaderCategories = await fetchTeamLeaders(sport, teamId);
+      let propSource: "scoreboard" | "team_leaders" | "unavailable" = "scoreboard";
+      if (!leaderCategories.length) {
+        if (teamId) {
+          leaderCategories = await fetchTeamLeaders(sport, teamId);
+          propSource = leaderCategories.length ? "team_leaders" : "unavailable";
+        } else {
+          propSource = "unavailable";
+        }
       }
 
       for (const category of leaderCategories) {
@@ -456,6 +463,9 @@ async function fetchSportPlayerEdge(
             recent_form:           edgeMag >= t.high
               ? (direction === "MORE" ? "hot" : "cold")
               : "steady",
+            // Transparency: where the leader came from (live scoreboard vs
+            // team-leaders fallback) — surfaced in the Model Status badge.
+            prop_source:           propSource,
             consistency_label:
               edgeMag >= t.high ? "stable" :
               edgeMag >= t.med  ? "medium" :

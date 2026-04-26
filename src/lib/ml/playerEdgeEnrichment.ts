@@ -35,6 +35,8 @@ import { extractMinimalPropFeatures } from "@/lib/ml/features/index";
 import { computeConfidence } from "@/lib/ml/models/confidence";
 import { computePropProjection } from "@/lib/ml/models/propProjection";
 import { computeAlpha, getAdaptiveWeightsSync } from "@/lib/ml/weights";
+import { deriveModelStatus } from "@/lib/ml/modelStatus";
+import { plattParamsFor } from "@/lib/ml/plattCalibration";
 import { supabase } from "@/lib/supabase";
 
 // ── Sport mapping ─────────────────────────────────────────────────────────────
@@ -217,6 +219,15 @@ export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePredicti
     projection_ci_low:  Math.round(mlProjection.projection_ci_low * 10) / 10,
     projection_ci_high: Math.round(mlProjection.projection_ci_high * 10) / 10,
     ml_debug:           mlDebug,
+    // Transparency fields for the Model Status badge.
+    data_quality:       Math.round(fv.data_quality * 100) / 100,
+    model_status:       deriveModelStatus({
+      sport:           pred.sport,
+      market:          pred.stat_type,
+      sampleSize:      blended.ml_sample_size,
+      dataQuality:     fv.data_quality,
+      plattAvailable:  plattParamsFor(pred.sport.toLowerCase(), "player_prop", pred.confidence) != null,
+    }).status,
     // Update timing_note only if ML produced a checkpoint (pregame = keep existing)
     timing_note: blended.timing.best_context === "live" && blended.timing.live_checkpoint
       ? blended.timing.live_checkpoint
