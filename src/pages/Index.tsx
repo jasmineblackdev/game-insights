@@ -13,6 +13,7 @@ import { BarChart3, Calendar, ClipboardList, Home, ListChecks, Sparkles, Trendin
 import { Link } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
+import { fetchWnbaGamesFast } from "@/lib/wnbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
 import { fetchMlbEnrichedGames, fetchMlbGamesFast } from "@/lib/mlbEspn";
 import { applyMlbPredictionModel } from "@/lib/mlbPredictionModel";
@@ -93,7 +94,7 @@ function LeaguePicker({
 }) {
   return (
     <div className={cn("inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5 shrink-0", className)}>
-      {(["nba", "nfl", "mlb", "boxing", "mma"] as League[]).map((l) => (
+      {(["nba", "wnba", "nfl", "mlb", "boxing", "mma"] as League[]).map((l) => (
         <button
           key={l}
           type="button"
@@ -500,6 +501,18 @@ const Index = () => {
     refetchIntervalInBackground: false,
   });
 
+  // WNBA — single-phase ESPN scoreboard fetch (no enrichment yet).
+  // Pulled when WNBA is selected OR when Tomorrow / Auto-Profit is open.
+  const wnbaQuery = useQuery({
+    queryKey: ["wnba-espn-scoreboard", easternYmd()],
+    queryFn: fetchWnbaGamesFast,
+    enabled: league === "wnba" || viewMode === "tomorrow" || viewMode === "home" || viewMode === "parlay_builder",
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+    refetchInterval: league === "wnba" ? 2 * 60 * 1000 : false,
+    refetchIntervalInBackground: false,
+  });
+
   // NFL is offseason Apr–Aug — fetch when selected OR when Tomorrow tab is open
   // (Tomorrow scans all supported sports; users shouldn't need to visit NFL first)
   const nflQuery = useQuery({
@@ -570,27 +583,31 @@ const Index = () => {
   const activeQuery =
     league === "nba"
       ? { isPending: nbaFastQuery.isPending, isError: nbaQuery.isError && nbaFastQuery.isError, error: nbaQuery.error }
-      : league === "nfl"
-        ? nflQuery
-        : league === "mlb"
-          ? {
-              isPending: mlbListPending,
-              isError: mlbBaseQuery.isError || mlbModeledQuery.isError,
-              error: mlbBaseQuery.error ?? mlbModeledQuery.error,
-            }
-          : league === "mma"
-            ? mmaQuery
-            : boxingQuery;
+      : league === "wnba"
+        ? wnbaQuery
+        : league === "nfl"
+          ? nflQuery
+          : league === "mlb"
+            ? {
+                isPending: mlbListPending,
+                isError: mlbBaseQuery.isError || mlbModeledQuery.isError,
+                error: mlbBaseQuery.error ?? mlbModeledQuery.error,
+              }
+            : league === "mma"
+              ? mmaQuery
+              : boxingQuery;
   const leagueGames =
     league === "nba"
       ? nbaGames
-      : league === "nfl"
-        ? (nflQuery.data ?? [])
-        : league === "mlb"
-          ? mlbGames
-          : league === "mma"
-            ? (mmaQuery.data ?? [])
-            : (boxingQuery.data ?? []);
+      : league === "wnba"
+        ? (wnbaQuery.data ?? [])
+        : league === "nfl"
+          ? (nflQuery.data ?? [])
+          : league === "mlb"
+            ? mlbGames
+            : league === "mma"
+              ? (mmaQuery.data ?? [])
+              : (boxingQuery.data ?? []);
 
   const gameIdsKey = useMemo(() => leagueGames.map((g) => g.id).sort().join(","), [leagueGames]);
 
@@ -598,12 +615,13 @@ const Index = () => {
   const allGames = useMemo<GamePrediction[]>(
     () => [
       ...nbaGames,
+      ...(wnbaQuery.data ?? []),
       ...(nflQuery.data ?? []),
       ...mlbGames,
       ...(boxingQuery.data ?? []),
       ...(mmaQuery.data ?? []),
     ],
-    [nbaGames, nflQuery.data, mlbGames, boxingQuery.data, mmaQuery.data]
+    [nbaGames, wnbaQuery.data, nflQuery.data, mlbGames, boxingQuery.data, mmaQuery.data]
   );
 
   const [oddsMapHome, setOddsMapHome] = useState<Map<string, GameOddsBundle>>(() => new Map());
