@@ -146,7 +146,8 @@ export function oddsSportKeyForPrediction(pred: GamePrediction): string {
   if (pred.league === "nba") return "basketball_nba";
   if (pred.league === "nfl") return "americanfootball_nfl";
   if (pred.league === "mma") return "mma_mixed_martial_arts";
-  if (pred.league === "boxing") return "boxing";
+  // The-Odds-API key is "boxing_boxing" — "boxing" returns UNKNOWN_SPORT 404.
+  if (pred.league === "boxing") return "boxing_boxing";
   return "baseball_mlb";
 }
 
