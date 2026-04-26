@@ -90,7 +90,12 @@ export function StickyParlaySlipDrawer() {
         <button
           type="button"
           aria-label={count ? `Open parlay slip (${count} legs)` : "Open parlay slip"}
-          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl active:scale-95 transition-all touch-manipulation safe-pb"
+          // FAB sits clear of the home-indicator AND the bankroll
+          // widget on narrow viewports — bottom-20 (5rem) gives ~80px
+          // of clearance which is enough for the widget's ~3.5rem
+          // height + safe-area inset on iOS.
+          style={{ bottom: "calc(5rem + env(safe-area-inset-bottom))" }}
+          className="fixed right-4 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-primary text-primary-foreground shadow-lg hover:shadow-xl active:scale-95 transition-all touch-manipulation"
         >
           <Layers className="w-4 h-4" />
           <span className="text-xs font-bold tracking-wide uppercase">Slip</span>

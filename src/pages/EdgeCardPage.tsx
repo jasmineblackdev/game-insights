@@ -20,6 +20,7 @@ import { useEdgeCard } from "@/context/EdgeCardContext";
 import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashboard";
 import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
 import { TrainingDataHealthPanel } from "@/components/ml/TrainingDataHealthPanel";
+import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -75,6 +76,8 @@ function EdgeCardPageInner() {
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-8">
+        <BankrollWidget />
+
         <section className="space-y-3">
           <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-confidence-high" />

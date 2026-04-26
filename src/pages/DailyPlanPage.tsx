@@ -91,9 +91,11 @@ interface PlanCardProps {
   onRegenerate: () => void;
   onPlaced: () => void;
   onReplaceWeakest: () => void;
+  /** Pre-computed swap preview — null when no improvement available. */
+  swapPreview: { newSelection: string; edgeDelta: number } | null;
 }
 
-function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onReplaceWeakest }: PlanCardProps) {
+function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onReplaceWeakest, swapPreview }: PlanCardProps) {
   const { addValueLeg } = useValueParlay();
   const { suggestStake, recordBetPlaced } = useBankroll();
   const stakeRec = suggestStake(card.stakeRisk);
@@ -290,15 +292,19 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
             size="sm"
             variant="ghost"
             onClick={onReplaceWeakest}
-            disabled={lockedIds.has(card.weakestLegId)}
+            disabled={lockedIds.has(card.weakestLegId) || !swapPreview}
             title={
               lockedIds.has(card.weakestLegId)
                 ? "Weakest leg is locked — unlock to swap"
-                : "Replace the weakest leg with the next-best alternative"
+                : swapPreview
+                  ? `Swap to ${swapPreview.newSelection} · +${(swapPreview.edgeDelta * 100).toFixed(1)}% edge`
+                  : "No better replacement available right now"
             }
           >
             <Shuffle className="w-3.5 h-3.5" />
-            Replace weakest
+            {swapPreview
+              ? <>Swap weakest <span className="text-[10px] text-emerald-600 dark:text-emerald-400 ml-1">+{(swapPreview.edgeDelta * 100).toFixed(1)}%</span></>
+              : "Replace weakest"}
           </Button>
         ) : null}
         <Button size="sm" variant="ghost" onClick={onRegenerate}>
@@ -429,6 +435,41 @@ export default function DailyPlanPage() {
     toast.success("Plan regenerated");
   };
 
+  /**
+   * Pre-compute a Replace Weakest preview per tier so the button can
+   * show the swap delta inline (e.g. "+4.2%") and stay disabled when
+   * no improvement is available. Re-runs whenever plan, candidates,
+   * or lock state change.
+   */
+  const swapPreviews = useMemo(() => {
+    const out: Partial<Record<DailyPlanCard["tier"], { newSelection: string; edgeDelta: number }>> = {};
+    for (const card of plan) {
+      if (!card.weakestLegId || card.legs.length < 2) continue;
+      const weakest = card.legs.find((l) => l.id === card.weakestLegId);
+      if (!weakest) continue;
+      const exclude = new Set<string>();
+      for (const other of plan) {
+        if (other.tier === card.tier) continue;
+        for (const l of other.legs) exclude.add(l.id);
+      }
+      const r = replaceWeakestLeg({
+        legs: card.legs,
+        pool: candidates,
+        weakestLegId: card.weakestLegId,
+        lockedLegIds: lockedIds,
+        excludeIds: exclude,
+        mode: card.tier === "primary" ? "safe" : card.tier === "balanced" ? "balanced" : "aggressive",
+      });
+      if (!r.ok || !r.added) continue;
+      out[card.tier] = {
+        newSelection: r.added.selectionLabel,
+        edgeDelta: Math.max(0, r.added.edge - weakest.edge),
+      };
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, candidates, lockedIds]);
+
   const replaceWeakestForTier = (tier: DailyPlanCard["tier"]) => {
     const card = plan.find((c) => c.tier === tier);
     if (!card || !card.result || !card.weakestLegId) {
@@ -527,6 +568,7 @@ export default function DailyPlanPage() {
                 onRegenerate={regenerateAll}
                 onPlaced={() => setPlacedTier((s) => new Set([...s, card.tier]))}
                 onReplaceWeakest={() => replaceWeakestForTier(card.tier)}
+                swapPreview={swapPreviews[card.tier] ?? null}
               />
             ))}
           </div>
