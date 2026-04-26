@@ -7,12 +7,13 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X, Layers, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/lib/supabase";
+import { useValueParlay } from "@/context/ValueParlayContext";
 
 interface ManualLeg {
   id: string;
@@ -30,7 +31,16 @@ const blankLeg = (): ManualLeg => ({
   odds: "",
 });
 
-const SPORTS = ["NBA", "NFL", "MLB", "Boxing", "MMA", "Other"] as const;
+const SPORTS = ["NBA", "WNBA", "NFL", "MLB", "Boxing", "MMA", "Other"] as const;
+
+/** Map ValueBetCandidate.sport (lower) → form's SPORTS option (caps). */
+function sportFromCandidate(s: string): typeof SPORTS[number] {
+  const u = s.toUpperCase();
+  if (u === "NBA" || u === "WNBA" || u === "NFL" || u === "MLB" || u === "BOXING" || u === "MMA") {
+    return u === "BOXING" ? "Boxing" : u === "MMA" ? "MMA" : (u as typeof SPORTS[number]);
+  }
+  return "Other";
+}
 const RESULTS: ("won" | "lost" | "push" | "pending")[] = ["won", "lost", "push", "pending"];
 
 function americanToImplied(american: number): number {
@@ -60,10 +70,38 @@ export function ManualParlayEntryForm({
   const [notes, setNotes]     = useState("");
   const [busy, setBusy]       = useState(false);
 
+  // Pull the user's current slip — populates "Import slip" button when
+  // they've already built a parlay in the app and want to log it as
+  // placed elsewhere instead of retyping every leg.
+  const { builderLegs } = useValueParlay();
+
   const addLeg    = () => setLegs((s) => [...s, blankLeg()]);
   const removeLeg = (id: string) => setLegs((s) => s.length > 1 ? s.filter((l) => l.id !== id) : s);
   const updateLeg = (id: string, k: keyof ManualLeg, v: string) =>
     setLegs((s) => s.map((l) => (l.id === id ? { ...l, [k]: v } : l)));
+
+  /**
+   * Replace the form's legs with the user's current parlay slip from
+   * ValueParlayContext. Keeps stake / result / notes untouched so a
+   * user can iterate on the same logged bet.
+   */
+  const importFromSlip = () => {
+    if (builderLegs.length === 0) {
+      toast.message("Slip is empty — add legs first");
+      return;
+    }
+    const imported: ManualLeg[] = builderLegs.map((l) => ({
+      id: typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      selection: l.selectionLabel,
+      sport:     sportFromCandidate(String(l.sport)),
+      bet_type:  l.statType ?? l.marketType,
+      odds:      String(l.americanOdds),
+    }));
+    setLegs(imported);
+    toast.success(`Imported ${imported.length} leg${imported.length === 1 ? "" : "s"} from slip`);
+  };
 
   const submit = async () => {
     if (!supabase) { toast.error("Supabase unavailable"); return; }
@@ -154,6 +192,26 @@ export function ManualParlayEntryForm({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Quick-import: most common case is logging a parlay the user
+            just built in the app. Tap once instead of retyping legs. */}
+        {builderLegs.length > 0 ? (
+          <div className="rounded-md border border-primary/20 bg-primary/5 p-3 flex items-center justify-between gap-3">
+            <div className="text-xs">
+              <p className="font-bold text-foreground flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                {builderLegs.length} leg{builderLegs.length === 1 ? "" : "s"} on your slip
+              </p>
+              <p className="text-muted-foreground mt-0.5">
+                Skip the typing — pull them in pre-filled.
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="default" onClick={importFromSlip}>
+              <Layers className="w-3.5 h-3.5" />
+              Import slip
+            </Button>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <Label className="text-xs font-bold tracking-wider uppercase text-muted-foreground">Legs</Label>

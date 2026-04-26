@@ -394,7 +394,14 @@ export default function RecommendedParlaysPage() {
       {showManualForm && (
         <ManualParlayEntryForm
           onClose={() => setShowManualForm(false)}
-          onSaved={() => { setShowManualForm(false); qc.invalidateQueries({ queryKey: ["recommended-parlays"] }); }}
+          onSaved={() => {
+            setShowManualForm(false);
+            // Drop the user on the Manual tab so they actually see the
+            // bet they just saved instead of staring at the empty
+            // Pending list.
+            setTab("manual");
+            qc.invalidateQueries({ queryKey: ["recommended-parlays"] });
+          }}
         />
       )}
     </div>
