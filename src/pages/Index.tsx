@@ -27,6 +27,7 @@ import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/odds
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
+import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { useSearchParams } from "react-router-dom";
 import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
@@ -985,6 +986,13 @@ const Index = () => {
                   </div>
                 )}
               </div>
+
+              {/* Bankroll widget — visible on Home + Parlay Builder per spec */}
+              {(viewMode === "home" || viewMode === "parlay_builder") ? (
+                <div className="mb-5">
+                  <BankrollWidget />
+                </div>
+              ) : null}
 
               {/* Content */}
               {viewMode === "home" ? (

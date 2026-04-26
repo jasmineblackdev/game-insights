@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useValueParlay } from "@/context/ValueParlayContext";
+import { useBankroll } from "@/context/BankrollContext";
 import {
   getPropRiskLevel,
   riskLevelClass,
@@ -40,6 +41,16 @@ function formatAmerican(o: number): string {
 export function StickyParlaySlipDrawer() {
   const { pathname, search } = useLocation();
   const { builderLegs, builderMetrics, removeValueLeg, clearValueBuilder } = useValueParlay();
+  const { currentBankroll, suggestStake, isInitialized: bankrollReady } = useBankroll();
+  // Slip-level risk = highest-risk leg. Drives the suggested stake.
+  const slipRisk: "low" | "medium" | "high" = builderLegs.length === 0
+    ? "medium"
+    : builderLegs.some((l) => getPropRiskLevel(l) === "high")
+      ? "high"
+      : builderLegs.some((l) => getPropRiskLevel(l) === "medium")
+        ? "medium"
+        : "low";
+  const stakeRec = suggestStake(slipRisk);
 
   // Hide on routes where the inline builder is the primary surface.
   // Home (/) in parlay_builder view passes ?view=parlay_builder via the
@@ -111,6 +122,19 @@ export function StickyParlaySlipDrawer() {
                 </span>
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded border bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/20 font-bold">
                   {builderMetrics.riskLevelCounts.high} HIGH
+                </span>
+              </div>
+            ) : null}
+            {bankrollReady && currentBankroll > 0 && stakeRec.stake > 0 ? (
+              <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 p-2 text-[11px] flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">
+                  Suggested stake ({slipRisk} risk):
+                </span>
+                <span className="font-bold tabular-nums text-foreground">
+                  ${stakeRec.stake}
+                  <span className="text-muted-foreground ml-1 font-normal">
+                    ({(stakeRec.pctOfBankroll * 100).toFixed(1)}%)
+                  </span>
                 </span>
               </div>
             ) : null}

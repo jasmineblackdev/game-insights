@@ -7,6 +7,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { EdgeCardProvider } from "@/context/EdgeCardContext";
 import { ValueParlayProvider } from "@/context/ValueParlayContext";
+import { BankrollProvider } from "@/context/BankrollContext";
 import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StickyParlaySlipDrawer } from "@/components/StickyParlaySlipDrawer";
@@ -54,6 +55,7 @@ const App = () => (
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
         <EdgeCardProvider>
           <ValueParlayProvider>
+          <BankrollProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
@@ -77,6 +79,7 @@ const App = () => (
               </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
+          </BankrollProvider>
           </ValueParlayProvider>
         </EdgeCardProvider>
       </ThemeProvider>
