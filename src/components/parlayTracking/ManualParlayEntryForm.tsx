@@ -7,13 +7,49 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, X, Layers, Sparkles } from "lucide-react";
+import { Plus, Trash2, X, Layers, Sparkles, Image as ImageIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/lib/supabase";
 import { useValueParlay } from "@/context/ValueParlayContext";
+
+const MAX_SCREENSHOTS = 4;
+const MAX_BYTES_PER_IMAGE = 5 * 1024 * 1024; // 5 MB cap per image
+
+interface ExtractedParlay {
+  combined_american_odds?: number | null;
+  wager?: number | null;
+  payout?: number | null;
+  parlay_outcome?: "won" | "lost" | "push" | "pending" | "partial";
+  bet_id?: string | null;
+  placed_at?: string | null;
+  sport_mix?: string;
+  market_mix?: string;
+  legs?: Array<{
+    selection?: string;
+    sport?: string;
+    market_type?: string;
+    odds?: number | null;
+    line_value?: number | null;
+    direction?: "MORE" | "LESS" | null;
+    stat_type?: string;
+    leg_outcome?: "win" | "loss" | "push" | "pending";
+    game_label?: string | null;
+    final_score?: string | null;
+  }>;
+}
+
+/** Read a File into a data URI suitable for the edge function. */
+function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.onload  = () => resolve(String(reader.result ?? ""));
+    reader.readAsDataURL(file);
+  });
+}
 
 interface ManualLeg {
   id: string;
@@ -70,10 +106,103 @@ export function ManualParlayEntryForm({
   const [notes, setNotes]     = useState("");
   const [busy, setBusy]       = useState(false);
 
+  // Screenshot ingestion: drop one or more bet-slip images, the
+  // parse-parlay-screenshot edge function calls Anthropic Vision and
+  // returns structured parlay JSON. The form pre-fills from that and
+  // the user verifies before saving.
+  const [screenshots, setScreenshots]   = useState<File[]>([]);
+  const [previews, setPreviews]         = useState<string[]>([]);
+  const [extracting, setExtracting]     = useState(false);
+
   // Pull the user's current slip — populates "Import slip" button when
   // they've already built a parlay in the app and want to log it as
   // placed elsewhere instead of retyping every leg.
   const { builderLegs } = useValueParlay();
+
+  const onScreenshotsPicked = (files: FileList | null) => {
+    if (!files) return;
+    const arr = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (arr.length === 0) {
+      toast.message("Pick image files only");
+      return;
+    }
+    const oversize = arr.find((f) => f.size > MAX_BYTES_PER_IMAGE);
+    if (oversize) {
+      toast.error(`"${oversize.name}" is over 5 MB — please pick a smaller screenshot`);
+      return;
+    }
+    const next = [...screenshots, ...arr].slice(0, MAX_SCREENSHOTS);
+    setScreenshots(next);
+    setPreviews(next.map((f) => URL.createObjectURL(f)));
+  };
+
+  const removeScreenshot = (i: number) => {
+    const next = screenshots.filter((_, idx) => idx !== i);
+    setScreenshots(next);
+    setPreviews((p) => {
+      const removed = p[i];
+      if (removed) URL.revokeObjectURL(removed);
+      return next.map((f) => URL.createObjectURL(f));
+    });
+  };
+
+  /**
+   * Pre-fill the form from an extracted parlay. Conservative: we
+   * don't blow away values the user has already typed unless the
+   * extracted value is non-empty.
+   */
+  const applyExtracted = (p: ExtractedParlay) => {
+    if (Array.isArray(p.legs) && p.legs.length > 0) {
+      const next: ManualLeg[] = p.legs.map((l) => ({
+        id: typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+        selection: l.selection ?? "",
+        sport:     sportFromCandidate(String(l.sport ?? "Other")),
+        bet_type:  l.market_type ?? "",
+        odds:      l.odds != null ? String(l.odds) : "",
+      }));
+      setLegs(next);
+    }
+    if (p.wager != null && Number.isFinite(p.wager))   setStake(String(p.wager));
+    if (p.payout != null && Number.isFinite(p.payout)) setPayout(String(p.payout));
+    if (p.parlay_outcome === "won" || p.parlay_outcome === "lost" || p.parlay_outcome === "push" || p.parlay_outcome === "pending") {
+      setResult(p.parlay_outcome);
+    }
+    const noteParts: string[] = [];
+    if (p.bet_id)    noteParts.push(`Bet ID: ${p.bet_id}`);
+    if (p.placed_at) noteParts.push(`Placed: ${p.placed_at}`);
+    noteParts.push("Ingested from screenshot — verify legs before saving.");
+    setNotes((prev) => (prev ? `${prev}\n${noteParts.join(" · ")}` : noteParts.join(" · ")));
+  };
+
+  const extractFromScreenshots = async () => {
+    if (!supabase) { toast.error("Supabase unavailable"); return; }
+    if (screenshots.length === 0) { toast.message("Add at least one screenshot"); return; }
+    setExtracting(true);
+    try {
+      const images = await Promise.all(screenshots.map(fileToDataUri));
+      const { data, error } = await supabase.functions.invoke<{
+        parlay?: ExtractedParlay;
+        error?: string;
+        detail?: string;
+      }>("parse-parlay-screenshot", { body: { images } });
+      if (error) throw new Error(error.message);
+      if (!data?.parlay) {
+        toast.error(data?.error ?? "Could not extract parlay");
+        if (data?.detail) console.warn("[parse-parlay-screenshot]", data.detail);
+        return;
+      }
+      applyExtracted(data.parlay);
+      const legCount = data.parlay.legs?.length ?? 0;
+      toast.success(`Extracted ${legCount} leg${legCount === 1 ? "" : "s"} — verify before saving`);
+    } catch (e) {
+      toast.error("Screenshot extraction failed");
+      console.error(e);
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const addLeg    = () => setLegs((s) => [...s, blankLeg()]);
   const removeLeg = (id: string) => setLegs((s) => s.length > 1 ? s.filter((l) => l.id !== id) : s);
@@ -191,6 +320,67 @@ export function ManualParlayEntryForm({
           <button onClick={onClose} className="p-1 hover:bg-muted rounded">
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Screenshot ingestion: drop a DraftKings (or any sportsbook)
+            bet-slip screenshot, the parse-parlay-screenshot edge fn
+            calls Anthropic Vision and pre-fills the form. User
+            verifies before saving — vision OCR isn't perfect on
+            small text. */}
+        <div className="rounded-md border border-dashed border-primary/30 bg-primary/[0.03] p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-bold tracking-wider uppercase text-muted-foreground flex items-center gap-1.5">
+              <ImageIcon className="w-3.5 h-3.5" />
+              Bet slip screenshot{previews.length > 1 ? "s" : ""}{" "}
+              <span className="text-[10px] text-muted-foreground/70 font-normal normal-case tracking-normal">
+                (up to {MAX_SCREENSHOTS}, ≤5MB each)
+              </span>
+            </Label>
+            {previews.length > 0 ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="default"
+                onClick={extractFromScreenshots}
+                disabled={extracting}
+              >
+                {extracting ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Extracting…</> : <><Sparkles className="w-3.5 h-3.5" /> Extract</>}
+              </Button>
+            ) : null}
+          </div>
+          {previews.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {previews.map((src, i) => (
+                <div key={src} className="relative">
+                  <img
+                    src={src}
+                    alt={`screenshot ${i + 1}`}
+                    className="h-20 w-auto rounded border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeScreenshot(i)}
+                    className="absolute -top-1 -right-1 bg-background border border-border rounded-full p-0.5 text-muted-foreground hover:text-destructive"
+                    aria-label="Remove screenshot"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <label className="flex items-center justify-center gap-2 text-xs text-muted-foreground border border-dashed border-border rounded h-12 cursor-pointer hover:bg-muted/30">
+            <Plus className="w-3.5 h-3.5" />
+            {previews.length === 0 ? "Add screenshot(s)" : `Add another (${previews.length}/${MAX_SCREENSHOTS})`}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => onScreenshotsPicked(e.target.files)}
+              disabled={previews.length >= MAX_SCREENSHOTS}
+            />
+          </label>
         </div>
 
         {/* Quick-import: most common case is logging a parlay the user
