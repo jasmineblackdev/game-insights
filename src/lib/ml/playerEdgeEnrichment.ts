@@ -91,17 +91,89 @@ function marketProbProxy(pred: PlayerEdgePrediction): number {
 }
 
 /**
+ * Per-(sport, stat_type) residual standard deviation. Hits are
+ * meaningfully tighter than RBIs; threes are noisier than points;
+ * combined picks add ~√n times the constituent variance. Flat per-
+ * sport σ was a coarse approximation that put RBI projections in
+ * the same variance bucket as hits, biasing the hit-probability
+ * mapping. These numbers are derived from per-stat residual
+ * standard deviations at common book lines.
+ *
+ * Lookup order: STAT_SIGMA[sport][stat_type] → SPORT_SIGMA[sport] → 4.0
+ */
+const STAT_SIGMA: Record<string, Record<string, number>> = {
+  NBA: {
+    points:        5.5,
+    rebounds:      2.8,
+    assists:       2.2,
+    threes:        1.5,
+    steals:        1.0,
+    blocks:        1.0,
+    pra:           7.5,
+    pts_reb:       5.8,
+    pts_ast:       5.5,
+    reb_ast:       3.4,
+  },
+  WNBA: {
+    points:        5.0,
+    rebounds:      2.5,
+    assists:       2.0,
+    threes:        1.4,
+    steals:        0.9,
+    blocks:        0.9,
+    pra:           6.8,
+    pts_reb:       5.2,
+    pts_ast:       5.0,
+    reb_ast:       3.0,
+  },
+  MLB: {
+    hits:               1.05,
+    total_bases:        1.55,
+    home_runs:          0.70,
+    rbis:               1.20,
+    runs:               0.95,
+    walks:              0.90,
+    stolen_bases:       0.55,
+    doubles:            0.65,
+    triples:            0.40,
+    extra_base_hits:    0.95,
+    strikeouts:         2.40,  // pitcher Ks
+    hits_runs_rbis:     1.85,
+    hits_runs:          1.55,
+    runs_rbis:          1.50,
+    hits_stolen_bases:  1.20,
+    hits_walks_stolen_bases: 1.55,
+  },
+  NFL: {
+    passing_yards:    75,
+    rushing_yards:    30,
+    receiving_yards:  25,
+    receptions:       2.5,
+  },
+};
+
+const SPORT_SIGMA_FALLBACK: Record<string, number> = {
+  NBA: 4.5, WNBA: 4.0, NFL: 18, MLB: 0.95, Boxing: 0.08, MMA: 0.08,
+};
+
+function sigmaFor(sport: string, statType: string | undefined): number {
+  const stat = (statType ?? "").toLowerCase();
+  const sportTable = STAT_SIGMA[sport];
+  if (sportTable && stat && sportTable[stat] != null) return sportTable[stat];
+  return SPORT_SIGMA_FALLBACK[sport] ?? 4.0;
+}
+
+/**
  * Variance-adjusted rules hit probability from projected value vs line.
  * Previously a linear transform of |edge|, which makes Platt train on a
  * signal that's structurally equivalent to edge. Now uses:
- *   P_over = Φ((projected − line) / sport_sigma)
- * where sport_sigma is a stat-specific residual volatility.
+ *   P_over = Φ((projected − line) / sigma)
+ * where sigma is per-(sport, stat_type) residual volatility — a tight
+ * stat (hits) and a noisy one (RBIs) get different mappings even at
+ * the same projected − line delta.
  */
 function rulesHitProbabilityVariance(pred: PlayerEdgePrediction): number {
-  const sportSigma: Record<string, number> = {
-    NBA: 4.5, NFL: 18, MLB: 0.6, Boxing: 0.08, MMA: 0.08,
-  };
-  const sigma = sportSigma[pred.sport] ?? 4.0;
+  const sigma = sigmaFor(pred.sport, pred.stat_type);
   const z = (pred.projected_value - pred.line_value) / sigma;
   // Normal CDF approximation (Abramowitz & Stegun 7.1.26 variant)
   const t = 1 / (1 + 0.2316419 * Math.abs(z));
