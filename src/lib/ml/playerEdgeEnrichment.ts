@@ -133,6 +133,18 @@ function getAlphaForSport(sport: MLSport): number {
   return computeAlpha(w?.sample_size ?? 0);
 }
 
+// Lazy import for the bucket prediction layer. Avoids pulling Supabase
+// into render paths that don't need it; the cache refresh is fired
+// asynchronously the first time enrichPrediction runs.
+import { predictHitProbability, refreshMlBuckets } from "@/lib/ml/mlPredictionLayer";
+
+let bucketRefreshKicked = false;
+function ensureBucketCache(): void {
+  if (bucketRefreshKicked) return;
+  bucketRefreshKicked = true;
+  void refreshMlBuckets();
+}
+
 // ── Core enrichment ───────────────────────────────────────────────────────────
 
 export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePrediction {
@@ -205,6 +217,24 @@ export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePredicti
     stability_score:      mlConfidence.stability_score,
   };
 
+  // 9. Bucket-based prediction layer — when the (sport × bet_type ×
+  //    market × confidence) bucket has ≥25 resolved samples in
+  //    ml_outcomes, override blended.hit_probability with the
+  //    bucket-calibrated value (60% bucket prior + 40% rules signal,
+  //    Platt-scaled). Falls through to the blended ML output otherwise.
+  ensureBucketCache();
+  const bucketPrediction = predictHitProbability({
+    sport: pred.sport,
+    betType: "player_prop",
+    market: pred.stat_type,
+    confidence: pred.confidence,
+    rulesProbability: rulesHitProbability(pred),
+  });
+  const finalHitProbability = bucketPrediction
+    ? bucketPrediction.hitProbability
+    : blended.hit_probability;
+  const finalMlActive = bucketPrediction ? true : blended.ml_active;
+
   return {
     ...pred,
     // Conservative field updates — nearly identical to rules output early on
@@ -212,8 +242,8 @@ export function enrichPrediction(pred: PlayerEdgePrediction): PlayerEdgePredicti
     edge:               blendedEdgeDelta,
     confidence:         finalConfidence,
     // New ML fields
-    ml_active:          blended.ml_active,
-    ml_hit_probability: Math.round(blended.hit_probability * 1000) / 1000,
+    ml_active:          finalMlActive,
+    ml_hit_probability: Math.round(finalHitProbability * 1000) / 1000,
     timing_urgency:     blended.timing.urgency,
     best_time_to_bet:   timingLabel,
     volatility_flag:    mlConfidence.volatility_flag,

@@ -248,6 +248,14 @@ function PlayerEdgeCard({
 
       {/* ── Default view: confidence + risk + ONE short reason ─── */}
       <div className="flex items-center gap-2 flex-wrap">
+        {pred.ml_active && pred.ml_hit_probability != null ? (
+          <span
+            title="Hit probability calibrated against this bucket's resolved bets"
+            className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary border border-primary/20"
+          >
+            Win prob {Math.round(pred.ml_hit_probability * 100)}%
+          </span>
+        ) : null}
         <span className={cn("text-[11px] font-bold px-2 py-0.5 rounded-full", confBadgeClass(pred))}>
           {pred.confidence === "HIGH" ? "High conf" : pred.confidence === "MED" ? "Med conf" : "Low conf"}
         </span>
