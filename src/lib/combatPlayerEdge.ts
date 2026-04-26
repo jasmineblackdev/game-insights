@@ -15,6 +15,64 @@ import { fetchMmaPredictions } from "@/lib/mmaFetch";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+interface CombatSignalProfile {
+  lastFightDate?: string;
+  opponentQualityScore?: number;
+}
+
+/** Days since fighter's last bout — null when unparseable or missing. */
+function layoffDays(p: CombatSignalProfile | undefined): number | null {
+  if (!p?.lastFightDate) return null;
+  const t = new Date(p.lastFightDate).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+/**
+ * Returns a one-line note describing the favored fighter's layoff vs. their
+ * opponent's, and whether SOS comparison favors them. Either field is null
+ * when there's no signal worth mentioning.
+ */
+function combatSignalNotes(
+  fav: CombatSignalProfile | undefined,
+  und: CombatSignalProfile | undefined,
+  favName: string,
+): { layoff: string | null; sos: string | null; risk: string | null } {
+  const favDays = layoffDays(fav);
+  const undDays = layoffDays(und);
+
+  let layoff: string | null = null;
+  let risk: string | null = null;
+  if (favDays != null) {
+    if (favDays > 540) {
+      layoff = `${favName} on a ${Math.round(favDays / 30)}-month layoff — ring rust risk`;
+      risk = "Long layoff (>18mo) historically drops favorite win prob ~5pp.";
+    } else if (favDays > 365) {
+      layoff = `${favName} returning from ${Math.round(favDays / 30)}-month layoff`;
+    } else if (favDays < 30) {
+      layoff = `${favName} on short rest (${favDays}d since last bout)`;
+      risk = "Short turnaround — recovery and camp quality may be compressed.";
+    } else if (favDays >= 60 && favDays <= 180 && undDays != null && undDays > 365) {
+      layoff = `${favName} active (${favDays}d) — opponent off ${Math.round(undDays / 30)}-month layoff`;
+    }
+  }
+
+  let sos: string | null = null;
+  const favSos = fav?.opponentQualityScore;
+  const undSos = und?.opponentQualityScore;
+  if (favSos != null && undSos != null) {
+    const diff = favSos - undSos;
+    if (diff >= 12) {
+      sos = `${favName} faced tougher recent comp (SOS ${Math.round(favSos)} vs ${Math.round(undSos)})`;
+    } else if (diff <= -12) {
+      sos = `${favName}'s recent SOS lags opponent (${Math.round(favSos)} vs ${Math.round(undSos)})`;
+      risk = risk ?? "Favorite tested against weaker schedule — record may be inflated.";
+    }
+  }
+
+  return { layoff, sos, risk };
+}
+
 function confUp(c: "high" | "medium" | "low"): "HIGH" | "MED" | "LOW" {
   if (c === "high") return "HIGH";
   if (c === "medium") return "MED";
@@ -68,9 +126,21 @@ function buildWinnerProp(
   const edgePct = Math.round(edgeAmt * 1000) / 10; // e.g. 5.8
   const direction: "MORE" | "LESS" = edgeAmt >= 0 ? "MORE" : "LESS";
 
+  // Layoff + SOS context — pulled from fighter profiles when available.
+  const favProfile = favHome ? (game.boxing?.homeFighter ?? game.mma?.homeFighter) : (game.boxing?.awayFighter ?? game.mma?.awayFighter);
+  const undProfile = favHome ? (game.boxing?.awayFighter ?? game.mma?.awayFighter) : (game.boxing?.homeFighter ?? game.mma?.homeFighter);
+  const signals = combatSignalNotes(favProfile, undProfile, favFighter.name);
+
   const reason1 = game.topReasons[0] ?? `Model projects ${favFighter.name} at ${Math.round(favProb * 100)}% win probability`;
-  const reason2 = game.topReasons[1] ?? game.keyMatchup;
-  const risk = game.riskFactors[0] ?? game.upsetPath;
+  const reason2Base = game.topReasons[1] ?? game.keyMatchup;
+  const reason2 = signals.sos ? `${reason2Base} · ${signals.sos}` : reason2Base;
+  const baseRisk = game.riskFactors[0] ?? game.upsetPath ?? "Fight outcomes are binary — any prop here is high variance.";
+  const risk = signals.risk ? `${signals.risk} ${baseRisk}` : baseRisk;
+  const trendNote = signals.layoff
+    ? signals.layoff
+    : (game.situationalTags?.includes("TITLE FIGHT") || game.situationalTags?.includes("TITLE BOUT"))
+      ? "Title fight — elevated stakes, sharper market"
+      : undefined;
 
   return {
     id: `${sport.toLowerCase()}-winner-${game.id}`,
@@ -90,14 +160,12 @@ function buildWinnerProp(
     confidence,
     reason_1: reason1,
     reason_2: reason2,
-    risk_factor: risk ?? "Fight outcomes are binary — any prop here is high variance.",
+    risk_factor: risk,
     game_sort: sortBase,
     confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
     risk_tier: riskTier(confidence),
     consistency_label: confidence === "HIGH" ? "stable" : confidence === "MED" ? "medium" : "volatile",
-    trend_note: game.situationalTags?.includes("TITLE FIGHT") || game.situationalTags?.includes("TITLE BOUT")
-      ? "Title fight — elevated stakes, sharper market"
-      : undefined,
+    trend_note: trendNote,
     timing_note: timingNote(sport),
   };
 }
