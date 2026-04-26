@@ -9,7 +9,7 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { Calendar, ClipboardList, Home, Layers, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { BarChart3, Calendar, ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
 import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
+import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
+import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
 import { OddsDebugBadge } from "@/components/OddsDebugBadge";
@@ -622,6 +624,14 @@ const Index = () => {
     [leagueGames, oddsMapHome]
   );
 
+  // Cross-sport, odds-enriched view of every loaded game. Used by the
+  // parlay-builder surface so legs can be picked across all sports
+  // without flipping the league chip.
+  const allGamesWithIntel = useMemo(
+    () => enrichGamesWithBettingIntelligence(allGames, oddsMapAll),
+    [allGames, oddsMapAll]
+  );
+
   useEffect(() => {
     if (!selectedGame || selectedGame.league !== "mlb") return;
     const next = leagueGamesWithIntel.find((g) => g.id === selectedGame.id);
@@ -931,8 +941,8 @@ const Index = () => {
                       to="/edge"
                       className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
                     >
-                      <Layers className="w-3 h-3 shrink-0" />
-                      Edge Card
+                      <BarChart3 className="w-3 h-3 shrink-0" />
+                      Analytics
                     </Link>
                   </div>
                 </div>
@@ -987,7 +997,40 @@ const Index = () => {
                   }
                 />
               ) : viewMode === "parlay_builder" ? (
-                <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
+                <div className="space-y-10">
+                  <BestValuePicksSection
+                    games={allGamesWithIntel}
+                    oddsMap={oddsMapAll}
+                    loading={
+                      nbaFastQuery.isPending ||
+                      nflQuery.isPending ||
+                      mlbFastQuery.isPending ||
+                      boxingQuery.isPending ||
+                      mmaQuery.isPending
+                    }
+                  />
+                  <ParlayBuilderSection
+                    games={allGamesWithIntel}
+                    oddsMap={oddsMapAll}
+                    gamesLoading={
+                      nbaFastQuery.isPending ||
+                      nflQuery.isPending ||
+                      mlbFastQuery.isPending ||
+                      boxingQuery.isPending ||
+                      mmaQuery.isPending
+                    }
+                    bookOddsLoading={false}
+                  />
+                  <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
+                    <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
+                      <span>Auto-build presets (Safe / Balanced / Cashout)</span>
+                      <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
+                    </summary>
+                    <div className="mt-4">
+                      <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
+                    </div>
+                  </details>
+                </div>
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
               ) : viewMode === "player_props" ? (

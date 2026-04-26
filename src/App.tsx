@@ -9,6 +9,7 @@ import { EdgeCardProvider } from "@/context/EdgeCardContext";
 import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { StickyParlaySlipDrawer } from "@/components/StickyParlaySlipDrawer";
 import { useLiveEdgeNotifications } from "@/hooks/useLiveEdgeNotifications";
 import { useSupabaseSession } from "@/hooks/useSupabaseSession";
 import { queryClient } from "@/lib/queryClient.ts";
@@ -72,6 +73,7 @@ const App = () => (
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </ErrorBoundary>
+                <StickyParlaySlipDrawer />
               </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
