@@ -33,10 +33,50 @@ function missingKey(provider: string): Response {
   return json({ error: `${provider}_key_not_configured`, provider }, 503);
 }
 
+/**
+ * Pass-through with status-envelope on upstream 4xx.
+ *
+ * Forwarding upstream's raw status (401/404/422/429) caused the
+ * Supabase JS client to log every quota / unknown-sport / invalid-
+ * market response as a "RUNTIME_ERROR: Edge function returned 401"
+ * even though the caller handles it correctly via oddsApiHealth.
+ *
+ * Now: 2xx pass through unchanged; 4xx upstream responses are
+ * wrapped in HTTP 200 with `{ upstream_status, error_code, body }`
+ * so callers parse the body without the JS client treating the
+ * proxy itself as a failure. 5xx and network errors still surface
+ * as non-200 because those are actually proxy-side problems and
+ * the caller's retry behavior should change.
+ */
 async function passThrough(url: string, headers: Record<string, string> = {}): Promise<Response> {
   try {
     const r = await fetch(url, { headers: { Accept: "application/json", ...headers } });
     const text = await r.text();
+
+    // 2xx — pass through as-is.
+    if (r.ok) {
+      return new Response(text, {
+        status: r.status,
+        headers: { ...corsHeaders, "Content-Type": r.headers.get("Content-Type") ?? "application/json" },
+      });
+    }
+
+    // 4xx — wrap in 200 envelope. Caller reads body.error_code.
+    if (r.status >= 400 && r.status < 500) {
+      let parsed: unknown = text;
+      try { parsed = JSON.parse(text); } catch { /* keep as text */ }
+      const errorCode = (typeof parsed === "object" && parsed !== null && "error_code" in parsed)
+        ? String((parsed as { error_code?: unknown }).error_code ?? "")
+        : "";
+      return json({
+        proxied:         true,
+        upstream_status: r.status,
+        error_code:      errorCode,
+        body:            parsed,
+      }, 200);
+    }
+
+    // 5xx — proxy-side failure. Surface it.
     return new Response(text, {
       status: r.status,
       headers: { ...corsHeaders, "Content-Type": r.headers.get("Content-Type") ?? "application/json" },

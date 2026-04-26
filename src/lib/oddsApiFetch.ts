@@ -68,7 +68,41 @@ async function fetchViaEdge(
   for (const [k, v] of Object.entries(params)) {
     u.searchParams.set(k, v);
   }
-  return fetch(u.toString(), { headers: supabaseAnonHeaders(u.toString()) });
+  const res = await fetch(u.toString(), { headers: supabaseAnonHeaders(u.toString()) });
+  // The Edge proxy now wraps upstream 4xx in a 200 envelope to keep
+  // the JS client from treating quota / unknown-sport responses as a
+  // proxy-side failure. Detect the envelope and reconstruct a
+  // Response with the upstream status so trackOddsResponse() reads
+  // the same shape it always did.
+  return await unwrapEdgeEnvelope(res);
+}
+
+/**
+ * Unwrap a `{ proxied: true, upstream_status, error_code, body }`
+ * envelope back into a Response with the upstream status. Pass
+ * non-envelope responses straight through.
+ */
+async function unwrapEdgeEnvelope(res: Response): Promise<Response> {
+  if (!res.ok) return res;
+  let parsed: unknown = null;
+  try {
+    parsed = await res.clone().json();
+  } catch {
+    return res;
+  }
+  if (
+    typeof parsed === "object" && parsed !== null
+    && "proxied" in parsed
+    && (parsed as { proxied?: boolean }).proxied === true
+  ) {
+    const env = parsed as { proxied: true; upstream_status: number; error_code?: string; body?: unknown };
+    const bodyJson = JSON.stringify(env.body ?? { error_code: env.error_code ?? "" });
+    return new Response(bodyJson, {
+      status: env.upstream_status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return res;
 }
 
 /** Path under /v4/, e.g. sports/?all=true or sports/basketball_nba/odds?regions=us&markets=h2h */
