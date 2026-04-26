@@ -958,6 +958,13 @@ const Index = () => {
                       </button>
                     ))}
                     <Link
+                      to="/daily"
+                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-primary hover:text-foreground active:bg-muted bg-primary/10 border border-primary/20"
+                    >
+                      <Sparkles className="w-3 h-3 shrink-0" />
+                      Daily Plan
+                    </Link>
+                    <Link
                       to="/edge"
                       className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
                     >

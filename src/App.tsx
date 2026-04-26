@@ -18,6 +18,7 @@ import { isSupabaseConfigured } from "@/lib/supabase";
 import { pullMlbStarterConfirmationsFromSupabase } from "@/lib/mlbStarterConfirm";
 import Index from "./pages/Index.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
+import DailyPlanPage from "./pages/DailyPlanPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
 import PicksPage from "./pages/PicksPage.tsx";
 import RecommendedParlaysPage from "./pages/RecommendedParlaysPage.tsx";
@@ -67,6 +68,7 @@ const App = () => (
                   <Routes>
                     <Route path="/" element={<Index />} />
                     <Route path="/edge" element={<EdgeCardPage />} />
+                    <Route path="/daily" element={<DailyPlanPage />} />
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
                     <Route path="/picks" element={<PicksPage />} />
                     <Route path="/parlays" element={<RecommendedParlaysPage />} />
