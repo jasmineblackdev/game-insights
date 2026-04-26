@@ -24,10 +24,24 @@
  */
 
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import {
+  getCorrelationOverride,
+  refreshCorrelationOverrides,
+} from "@/lib/valueParlay/correlationOverrides";
 
 // Correlation floor to avoid overstating joint probability on wildly
 // positive pairs we don't have real data for. Tune if real data lands.
 const RHO_CAP = 0.45;
+
+// Kick the overrides cache once per session — first call to
+// correlatedParlayHitProbability triggers a refresh; the cache
+// persists for 30 minutes after that.
+let overridesKicked = false;
+function ensureOverrides(): void {
+  if (overridesKicked) return;
+  overridesKicked = true;
+  void refreshCorrelationOverrides();
+}
 
 /**
  * Pair-type → rho lookup. Keys sorted so lookup is direction-agnostic.
@@ -90,7 +104,11 @@ function pairKey(a: ValueBetCandidate, b: ValueBetCandidate): string {
 }
 
 function rhoFor(a: ValueBetCandidate, b: ValueBetCandidate): number {
-  const rho = PAIR_RHO[pairKey(a, b)] ?? 0;
+  const key = pairKey(a, b);
+  // Learned override wins when the bucket has enough samples; fall
+  // through to the hard-coded PAIR_RHO research defaults otherwise.
+  const learned = getCorrelationOverride(key);
+  const rho = learned ?? PAIR_RHO[key] ?? 0;
   return Math.max(-RHO_CAP, Math.min(RHO_CAP, rho));
 }
 
@@ -123,6 +141,10 @@ export function correlatedParlayHitProbability(
   modelProbs: number[],
 ): number {
   if (!legs.length) return 0;
+  // Kick the learned-correlation cache on first call. Async, doesn't
+  // block this render — the override applies on subsequent calls
+  // once the RPC resolves.
+  ensureOverrides();
   if (legs.length !== modelProbs.length) {
     // Degrade to naive product if caller misuses
     return modelProbs.reduce((acc, p) => acc * Math.min(0.999, Math.max(0.001, p)), 1);
