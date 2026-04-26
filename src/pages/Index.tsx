@@ -9,7 +9,8 @@ import { GameDetailView } from "@/components/GameDetailView";
 import { DraftPickCard } from "@/components/DraftPickCard";
 import { DraftEdgeSection } from "@/components/DraftEdgeSection";
 import { UnitSizeCalculator } from "@/components/UnitSizeCalculator";
-import { Calendar, ClipboardList, Home, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { Calendar, ClipboardList, Home, Layers, Sparkles, TrendingUp, Trophy, Tv2, User, Zap } from "lucide-react";
+import { Link } from "react-router-dom";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { easternYmd, fetchNbaGamePredictions, fetchNbaGamesFast } from "@/lib/nbaEspn";
 import { fetchNflGamePredictions } from "@/lib/nflEspn";
@@ -926,6 +927,13 @@ const Index = () => {
                         {label}
                       </button>
                     ))}
+                    <Link
+                      to="/edge"
+                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
+                    >
+                      <Layers className="w-3 h-3 shrink-0" />
+                      Edge Card
+                    </Link>
                   </div>
                 </div>
 
