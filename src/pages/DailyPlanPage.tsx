@@ -27,7 +27,9 @@ import {
   AlertTriangle,
   Layers,
   Shuffle,
+  ExternalLink,
 } from "lucide-react";
+import { DraftKingsTicketModal } from "@/components/draftkings/DraftKingsTicketModal";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -96,6 +98,7 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
   const { suggestStake, recordBetPlaced } = useBankroll();
   const stakeRec = suggestStake(card.stakeRisk);
   const [placed, setPlaced] = useState(false);
+  const [dkOpen, setDkOpen] = useState(false);
 
   if (!card.result || card.legs.length === 0) {
     return (
@@ -270,13 +273,17 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="default" className="flex-1" onClick={addAllToSlip}>
+        <Button size="sm" variant="default" className="flex-1" onClick={() => setDkOpen(true)} disabled={placed}>
+          <ExternalLink className="w-3.5 h-3.5" />
+          Place on DraftKings
+        </Button>
+        <Button size="sm" variant="outline" onClick={addAllToSlip}>
           <Plus className="w-3.5 h-3.5" />
           Add to slip
         </Button>
-        <Button size="sm" variant="outline" className="flex-1" onClick={markPlaced} disabled={placed}>
+        <Button size="sm" variant="ghost" onClick={markPlaced} disabled={placed}>
           <CheckCircle2 className="w-3.5 h-3.5" />
-          {placed ? "Placed" : "Mark as placed"}
+          {placed ? "Placed" : "Mark placed"}
         </Button>
         {card.legs.length > 1 && card.weakestLegId ? (
           <Button
@@ -299,6 +306,21 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
           Regenerate
         </Button>
       </div>
+
+      <DraftKingsTicketModal
+        open={dkOpen}
+        onClose={() => setDkOpen(false)}
+        legs={card.legs}
+        result={card.result}
+        suggestedStake={stakeRec.stake}
+        description={`Daily Plan · ${tierLabel(card.tier)}`}
+        tier={card.tier === "upside" ? "aggressive" : card.tier === "balanced" ? "balanced" : "safe"}
+        variant="best_value"
+        onPlaced={() => {
+          setPlaced(true);
+          onPlaced();
+        }}
+      />
     </div>
   );
 }

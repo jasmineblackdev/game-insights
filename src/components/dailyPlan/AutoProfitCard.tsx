@@ -13,7 +13,9 @@ import {
   ShieldAlert,
   Shuffle,
   TrendingUp,
+  ExternalLink,
 } from "lucide-react";
+import { DraftKingsTicketModal } from "@/components/draftkings/DraftKingsTicketModal";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -60,6 +62,7 @@ export function AutoProfitCard({ plan, onReplaceWeakest }: Props) {
 
   const [overrideStop, setOverrideStop] = useState(false);
   const [placed, setPlaced] = useState(false);
+  const [dkOpen, setDkOpen] = useState(false);
 
   const skeleton = useMemo<AutoProfitPlan>(
     () =>
@@ -320,13 +323,17 @@ export function AutoProfitCard({ plan, onReplaceWeakest }: Props) {
       {/* Actions */}
       {ticket && (effectiveAction === "BET_NOW" || effectiveAction === "SMALL_BET") ? (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="default" className="flex-1" onClick={addAllToSlip}>
+          <Button size="sm" variant="default" className="flex-1" onClick={() => setDkOpen(true)} disabled={placed}>
+            <ExternalLink className="w-3.5 h-3.5" />
+            Place on DraftKings
+          </Button>
+          <Button size="sm" variant="outline" onClick={addAllToSlip}>
             <Plus className="w-3.5 h-3.5" />
             Add to slip
           </Button>
-          <Button size="sm" variant="outline" className="flex-1" onClick={markPlaced} disabled={placed}>
+          <Button size="sm" variant="ghost" onClick={markPlaced} disabled={placed}>
             <CheckCircle2 className="w-3.5 h-3.5" />
-            {placed ? "Placed" : "Mark as placed"}
+            {placed ? "Placed" : "Mark placed"}
           </Button>
           {ticket.weakestLegId && ticket.legs.length > 1 ? (
             <Button size="sm" variant="ghost" onClick={() => onReplaceWeakest(ticket.tier)}>
@@ -335,6 +342,23 @@ export function AutoProfitCard({ plan, onReplaceWeakest }: Props) {
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {/* DraftKings manual-execution modal */}
+      {ticket && ticket.result ? (
+        <DraftKingsTicketModal
+          open={dkOpen}
+          onClose={() => setDkOpen(false)}
+          legs={ticket.legs}
+          result={ticket.result}
+          suggestedStake={adjusted.stake}
+          description={`Auto Profit · ${modeLabel(skeleton.mode)} · ${actionLabel(effectiveAction)}`}
+          tier={ticket.tier === "upside" ? "aggressive" : ticket.tier === "balanced" ? "balanced" : "safe"}
+          variant="best_value"
+          onPlaced={() => {
+            setPlaced(true);
+          }}
+        />
       ) : null}
     </div>
   );
