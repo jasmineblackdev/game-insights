@@ -16,6 +16,7 @@
 
 import { SPORT_CONFIG } from "@/lib/oddsProviderConfig";
 import { isOddsSportLocked } from "@/lib/oddsApiHealth";
+import { unwrapEdgeEnvelope, logOddsApiCall } from "@/lib/oddsApiEnvelope";
 
 // ── Normalized event shape ────────────────────────────────────────────────────
 
@@ -72,7 +73,19 @@ async function proxyGet(params: Record<string, string>): Promise<Response | null
     const res = await fetch(`${PROXY_BASE}?${q}`, {
       headers: { Authorization: `Bearer ${SUPABASE_ANON}`, apikey: SUPABASE_ANON },
     });
-    return res;
+    // Unwrap the same 200-envelope oddsApiFetch handles. Without this
+    // every quota / unknown-sport response was forwarded as a 200
+    // wrapper to provider code, which then tried to JSON.parse the
+    // envelope as upstream data and silently fell through.
+    const { res: unwrapped, meta } = await unwrapEdgeEnvelope(res);
+    logOddsApiCall({
+      path:      "multiOddsProvider",
+      sportKey:  params.sportKey,
+      status:    unwrapped.status,
+      unwrapped: meta.unwrapped,
+      errorCode: meta.errorCode,
+    });
+    return unwrapped;
   } catch {
     return null;
   }

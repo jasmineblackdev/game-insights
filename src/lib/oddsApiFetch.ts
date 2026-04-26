@@ -4,6 +4,7 @@
  */
 
 import { trackOddsResponse, isOddsSportLocked } from "@/lib/oddsApiHealth";
+import { unwrapEdgeEnvelope as sharedUnwrap, logOddsApiCall } from "@/lib/oddsApiEnvelope";
 
 // Production fallback values — VITE_ prefix means these are intentionally public (client-bundled).
 // Used when Vercel build doesn't inject the env vars from .env.production.
@@ -69,40 +70,20 @@ async function fetchViaEdge(
     u.searchParams.set(k, v);
   }
   const res = await fetch(u.toString(), { headers: supabaseAnonHeaders(u.toString()) });
-  // The Edge proxy now wraps upstream 4xx in a 200 envelope to keep
-  // the JS client from treating quota / unknown-sport responses as a
-  // proxy-side failure. Detect the envelope and reconstruct a
-  // Response with the upstream status so trackOddsResponse() reads
-  // the same shape it always did.
-  return await unwrapEdgeEnvelope(res);
-}
-
-/**
- * Unwrap a `{ proxied: true, upstream_status, error_code, body }`
- * envelope back into a Response with the upstream status. Pass
- * non-envelope responses straight through.
- */
-async function unwrapEdgeEnvelope(res: Response): Promise<Response> {
-  if (!res.ok) return res;
-  let parsed: unknown = null;
-  try {
-    parsed = await res.clone().json();
-  } catch {
-    return res;
-  }
-  if (
-    typeof parsed === "object" && parsed !== null
-    && "proxied" in parsed
-    && (parsed as { proxied?: boolean }).proxied === true
-  ) {
-    const env = parsed as { proxied: true; upstream_status: number; error_code?: string; body?: unknown };
-    const bodyJson = JSON.stringify(env.body ?? { error_code: env.error_code ?? "" });
-    return new Response(bodyJson, {
-      status: env.upstream_status,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  return res;
+  // The Edge proxy wraps upstream 4xx in a 200 envelope to keep the
+  // JS client from treating quota / unknown-sport responses as a
+  // proxy-side failure. Unwrap so trackOddsResponse() sees the real
+  // upstream status. Shared helper — same code path used by
+  // multiOddsProvider.proxyGet.
+  const { res: unwrapped, meta } = await sharedUnwrap(res);
+  logOddsApiCall({
+    path:      "oddsApiFetch.edge",
+    sportKey:  params.sportKey,
+    status:    unwrapped.status,
+    unwrapped: meta.unwrapped,
+    errorCode: meta.errorCode,
+  });
+  return unwrapped;
 }
 
 /** Path under /v4/, e.g. sports/?all=true or sports/basketball_nba/odds?regions=us&markets=h2h */

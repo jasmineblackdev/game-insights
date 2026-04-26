@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { forwardRef, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { GamePrediction, League, GameDate } from "@/data/mockGames";
@@ -328,15 +328,7 @@ const PARLAY_TIERS: {
   },
 ];
 
-function HomeDashboard({
-  topGames,
-  topProps,
-  isPropsPending,
-  league,
-  onSelectGame,
-  onNavigate,
-  onNavigateToParlay,
-}: {
+interface HomeDashboardProps {
   topGames: GamePrediction[];
   topProps: PlayerEdgePrediction[];
   isPropsPending: boolean;
@@ -344,9 +336,21 @@ function HomeDashboard({
   onSelectGame: (g: GamePrediction) => void;
   onNavigate: (m: ViewMode) => void;
   onNavigateToParlay: (mode: ParlayBuildMode) => void;
-}) {
+}
+
+// forwardRef so motion.div / AnimatePresence parents that pass refs
+// through don't trigger "Function components cannot be given refs".
+const HomeDashboard = forwardRef<HTMLDivElement, HomeDashboardProps>(function HomeDashboard({
+  topGames,
+  topProps,
+  isPropsPending,
+  league,
+  onSelectGame,
+  onNavigate,
+  onNavigateToParlay,
+}, ref) {
   return (
-    <div className="space-y-10">
+    <div ref={ref} className="space-y-10">
       {/* Top AI Picks Today */}
       <section>
         <div className="flex items-center justify-between mb-4">
@@ -460,7 +464,7 @@ function HomeDashboard({
       </section>
     </div>
   );
-}
+});
 
 const Index = () => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);

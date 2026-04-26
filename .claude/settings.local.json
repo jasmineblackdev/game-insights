@@ -51,7 +51,9 @@
       "Bash(node *)",
       "Bash(curl -s \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/leaders\")",
       "Bash(curl -s -o /tmp/nba_team.json -w \"HTTP %{http_code} bytes %{size_download}\\\\n\" \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/leaders\")",
-      "Bash(curl -s -o /tmp/nba_roster.json -w \"HTTP %{http_code} bytes %{size_download}\\\\n\" \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/roster\")"
+      "Bash(curl -s -o /tmp/nba_roster.json -w \"HTTP %{http_code} bytes %{size_download}\\\\n\" \"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/28/roster\")",
+      "Bash(awk *)",
+      "Bash(chmod +x *)"
     ]
   }
 }
