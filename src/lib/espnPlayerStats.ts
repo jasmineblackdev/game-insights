@@ -134,7 +134,7 @@ const NBA_COMBINED_PICKS: { statType: string; unit: string; parts: string[] }[] 
 
 const MLB_STAT_MAP: Record<string, StatMapEntry> = {
   homeRuns: {
-    statType: "total_bases", unit: "HR",
+    statType: "home_runs", unit: "HR",
     matches: ["homeruns", "hr", "homerunsleader", "homerun"],
   },
   strikeouts: {
@@ -151,7 +151,49 @@ const MLB_STAT_MAP: Record<string, StatMapEntry> = {
       "battingaverage", "battingavg", "avg",
     ],
   },
+  rbis: {
+    statType: "rbis", unit: "RBI",
+    matches: ["rbis", "rbi", "rbisleader", "runsbattedin"],
+  },
+  runs: {
+    statType: "runs", unit: "R",
+    matches: ["runs", "runsleader", "runsscored", "r"],
+  },
+  walks: {
+    statType: "walks", unit: "BB",
+    matches: ["walks", "walksleader", "bb", "baseonballs"],
+  },
+  stolenBases: {
+    statType: "stolen_bases", unit: "SB",
+    matches: ["stolenbases", "stolenbasesleader", "sb", "stolen"],
+  },
+  doubles: {
+    statType: "doubles", unit: "2B",
+    matches: ["doubles", "doublesleader", "2b"],
+  },
+  triples: {
+    statType: "triples", unit: "3B",
+    matches: ["triples", "triplesleader", "3b"],
+  },
+  totalBases: {
+    statType: "total_bases", unit: "TB",
+    matches: ["totalbases", "totalbasesleader", "tb"],
+  },
 };
+
+/**
+ * Combined MLB picks. We don't get singles directly from ESPN, but we can
+ * derive an "extra_base_hits" approximation from doubles + triples + HR
+ * when those are present. Other combos sum existing per-game averages.
+ */
+const MLB_COMBINED_PICKS: { statType: string; unit: string; parts: string[] }[] = [
+  { statType: "hits_runs_rbis",          unit: "H+R+RBI",   parts: ["hits", "runs", "rbis"] },
+  { statType: "hits_runs",               unit: "H+R",       parts: ["hits", "runs"] },
+  { statType: "runs_rbis",               unit: "R+RBI",     parts: ["runs", "rbis"] },
+  { statType: "hits_stolen_bases",       unit: "H+SB",      parts: ["hits", "stolen_bases"] },
+  { statType: "hits_walks_stolen_bases", unit: "H+BB+SB",   parts: ["hits", "walks", "stolen_bases"] },
+  { statType: "extra_base_hits",         unit: "XBH",       parts: ["doubles", "triples", "home_runs"] },
+];
 
 const NFL_STAT_MAP: Record<string, StatMapEntry> = {
   passingYards: {
@@ -576,7 +618,7 @@ async function fetchSportPlayerEdge(
           if (!Number.isFinite(value) || value <= 0) continue;
 
           // Accumulate this stat for the athlete so combined picks can use it
-          if (sport === "NBA" && leader.athlete?.id) {
+          if ((sport === "NBA" || sport === "MLB") && leader.athlete?.id) {
             const aid = String(leader.athlete.id);
             const accKey = `${eventId}:${aid}`;
             const acc = athleteStatMap.get(accKey) ?? {
@@ -736,6 +778,47 @@ async function fetchSportPlayerEdge(
           recent_form: edgeMag >= t.high * 2.5 ? (direction === "MORE" ? "hot" : "cold") : "steady",
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high * 2.5 ? "stable" : edgeMag >= t.med * 2.5 ? "medium" : "volatile",
+        });
+      }
+    }
+  }
+
+  // ── Emit MLB combined picks (H+R+RBI, H+R, R+RBI, H+SB, H+BB+SB, XBH).
+  //    Combined-stat lines are noisier than singles, so confidence
+  //    threshold is widened (t.high is 1.5 hits; combined needs ~2x).
+  if (sport === "MLB") {
+    for (const acc of athleteStatMap.values()) {
+      for (const combo of MLB_COMBINED_PICKS) {
+        if (!combo.parts.every((p) => acc.stats[p] != null)) continue;
+        const sumVal = combo.parts.reduce((s, p) => s + acc.stats[p]!, 0);
+        if (!Number.isFinite(sumVal) || sumVal <= 0) continue;
+
+        const projectedRaw = projectValue(sumVal, acc.oppWinPct, acc.isHome, "MLB", "");
+        const projected    = Math.round(projectedRaw * 10) / 10;
+        const lineValue    = snapToHalfPoint(sumVal);
+        const edge         = projected - lineValue;
+        const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
+        const edgeMag      = Math.abs(edge);
+        const confidence: "HIGH" | "MED" | "LOW" =
+          edgeMag >= t.high * 2.0 ? "HIGH"
+          : edgeMag >= t.med * 2.0 ? "MED" : "LOW";
+
+        predictions.push({
+          id: `espn-mlb-${acc.eventId}-${acc.athleteId}-${combo.statType}`,
+          game_id: acc.eventId, player_id: acc.athleteId, player_name: acc.name,
+          sport: "MLB", team: acc.team, opponent: acc.opponent, game_time: acc.gameTime,
+          stat_type: combo.statType, line_value: lineValue, projected_value: projected,
+          prediction_direction: direction, edge: Math.round(edge * 10) / 10, confidence,
+          reason_1: `${combo.unit} season avg ${sumVal.toFixed(1)} — projected vs ${acc.opponent}.`,
+          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.`,
+          risk_factor: `Combined-stat lines move with lineup spot and pitcher matchup; monitor late SP confirmation.`,
+          game_sort: sortBase + predictions.length,
+          confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
+          risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
+          is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
+          recent_form: edgeMag >= t.high * 2.0 ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          prop_source: acc.propSource,
+          consistency_label: edgeMag >= t.high * 2.0 ? "stable" : edgeMag >= t.med * 2.0 ? "medium" : "volatile",
         });
       }
     }

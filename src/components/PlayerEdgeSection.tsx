@@ -31,7 +31,10 @@ const STAT_FILTERS: PlayerEdgeStatFilter[] = [
   "points", "rebounds", "assists", "threes", "steals", "blocks",
   "pra", "pts_reb", "pts_ast", "reb_ast",
   "passing_yards", "rushing_yards", "receiving_yards", "receptions",
-  "strikeouts", "hits", "total_bases",
+  "hits", "home_runs", "rbis", "runs", "walks", "stolen_bases",
+  "doubles", "triples", "total_bases", "extra_base_hits",
+  "hits_runs_rbis", "hits_runs", "runs_rbis", "hits_stolen_bases", "hits_walks_stolen_bases",
+  "strikeouts",
   "fight_winner", "ko_tko", "submission", "decision", "draw", "total_rounds",
 ];
 

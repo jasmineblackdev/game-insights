@@ -14,8 +14,13 @@ export type PlayerEdgeStatFilter =
   | "steals" | "blocks" | "pts_reb" | "pts_ast" | "reb_ast"
   // NFL
   | "passing_yards" | "rushing_yards" | "receiving_yards" | "receptions"
-  // MLB
+  // MLB — singles
   | "strikeouts" | "hits" | "total_bases"
+  | "home_runs" | "rbis" | "runs" | "walks" | "stolen_bases"
+  | "singles" | "doubles" | "triples" | "extra_base_hits"
+  // MLB — combined
+  | "hits_runs_rbis" | "hits_runs" | "runs_rbis"
+  | "hits_stolen_bases" | "hits_walks_stolen_bases"
   // Combat sports
   | "fight_winner" | "ko_tko" | "submission" | "decision" | "draw" | "total_rounds" | "goes_distance";
 
@@ -125,6 +130,20 @@ export function statFilterLabel(f: PlayerEdgeStatFilter): string {
     strikeouts: "Strikeouts",
     hits: "Hits",
     total_bases: "Total Bases",
+    home_runs: "Home Runs",
+    rbis: "RBIs",
+    runs: "Runs",
+    walks: "Walks",
+    stolen_bases: "Stolen Bases",
+    singles: "Singles",
+    doubles: "Doubles",
+    triples: "Triples",
+    extra_base_hits: "Extra-Base Hits",
+    hits_runs_rbis: "H + R + RBI",
+    hits_runs: "H + R",
+    runs_rbis: "R + RBI",
+    hits_stolen_bases: "H + SB",
+    hits_walks_stolen_bases: "H + BB + SB",
     fight_winner: "Fight Winner",
     ko_tko: "KO/TKO",
     submission: "Submission",
