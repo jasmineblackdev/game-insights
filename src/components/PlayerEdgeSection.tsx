@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Star, Clock, Copy, ChevronDown, ChevronUp, TrendingUp, ClipboardList } from "lucide-react";
+import { Star, Clock, Copy, ChevronDown, ChevronUp, TrendingUp, ClipboardList, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,8 @@ import {
 import { usePlayerEdgeFavorites } from "@/hooks/usePlayerEdgeFavorites";
 import { logPick, fetchAccuracyStats } from "@/lib/picksLog";
 import { useBankroll } from "@/context/BankrollContext";
+import { useValueParlay } from "@/context/ValueParlayContext";
+import { buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import {
   pickActionForPrediction,
   pickActionLabel,
@@ -156,6 +158,19 @@ function PlayerEdgeCard({
   // matchup, model status, and the user's current bankroll state.
   const { lossStreak, hadLossToday } = useBankroll();
   const action = pickActionForPrediction(pred, { lossStreak, hadLossToday });
+  const { addValueLeg, isValueLegAdded } = useValueParlay();
+  const addToParlay = () => {
+    const candidate = buildEnrichedPropCandidates([pred])[0];
+    if (!candidate) {
+      toast.message("This prop can't be added directly — open the parlay builder.");
+      return;
+    }
+    const r = addValueLeg(candidate);
+    if (r.ok) toast.success("Added to parlay slip");
+    else toast.message(r.message ?? "Could not add");
+  };
+  const onSlip = isValueLegAdded(`prop-${pred.id}`) || isValueLegAdded(`vp-prop-${pred.id}`);
+  void onSlip;
 
   // Copy pick text to clipboard and log it
   const copyPick = () => {
@@ -231,137 +246,173 @@ function PlayerEdgeCard({
         </span>
       </div>
 
-      {/* ── MEDIUM: Confidence + risk tier ───────────────── */}
+      {/* ── Default view: confidence + risk + ONE short reason ─── */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-muted-foreground">Confidence</span>
-          <span className={cn("text-sm font-bold px-2.5 py-0.5 rounded-full", confBadgeClass(pred))}>
-            {pred.confidence === "HIGH" ? "High" : pred.confidence === "MED" ? "Medium" : "Low"}
-          </span>
-        </div>
+        <span className={cn("text-[11px] font-bold px-2 py-0.5 rounded-full", confBadgeClass(pred))}>
+          {pred.confidence === "HIGH" ? "High conf" : pred.confidence === "MED" ? "Med conf" : "Low conf"}
+        </span>
         {pred.risk_tier && (
           <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", riskBadgeClass(pred.risk_tier))}>
             {riskLabel(pred.risk_tier)}
           </span>
         )}
-        {/* ML volatility flag — only shown when ML flags variance not already visible in consistency_label */}
-        {pred.volatility_flag && pred.consistency_label !== "volatile" && (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
-            Volatile
+        {(pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality && pred.matchup_quality !== "unknown" && (
+          <span
+            title={pred.matchup_note ?? undefined}
+            className={cn(
+              "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border",
+              pred.matchup_quality === "tough"   && "bg-red-500/10 text-red-500 border-red-500/20",
+              pred.matchup_quality === "soft"    && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+              pred.matchup_quality === "fast"    && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
+              pred.matchup_quality === "neutral" && "bg-muted text-muted-foreground border-border",
+            )}
+          >
+            {pred.sport === "MLB" && pred.matchup_quality === "tough"   && "Tough SP"}
+            {pred.sport === "MLB" && pred.matchup_quality === "soft"    && "Soft SP"}
+            {pred.sport === "MLB" && pred.matchup_quality === "neutral" && "Neutral SP"}
+            {pred.sport === "NBA" && pred.matchup_quality === "tough"   && "Tough D"}
+            {pred.sport === "NBA" && pred.matchup_quality === "soft"    && "Soft D"}
+            {pred.sport === "NBA" && pred.matchup_quality === "fast"    && "Fast pace"}
+            {pred.sport === "NBA" && pred.matchup_quality === "neutral" && "Neutral D"}
           </span>
-        )}
-        {pred.trend_note && (
-          <span className="text-[10px] text-primary font-medium">{pred.trend_note}</span>
         )}
       </div>
 
-      {/* ── SMALL: Projection + Edge (supporting math) ───── */}
-      <div className="flex items-center gap-4 text-[11px]">
-        <div>
-          <span className="text-muted-foreground">Projection </span>
-          <span className="font-bold text-foreground tabular-nums">
-            {isCombatSport && pred.stat_type === "fight_winner"
-              ? `${pred.projected_value}%`
-              : pred.projected_value}
-          </span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Edge </span>
-          <span className={cn("font-bold tabular-nums", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
-            {pred.prediction_direction === "MORE" ? "+" : "−"}{Math.abs(pred.edge).toFixed(1)}
-            {isCombatSport && pred.stat_type === "fight_winner" ? "%" : ""}
-          </span>
-        </div>
-        {pred.consistency_label && (
-          <div>
-            <span className="text-muted-foreground">Form </span>
-            <span className={cn(
-              "font-bold capitalize",
-              pred.consistency_label === "stable" && "text-emerald-600 dark:text-emerald-400",
-              pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
-              pred.consistency_label === "volatile" && "text-red-500"
-            )}>
-              {pred.consistency_label}
-            </span>
+      {/* ── ONE short reason (default view) ──────────────── */}
+      <p className="text-[11px] text-muted-foreground leading-snug flex-1">
+        {pred.reason_1 || pred.explanations?.[0] || pred.risk_factor}
+      </p>
+
+      {/* ── Expandable Details (raw stats, full reasons, matchup notes) ── */}
+      <details className="group rounded-md border border-dashed border-border bg-card/40 px-2 py-1.5">
+        <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-muted-foreground font-semibold list-none flex items-center justify-between">
+          <span>Details</span>
+          <span className="text-[9px] group-open:hidden">Show</span>
+          <span className="text-[9px] hidden group-open:inline">Hide</span>
+        </summary>
+        <div className="mt-2 space-y-2 text-[11px]">
+          {/* Raw projection / edge / form */}
+          <div className="flex items-center gap-4">
+            <div>
+              <span className="text-muted-foreground">Projection </span>
+              <span className="font-bold text-foreground tabular-nums">
+                {isCombatSport && pred.stat_type === "fight_winner"
+                  ? `${pred.projected_value}%`
+                  : pred.projected_value}
+              </span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Edge </span>
+              <span className={cn("font-bold tabular-nums", pred.prediction_direction === "MORE" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500")}>
+                {pred.prediction_direction === "MORE" ? "+" : "−"}{Math.abs(pred.edge).toFixed(1)}
+                {isCombatSport && pred.stat_type === "fight_winner" ? "%" : ""}
+              </span>
+            </div>
+            {pred.consistency_label && (
+              <div>
+                <span className="text-muted-foreground">Form </span>
+                <span className={cn(
+                  "font-bold capitalize",
+                  pred.consistency_label === "stable" && "text-emerald-600 dark:text-emerald-400",
+                  pred.consistency_label === "medium" && "text-amber-600 dark:text-amber-400",
+                  pred.consistency_label === "volatile" && "text-red-500"
+                )}>
+                  {pred.consistency_label}
+                </span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* ── Timing + line movement + opponent matchup ─── */}
-      {(pred.best_time_to_bet || pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1) || ((pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality)) && (
-        <div className="flex flex-wrap items-center gap-2">
-          {/* ML timing recommendation — prefer best_time_to_bet, fall back to timing_note */}
-          {(pred.best_time_to_bet || pred.timing_note) && (
-            <TimingBadge
-              note={pred.best_time_to_bet ?? pred.timing_note!}
-              urgency={pred.timing_urgency}
-            />
-          )}
-          {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
-            <span className={cn(
-              "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
-              pred.line_delta > 0
-                ? "bg-red-500/10 text-red-500"
-                : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-            )}>
-              <TrendingUp className={cn("w-2.5 h-2.5", pred.line_delta > 0 && "rotate-180")} />
-              Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
-            </span>
-          )}
-          {(pred.sport === "MLB" || pred.sport === "NBA") && pred.matchup_quality && (
-            <span
-              title={pred.matchup_note ?? undefined}
-              className={cn(
-                "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border",
-                pred.matchup_quality === "tough"   && "bg-red-500/10 text-red-500 border-red-500/20",
-                pred.matchup_quality === "soft"    && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-                pred.matchup_quality === "fast"    && "bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20",
-                pred.matchup_quality === "neutral" && "bg-muted text-muted-foreground border-border",
-                pred.matchup_quality === "unknown" && "bg-muted/40 text-muted-foreground border-dashed border-border",
+          {/* Model probabilities when available */}
+          {(pred.ml_hit_probability != null || pred.confidence_score_0_100 != null) ? (
+            <div className="flex items-center gap-4 text-[11px]">
+              {pred.ml_hit_probability != null ? (
+                <div>
+                  <span className="text-muted-foreground">Hit prob </span>
+                  <span className="font-bold tabular-nums">{Math.round(pred.ml_hit_probability * 100)}%</span>
+                </div>
+              ) : null}
+              {pred.confidence_score_0_100 != null ? (
+                <div>
+                  <span className="text-muted-foreground">Conf score </span>
+                  <span className="font-bold tabular-nums">{pred.confidence_score_0_100}</span>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Timing + line movement (moved into Details) */}
+          {(pred.best_time_to_bet || pred.timing_note || (pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1)) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {(pred.best_time_to_bet || pred.timing_note) && (
+                <TimingBadge
+                  note={pred.best_time_to_bet ?? pred.timing_note!}
+                  urgency={pred.timing_urgency}
+                />
               )}
-            >
-              {pred.sport === "MLB" && pred.matchup_quality === "tough"   && "Tough SP"}
-              {pred.sport === "MLB" && pred.matchup_quality === "soft"    && "Soft SP"}
-              {pred.sport === "MLB" && pred.matchup_quality === "neutral" && "Neutral SP"}
-              {pred.sport === "MLB" && pred.matchup_quality === "unknown" && "SP TBA"}
-              {pred.sport === "NBA" && pred.matchup_quality === "tough"   && "Tough D"}
-              {pred.sport === "NBA" && pred.matchup_quality === "soft"    && "Soft D"}
-              {pred.sport === "NBA" && pred.matchup_quality === "fast"    && "Fast pace"}
-              {pred.sport === "NBA" && pred.matchup_quality === "neutral" && "Neutral D"}
-              {pred.sport === "NBA" && pred.matchup_quality === "unknown" && "Team data TBA"}
-            </span>
+              {pred.line_delta != null && Math.abs(pred.line_delta) >= 0.1 && (
+                <span className={cn(
+                  "inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full",
+                  pred.line_delta > 0
+                    ? "bg-red-500/10 text-red-500"
+                    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                )}>
+                  <TrendingUp className={cn("w-2.5 h-2.5", pred.line_delta > 0 && "rotate-180")} />
+                  Avg {pred.line_delta > 0 ? "+" : ""}{pred.line_delta} from open
+                </span>
+              )}
+              {pred.volatility_flag && pred.consistency_label !== "volatile" && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
+                  Volatile
+                </span>
+              )}
+              {pred.trend_note && (
+                <span className="text-[10px] text-primary font-medium">{pred.trend_note}</span>
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {/* ── Why strong + Risk ────────────────────────────── */}
-      <div className="space-y-2 text-[11px] flex-1">
-        <p className="text-emerald-600 dark:text-emerald-400 font-semibold">Why strong</p>
-        <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
-          {(pred.explanations?.length
-            ? pred.explanations
-            : [pred.reason_1, pred.reason_2].filter(Boolean)
-          ).map((line, i) => <li key={i}>{line}</li>)}
-        </ul>
-        <div className="flex gap-1.5 items-start pt-0.5">
-          <span className="text-red-500/80 font-semibold shrink-0">Risk:</span>
-          <span className="text-muted-foreground">{pred.risk_factor}</span>
+          {/* Full why-strong list + risk */}
+          <div className="space-y-1">
+            <p className="text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">Why strong</p>
+            <ul className="list-disc list-inside text-muted-foreground space-y-0.5">
+              {(pred.explanations?.length
+                ? pred.explanations
+                : [pred.reason_1, pred.reason_2].filter(Boolean)
+              ).map((line, i) => <li key={i}>{line}</li>)}
+            </ul>
+          </div>
+          <div className="flex gap-1.5 items-start">
+            <span className="text-red-500/80 font-semibold shrink-0">Risk:</span>
+            <span className="text-muted-foreground">{pred.risk_factor}</span>
+          </div>
         </div>
-      </div>
+      </details>
 
       {/* ── Actions ──────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-2 pt-1 border-t border-border">
         <Button
           size="sm"
-          variant="outline"
+          variant="default"
           className="flex-1 font-semibold min-h-11 sm:min-h-9 touch-manipulation gap-1.5"
+          onClick={addToParlay}
+          disabled={action === "SKIP"}
+          title={action === "SKIP" ? "This pick is flagged SKIP — not recommended" : "Add this pick to your parlay slip"}
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add to Parlay
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="font-semibold min-h-11 sm:min-h-9 touch-manipulation gap-1.5"
           onClick={copyPick}
         >
           <Copy className="w-3.5 h-3.5" />
-          Copy Pick
+          Copy
         </Button>
-        <Button variant="outline" size="sm" className="flex-1 min-h-11 sm:min-h-9 touch-manipulation" asChild>
-          <Link to={`/player-edge/${pred.id}`}>View Details</Link>
+        <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-9 touch-manipulation" asChild>
+          <Link to={`/player-edge/${pred.id}`}>Details →</Link>
         </Button>
       </div>
     </div>

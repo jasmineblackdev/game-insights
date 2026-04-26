@@ -99,9 +99,16 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
 
   if (!card.result || card.legs.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card/40 p-5 text-sm text-muted-foreground">
-        <p className="font-display font-bold text-foreground mb-1">{tierLabel(card.tier)}</p>
-        <p>No qualifying build for this tier yet — try Regenerate after data refreshes.</p>
+      <div className="rounded-lg border border-dashed border-border bg-card/40 p-5 text-sm space-y-2">
+        <p className="font-display font-bold text-foreground">{tierLabel(card.tier)}</p>
+        <p className="text-muted-foreground">
+          No strong plays for this lane right now — wait for stronger setups or take a smaller bet on
+          another tier.
+        </p>
+        <Button size="sm" variant="ghost" onClick={onRegenerate} className="px-0">
+          <RefreshCw className="w-3.5 h-3.5" />
+          Regenerate after data refreshes
+        </Button>
       </div>
     );
   }
