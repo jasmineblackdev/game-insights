@@ -7,11 +7,12 @@
  * parlay performance without picker-UI noise on the same screen.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
   BarChart3,
+  Brain,
   History,
   TrendingUp,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashbo
 import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
 import { TrainingDataHealthPanel } from "@/components/ml/TrainingDataHealthPanel";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
+import { MLPerformanceContent } from "@/pages/MLPerformancePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -33,8 +35,11 @@ function leagueShort(l: string) {
   return l.toUpperCase();
 }
 
+type AnalyticsTab = "performance" | "ml_perf";
+
 function EdgeCardPageInner() {
   const { history, setHistoryOutcome } = useEdgeCard();
+  const [tab, setTab] = useState<AnalyticsTab>("performance");
 
   const historyRecord = useMemo(() => {
     let w = 0;
@@ -77,6 +82,38 @@ function EdgeCardPageInner() {
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-8">
         <BankrollWidget />
+
+        {/* Performance / ML Perf sub-tabs — ML Perf used to be a
+            separate top-level nav entry; folded in here so Analytics
+            is the single hub for model + parlay + training-data
+            insight. The /ml-performance route still works for direct
+            links and renders the same MLPerformanceContent. */}
+        <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+          {([
+            { id: "performance", icon: BarChart3, label: "Performance" },
+            { id: "ml_perf",     icon: Brain,     label: "ML Perf" },
+          ] as const).map(({ id, icon: Icon, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id)}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors",
+                tab === id
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon className="w-3 h-3" />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "ml_perf" ? (
+          <MLPerformanceContent embedded />
+        ) : (
+          <>
 
         <section className="space-y-3">
           <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
@@ -196,6 +233,8 @@ function EdgeCardPageInner() {
             </ul>
           )}
         </section>
+          </>
+        )}
       </main>
     </div>
   );

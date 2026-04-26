@@ -92,7 +92,12 @@ function StatTable<T extends object>({
   );
 }
 
-export default function MLPerformancePage() {
+/**
+ * Shared content body — reusable from /ml-performance (full-page) and
+ * /edge → ML Perf sub-tab. Stripped of route-level chrome so it can
+ * compose into a parent shell.
+ */
+export function MLPerformanceContent({ embedded = false }: { embedded?: boolean }) {
   const { data: bySport = [],   refetch: r1, isFetching: f1 } = useQuery({ queryKey: ["ml-perf-sport"],   queryFn: () => rpc<SportRow>("analytics_model_performance_by_sport"),     staleTime: 60_000 });
   const { data: byBet = [],     refetch: r2, isFetching: f2 } = useQuery({ queryKey: ["ml-perf-bet"],     queryFn: () => rpc<BetTypeRow>("analytics_model_performance_by_bet_type"), staleTime: 60_000 });
   const { data: byOdds = [],    refetch: r3, isFetching: f3 } = useQuery({ queryKey: ["ml-perf-odds"],    queryFn: () => rpc<OddsBucketRow>("analytics_model_performance_by_odds_range"), staleTime: 60_000 });
@@ -102,18 +107,27 @@ export default function MLPerformancePage() {
   const isFetching = f1 || f2 || f3 || f4;
 
   return (
-    <div className="container mx-auto max-w-5xl px-4 py-6 space-y-5">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/"><ArrowLeft className="w-4 h-4" /></Link>
-        </Button>
-        <Brain className="w-5 h-5 text-primary" />
-        <h1 className="font-display font-bold text-2xl text-foreground">ML Performance</h1>
-        <Button size="sm" variant="outline" onClick={refreshAll} disabled={isFetching} className="ml-auto gap-1">
-          <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
-          Refresh
-        </Button>
-      </div>
+    <div className={embedded ? "space-y-5" : "container mx-auto max-w-5xl px-4 py-6 space-y-5"}>
+      {!embedded ? (
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" asChild>
+            <Link to="/"><ArrowLeft className="w-4 h-4" /></Link>
+          </Button>
+          <Brain className="w-5 h-5 text-primary" />
+          <h1 className="font-display font-bold text-2xl text-foreground">ML Performance</h1>
+          <Button size="sm" variant="outline" onClick={refreshAll} disabled={isFetching} className="ml-auto gap-1">
+            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-end">
+          <Button size="sm" variant="outline" onClick={refreshAll} disabled={isFetching} className="gap-1">
+            <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Rolling 30-day windows pulled from <code className="bg-muted px-1.5 py-0.5 rounded">prediction_history</code> +{" "}
@@ -182,4 +196,9 @@ export default function MLPerformancePage() {
       />
     </div>
   );
+}
+
+/** Route-level page — preserves /ml-performance for direct links. */
+export default function MLPerformancePage() {
+  return <MLPerformanceContent />;
 }

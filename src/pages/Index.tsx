@@ -467,6 +467,14 @@ const Index = () => {
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
   const [searchParams, setSearchParams] = useSearchParams();
+  // Today / Tomorrow segmented control inside Home — replaces the
+  // dedicated "Tomorrow" nav tab. When toggled to "tomorrow", the
+  // Home view renders TomorrowTab content inline.
+  const [homeDateMode, setHomeDateMode] = useState<"today" | "tomorrow">("today");
+  // Auto / Manual sub-tab inside Parlay Builder — replaces the
+  // dedicated Daily Plan nav tab. Auto = HomeAutoProfit + 3-tier
+  // recommendations; Manual = ParlayBuilderSection.
+  const [parlayBuilderMode, setParlayBuilderMode] = useState<"manual" | "auto">("manual");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     // Allow deep links like /?view=parlay_builder so the slip drawer's
     // "Open builder" button (and any future external links) land on the
@@ -964,12 +972,17 @@ const Index = () => {
               {/* View mode toggle */}
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center mb-5">
                 <div className="overflow-x-auto -mx-1 px-1 pb-0.5 sm:overflow-visible sm:pb-0 [scrollbar-width:thin]">
+                  {/*
+                    Consolidated 6-tab nav (was 10). Best Picks +
+                    Tomorrow merged into Home (Today/Tomorrow toggle
+                    renders below). Daily Plan + ML Perf moved into
+                    sub-tabs of Parlay Builder + Analytics — routes
+                    still exist, they're just no longer top-level.
+                  */}
                   <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
                     {(
                       [
                         { mode: "home",           icon: Home,        label: "Home" },
-                        { mode: "best_picks",     icon: TrendingUp,  label: "Best Picks" },
-                        { mode: "tomorrow",       icon: Calendar,    label: "Tomorrow" },
                         { mode: "player_props",   icon: User,        label: "Player Props" },
                         { mode: "parlay_builder", icon: Sparkles,    label: "Parlay Builder" },
                         { mode: "live",           icon: Zap,         label: "Live" },
@@ -991,13 +1004,6 @@ const Index = () => {
                       </button>
                     ))}
                     <Link
-                      to="/daily"
-                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-primary hover:text-foreground active:bg-muted bg-primary/10 border border-primary/20"
-                    >
-                      <Sparkles className="w-3 h-3 shrink-0" />
-                      Daily Plan
-                    </Link>
-                    <Link
                       to="/parlays"
                       className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
                     >
@@ -1010,13 +1016,6 @@ const Index = () => {
                     >
                       <BarChart3 className="w-3 h-3 shrink-0" />
                       Analytics
-                    </Link>
-                    <Link
-                      to="/ml-performance"
-                      className="flex items-center gap-1.5 min-h-10 px-3 py-2 sm:py-1.5 rounded-full text-xs font-semibold transition-colors touch-manipulation shrink-0 text-muted-foreground hover:text-foreground active:bg-muted"
-                    >
-                      <TrendingUp className="w-3 h-3 shrink-0" />
-                      ML Perf
                     </Link>
                   </div>
                 </div>
@@ -1051,9 +1050,31 @@ const Index = () => {
                 </div>
               ) : null}
 
-              {/* Auto Profit top card on Home — guides the user to one
-                  clear next step before the dashboard's full breakdown. */}
+              {/* Today / Tomorrow segmented control on Home (replaces
+                  the old Tomorrow tab). Hidden on other view modes. */}
               {viewMode === "home" ? (
+                <div className="mb-4 inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+                  {(["today", "tomorrow"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setHomeDateMode(mode)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-full text-xs font-semibold transition-colors capitalize",
+                        homeDateMode === mode
+                          ? "bg-card text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+
+              {/* Auto Profit top card on Home (today only — Tomorrow
+                  view shows the cross-sport TomorrowTab instead). */}
+              {viewMode === "home" && homeDateMode === "today" ? (
                 <div className="mb-6">
                   <HomeAutoProfit
                     candidates={homeAutoProfitCandidates}
@@ -1067,7 +1088,7 @@ const Index = () => {
               ) : null}
 
               {/* Content */}
-              {viewMode === "home" ? (
+              {viewMode === "home" && homeDateMode === "today" ? (
                 <HomeDashboard
                   topGames={topPicksForToday(leagueGamesWithIntel)}
                   topProps={topHomeProps}
@@ -1077,7 +1098,7 @@ const Index = () => {
                   onNavigate={handleViewModeChange}
                   onNavigateToParlay={handleNavigateToParlay}
                 />
-              ) : viewMode === "tomorrow" ? (
+              ) : (viewMode === "home" && homeDateMode === "tomorrow") || viewMode === "tomorrow" ? (
                 <TomorrowTab
                   allGames={allGames}
                   allProps={homePropsQuery.data?.items ?? []}
@@ -1096,42 +1117,77 @@ const Index = () => {
                   }
                 />
               ) : viewMode === "parlay_builder" ? (
-                <div className="space-y-10">
-                  {/*
-                    Single parlay surface — ParlayBuilderSection is the primary
-                    builder and already includes a leg picker via
-                    RankedLiveParlayPresets. BestValuePicksSection used to
-                    render above this but it duplicated the leg-picker role
-                    and the reviewer flagged "two parlay builders render
-                    together on Home". Moved into a collapsed details below
-                    for users who want the individual best-value list.
+                <div className="space-y-6">
+                  {/* Manual / Auto sub-tabs — Auto used to be the
+                      separate "Daily Plan" nav tab; folded in here so
+                      there's a single parlay surface. */}
+                  <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
+                    {(["manual", "auto"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setParlayBuilderMode(m)}
+                        className={cn(
+                          "px-4 py-1.5 rounded-full text-xs font-semibold transition-colors capitalize",
+                          parlayBuilderMode === m
+                            ? "bg-card text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {m === "auto" ? "Auto Parlay" : "Manual Build"}
+                      </button>
+                    ))}
+                  </div>
 
-                    Loading gate: only show skeletons when we genuinely have
-                    zero games yet. Offseason sports (NFL in spring, MMA on
-                    weekdays) shouldn't block the render.
-                  */}
-                  <ParlayBuilderSection
-                    games={allGamesWithIntel}
-                    oddsMap={oddsMapAll}
-                    gamesLoading={allGamesWithIntel.length === 0 && (
-                      nbaFastQuery.isPending ||
-                      mlbFastQuery.isPending
-                    )}
-                    bookOddsLoading={false}
-                  />
-                  <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
-                    <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
-                      <span>Best-value picks (individual leg list)</span>
-                      <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
-                    </summary>
-                    <div className="mt-4">
-                      <BestValuePicksSection
+                  {parlayBuilderMode === "auto" ? (
+                    <div className="space-y-4">
+                      <HomeAutoProfit
+                        candidates={homeAutoProfitCandidates}
+                        loading={
+                          nbaFastQuery.isPending ||
+                          mlbFastQuery.isPending ||
+                          homePropsQuery.isPending
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground text-center">
+                        Want the full 3-tier breakdown (Primary / Balanced / Upside)?{" "}
+                        <Link to="/daily" className="text-primary hover:underline">
+                          Open Daily Plan →
+                        </Link>
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-10">
+                      {/*
+                        Manual builder — ParlayBuilderSection includes its own
+                        leg picker via RankedLiveParlayPresets. The
+                        BestValuePicksSection details below is for users who
+                        want the explicit individual-leg list.
+                      */}
+                      <ParlayBuilderSection
                         games={allGamesWithIntel}
                         oddsMap={oddsMapAll}
-                        loading={false}
+                        gamesLoading={allGamesWithIntel.length === 0 && (
+                          nbaFastQuery.isPending ||
+                          mlbFastQuery.isPending
+                        )}
+                        bookOddsLoading={false}
                       />
+                      <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
+                        <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
+                          <span>Best-value picks (individual leg list)</span>
+                          <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
+                        </summary>
+                        <div className="mt-4">
+                          <BestValuePicksSection
+                            games={allGamesWithIntel}
+                            oddsMap={oddsMapAll}
+                            loading={false}
+                          />
+                        </div>
+                      </details>
                     </div>
-                  </details>
+                  )}
                 </div>
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
