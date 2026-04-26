@@ -11,6 +11,7 @@ export type PlayerEdgeStatFilter =
   | "all"
   // NBA
   | "points" | "rebounds" | "assists" | "pra" | "threes"
+  | "steals" | "blocks" | "pts_reb" | "pts_ast" | "reb_ast"
   // NFL
   | "passing_yards" | "rushing_yards" | "receiving_yards" | "receptions"
   // MLB
@@ -112,6 +113,11 @@ export function statFilterLabel(f: PlayerEdgeStatFilter): string {
     assists: "Assists",
     pra: "PRA",
     threes: "3-Pointers",
+    steals: "Steals",
+    blocks: "Blocks",
+    pts_reb: "Pts + Reb",
+    pts_ast: "Pts + Ast",
+    reb_ast: "Reb + Ast",
     passing_yards: "Passing Yards",
     rushing_yards: "Rushing Yards",
     receiving_yards: "Receiving Yards",

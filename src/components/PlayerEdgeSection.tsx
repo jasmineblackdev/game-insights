@@ -28,8 +28,9 @@ const SPORT_FILTERS: PlayerEdgeSportFilter[] = ["all", "NBA", "NFL", "MLB", "Box
 
 const STAT_FILTERS: PlayerEdgeStatFilter[] = [
   "all",
-  "points", "rebounds", "assists",
-  "passing_yards", "rushing_yards", "receiving_yards",
+  "points", "rebounds", "assists", "threes", "steals", "blocks",
+  "pra", "pts_reb", "pts_ast", "reb_ast",
+  "passing_yards", "rushing_yards", "receiving_yards", "receptions",
   "strikeouts", "hits", "total_bases",
   "fight_winner", "ko_tko", "submission", "decision", "draw", "total_rounds",
 ];

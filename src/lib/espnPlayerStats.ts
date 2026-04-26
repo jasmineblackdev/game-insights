@@ -104,7 +104,33 @@ const NBA_STAT_MAP: Record<string, StatMapEntry> = {
       "averageassists", "avgassists", "assistspergame", "apg",
     ],
   },
+  threes: {
+    statType: "threes", unit: "3PM",
+    matches: [
+      "threes", "threepointers", "threepointersmade", "3pm",
+      "averagethreepointers", "threepointerspergame",
+    ],
+  },
+  steals: {
+    statType: "steals", unit: "stl",
+    matches: ["steals", "averagesteals", "stealspergame", "stl", "spg"],
+  },
+  blocks: {
+    statType: "blocks", unit: "blk",
+    matches: ["blocks", "averageblocks", "blockspergame", "blk", "bpg"],
+  },
 };
+
+// Combined NBA picks (points + rebounds + assists, etc.) are derived by
+// summing the same-athlete entries across the per-stat categories. The
+// ESPN scoreboard doesn't expose them directly, but we can produce them
+// from the source values we already pulled.
+const NBA_COMBINED_PICKS: { statType: string; unit: string; parts: string[] }[] = [
+  { statType: "pra",        unit: "PRA", parts: ["points", "rebounds", "assists"] },
+  { statType: "pts_reb",    unit: "P+R", parts: ["points", "rebounds"] },
+  { statType: "pts_ast",    unit: "P+A", parts: ["points", "assists"] },
+  { statType: "reb_ast",    unit: "R+A", parts: ["rebounds", "assists"] },
+];
 
 const MLB_STAT_MAP: Record<string, StatMapEntry> = {
   homeRuns: {
@@ -280,6 +306,15 @@ function overallWinPct(competitor: EspnCompetitorRaw): number {
   return w + l > 0 ? w / (w + l) : 0.5;
 }
 
+/**
+ * Snap a raw projection (e.g. 28.803...) to a clean sportsbook line at .5
+ * intervals (e.g. 28.5). Books always set lines at half-points so there
+ * are no pushes. Used for line_value / projected_value display.
+ */
+function snapToHalfPoint(v: number): number {
+  return Math.round(v - 0.5) + 0.5;
+}
+
 function projectValue(
   seasonAvg: number,
   opponentWinPct: number,
@@ -420,6 +455,44 @@ async function fetchSportPlayerEdge(
   const predictions: PlayerEdgePrediction[] = [];
   const t = edgeThresholds(sport);
 
+  // Per-athlete per-event accumulator for combined NBA picks (PRA / P+R / etc).
+  // Key: `${eventId}:${athleteId}`. Value: { name, team, opp, isHome, oppWinPct, stats: { points: n, ... } }
+  type AthleteAcc = {
+    athleteId: string;
+    name: string;
+    team: string;
+    opponent: string;
+    isHome: boolean;
+    oppWinPct: number;
+    eventId: string;
+    gameTime: string;
+    propSource: "scoreboard" | "team_leaders" | "unavailable";
+    stats: Record<string, number>;
+  };
+  const athleteStatMap = new Map<string, AthleteAcc>();
+
+  /** Parse "18.1 PPG, 7.5 RPG, 5.9 APG, 1.4 SPG, 1.5 BPG" into per-stat numbers. */
+  function parseRatingString(raw: string | undefined): Record<string, number> {
+    const out: Record<string, number> = {};
+    if (!raw) return out;
+    const re = /(\d+\.?\d*)\s*(PPG|RPG|APG|SPG|BPG|3PM)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) {
+      const v = Number(m[1]);
+      const k = m[2].toUpperCase();
+      if (!Number.isFinite(v)) continue;
+      const stat = k === "PPG" ? "points"
+                 : k === "RPG" ? "rebounds"
+                 : k === "APG" ? "assists"
+                 : k === "SPG" ? "steals"
+                 : k === "BPG" ? "blocks"
+                 : k === "3PM" ? "threes"
+                 : null;
+      if (stat) out[stat] = v;
+    }
+    return out;
+  }
+
   for (const event of events) {
     const comp = event.competitions?.[0];
     if (!comp?.competitors || comp.competitors.length < 2) continue;
@@ -464,6 +537,31 @@ async function fetchSportPlayerEdge(
 
       for (const category of leaderCategories) {
         const catName = category.name ?? "";
+
+        // Special-case: NBA scoreboard's "rating" category packs SPG/BPG (and
+        // sometimes 3PM) into displayValue. Parse it for the named athlete and
+        // feed the per-athlete accumulator so combined picks can use these.
+        if (sport === "NBA" && catName.toLowerCase() === "rating") {
+          const leaders = (category.leaders ?? []).slice(0, 5);
+          for (const L of leaders) {
+            const ath = L.athlete;
+            if (!ath?.displayName) continue;
+            const aid = String(ath.id ?? `ath-rating-${ath.displayName}`);
+            const parsed = parseRatingString(L.displayValue);
+            const accKey = `${eventId}:${aid}`;
+            const acc = athleteStatMap.get(accKey) ?? {
+              athleteId: aid, name: ath.displayName, team: teamAbbr,
+              opponent: oppAbbr, isHome, oppWinPct, eventId, gameTime, propSource,
+              stats: {},
+            };
+            for (const [k, v] of Object.entries(parsed)) {
+              if (acc.stats[k] == null) acc.stats[k] = v;
+            }
+            athleteStatMap.set(accKey, acc);
+          }
+          continue;
+        }
+
         const mapping = resolveStatMapping(statMap, catName);
         if (!mapping) continue;
 
@@ -477,12 +575,29 @@ async function fetchSportPlayerEdge(
           const value = leader.value ?? Number.parseFloat(leader.displayValue);
           if (!Number.isFinite(value) || value <= 0) continue;
 
-          const projected  = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather);
-          const edge       = projected - value;
+          // Accumulate this stat for the athlete so combined picks can use it
+          if (sport === "NBA" && leader.athlete?.id) {
+            const aid = String(leader.athlete.id);
+            const accKey = `${eventId}:${aid}`;
+            const acc = athleteStatMap.get(accKey) ?? {
+              athleteId: aid, name, team: teamAbbr,
+              opponent: oppAbbr, isHome, oppWinPct, eventId, gameTime, propSource,
+              stats: {},
+            };
+            if (acc.stats[mapping.statType] == null) {
+              acc.stats[mapping.statType] = value;
+            }
+            athleteStatMap.set(accKey, acc);
+          }
+
+          const projectedRaw = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather);
+          const projected    = Math.round(projectedRaw * 10) / 10;          // 1-decimal display
+          const lineValue    = snapToHalfPoint(value);                       // sportsbook .5 line
+          const edge         = projected - lineValue;
           const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
-          const edgeMag    = Math.abs(edge);
-          const confidence = edgeToConfidence(edgeMag, sport);
-          const athleteId  = leader.athlete?.id
+          const edgeMag      = Math.abs(edge);
+          const confidence   = edgeToConfidence(edgeMag, sport);
+          const athleteId    = leader.athlete?.id
             ?? `ath-${catName}-${name.replace(/\s+/g, "-")}`;
           const id = `espn-${sport.toLowerCase()}-${eventId}-${athleteId}-${catName}`;
 
@@ -501,7 +616,7 @@ async function fetchSportPlayerEdge(
             opponent:           oppAbbr,
             game_time:          gameTime,
             stat_type:          mapping.statType,
-            line_value:         value,
+            line_value:         lineValue,
             projected_value:    projected,
             prediction_direction: direction,
             edge:               Math.round(edge * 10) / 10,
@@ -533,6 +648,95 @@ async function fetchSportPlayerEdge(
               : undefined,
           });
         }
+      }
+    }
+  }
+
+  // ── Emit NBA single-stat preds for steals/blocks/threes parsed from
+  //    "rating" category, plus combined picks (PRA / P+R / P+A / R+A) for
+  //    any athlete with all required parts.
+  if (sport === "NBA") {
+    const SINGLE_FROM_RATING: { stat: string; unit: string }[] = [
+      { stat: "steals", unit: "stl" },
+      { stat: "blocks", unit: "blk" },
+      { stat: "threes", unit: "3PM" },
+    ];
+
+    for (const acc of athleteStatMap.values()) {
+      // Single-stat picks for stats we couldn't get directly from a category
+      // (steals/blocks/threes typically come from the rating string).
+      for (const { stat, unit } of SINGLE_FROM_RATING) {
+        const value = acc.stats[stat];
+        if (value == null || !Number.isFinite(value) || value <= 0) continue;
+        // Skip if we already emitted this exact stat via a category match
+        const dupKey = `espn-nba-${acc.eventId}-${acc.athleteId}-${stat}`;
+        if (predictions.some((p) => p.id === dupKey)) continue;
+
+        const projectedRaw = projectValue(value, acc.oppWinPct, acc.isHome, "NBA", "");
+        const projected    = Math.round(projectedRaw * 10) / 10;
+        const lineValue    = snapToHalfPoint(value);
+        const edge         = projected - lineValue;
+        const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
+        const edgeMag      = Math.abs(edge);
+        const confidence   = edgeToConfidence(edgeMag, "NBA");
+        const { reason_1, reason_2, risk_factor } = buildReasons(
+          acc.name, stat, unit, value, projected,
+          acc.opponent, acc.oppWinPct, direction, "NBA", "",
+        );
+
+        predictions.push({
+          id: dupKey,
+          game_id: acc.eventId, player_id: acc.athleteId, player_name: acc.name,
+          sport: "NBA", team: acc.team, opponent: acc.opponent, game_time: acc.gameTime,
+          stat_type: stat, line_value: lineValue, projected_value: projected,
+          prediction_direction: direction, edge: Math.round(edge * 10) / 10, confidence,
+          reason_1, reason_2, risk_factor,
+          game_sort: sortBase + predictions.length,
+          confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
+          risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
+          is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
+          recent_form: edgeMag >= t.high ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          prop_source: acc.propSource,
+          consistency_label: edgeMag >= t.high ? "stable" : edgeMag >= t.med ? "medium" : "volatile",
+        });
+      }
+
+      // Combined picks (PRA / P+R / P+A / R+A) — only when we have every
+      // required part (no inferring missing values).
+      for (const combo of NBA_COMBINED_PICKS) {
+        if (!combo.parts.every((p) => acc.stats[p] != null)) continue;
+        const sumVal = combo.parts.reduce((s, p) => s + acc.stats[p]!, 0);
+        if (!Number.isFinite(sumVal) || sumVal <= 0) continue;
+
+        const projectedRaw = projectValue(sumVal, acc.oppWinPct, acc.isHome, "NBA", "");
+        const projected    = Math.round(projectedRaw * 10) / 10;
+        const lineValue    = snapToHalfPoint(sumVal);
+        const edge         = projected - lineValue;
+        const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
+        const edgeMag      = Math.abs(edge);
+        // Combined-stat thresholds are ~3x single-stat (sum of three averages
+        // is naturally noisier), so bump the high bar.
+        const confidence: "HIGH" | "MED" | "LOW" =
+          edgeMag >= t.high * 2.5 ? "HIGH"
+          : edgeMag >= t.med * 2.5 ? "MED" : "LOW";
+
+        predictions.push({
+          id: `espn-nba-${acc.eventId}-${acc.athleteId}-${combo.statType}`,
+          game_id: acc.eventId, player_id: acc.athleteId, player_name: acc.name,
+          sport: "NBA", team: acc.team, opponent: acc.opponent, game_time: acc.gameTime,
+          stat_type: combo.statType, line_value: lineValue, projected_value: projected,
+          prediction_direction: direction, edge: Math.round(edge * 10) / 10, confidence,
+          reason_1: `${combo.unit} season avg ${sumVal.toFixed(1)} — projected vs ${acc.opponent}.`,
+          reason_2: `Combines ${combo.parts.join(" + ")} — combined props are noisier than singles.`,
+          risk_factor: `Combined-stat lines move with usage shifts; monitor late lineup news.`,
+          game_sort: sortBase + predictions.length,
+          confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
+          risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
+          is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
+          recent_form: edgeMag >= t.high * 2.5 ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          prop_source: acc.propSource,
+          consistency_label: edgeMag >= t.high * 2.5 ? "stable" : edgeMag >= t.med * 2.5 ? "medium" : "volatile",
+        });
       }
     }
   }
