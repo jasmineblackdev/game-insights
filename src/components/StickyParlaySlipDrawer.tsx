@@ -14,6 +14,7 @@
  * point of that surface.
  */
 
+import { useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Layers, X, Trash2, Shuffle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -25,7 +26,8 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { useBankroll } from "@/context/BankrollContext";
 import {
@@ -62,6 +64,11 @@ export function StickyParlaySlipDrawer() {
     hadLossToday,
   } = useBankroll();
   // Slip-level risk = highest-risk leg. Drives the suggested stake.
+  // Hidden SheetClose ref — triggered programmatically by Link
+  // onClick handlers so we don't have to wrap them in <SheetClose
+  // asChild>, which causes the Slot-in-Slot forwardRef warning when
+  // combined with <Button asChild>.
+  const closeRef = useRef<HTMLButtonElement>(null);
   const slipRisk: "low" | "medium" | "high" = builderLegs.length === 0
     ? "medium"
     : builderLegs.some((l) => getPropRiskLevel(l) === "high")
@@ -112,6 +119,8 @@ export function StickyParlaySlipDrawer() {
       </SheetTrigger>
 
       <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
+        {/* Programmatic close handle for Link onClicks below */}
+        <SheetClose ref={closeRef} className="sr-only" tabIndex={-1} aria-hidden="true" />
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-primary" />
@@ -172,30 +181,39 @@ export function StickyParlaySlipDrawer() {
                 <p className="font-semibold text-foreground">No legs yet</p>
                 <p className="mt-1">Tap "Add to parlay" on any pick to start your slip.</p>
               </div>
+              {/*
+                Style the <Link> with buttonVariants directly instead
+                of <SheetClose asChild><Button asChild><Link/></></>.
+                Two stacked Radix Slot wrappers both try to forward
+                the same ref to the Link child and trigger React's
+                "Function components cannot be given refs" warning.
+                Using a plain onClick to close the sheet avoids the
+                Slot-in-Slot pattern entirely.
+              */}
               <div className="flex flex-col gap-2">
-                <SheetClose asChild>
-                  <Button asChild variant="default" size="sm">
-                    <Link to="/daily">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      Build today's Auto Profit bet
-                    </Link>
-                  </Button>
-                </SheetClose>
-                <SheetClose asChild>
-                  <Button asChild variant="outline" size="sm">
-                    <Link to="/?view=parlay_builder">
-                      <Layers className="w-3.5 h-3.5" />
-                      Open Parlay Builder
-                    </Link>
-                  </Button>
-                </SheetClose>
-                <SheetClose asChild>
-                  <Button asChild variant="ghost" size="sm">
-                    <Link to="/parlays">
-                      Log a bet placed elsewhere →
-                    </Link>
-                  </Button>
-                </SheetClose>
+                <Link
+                  to="/daily"
+                  onClick={() => closeRef.current?.click()}
+                  className={buttonVariants({ variant: "default", size: "sm" })}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Build today's Auto Profit bet
+                </Link>
+                <Link
+                  to="/?view=parlay_builder"
+                  onClick={() => closeRef.current?.click()}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Open Parlay Builder
+                </Link>
+                <Link
+                  to="/parlays"
+                  onClick={() => closeRef.current?.click()}
+                  className={buttonVariants({ variant: "ghost", size: "sm" })}
+                >
+                  Log a bet placed elsewhere →
+                </Link>
               </div>
             </div>
           ) : (
@@ -309,17 +327,18 @@ export function StickyParlaySlipDrawer() {
             <Trash2 className="w-3.5 h-3.5" />
             Clear
           </Button>
-          <SheetClose asChild>
-            <Button
-              asChild
-              variant="default"
-              size="sm"
-              className="flex-1 min-w-0"
-              disabled={!count}
-            >
-              <Link to="/?view=parlay_builder">Open builder</Link>
-            </Button>
-          </SheetClose>
+          <Link
+            to="/?view=parlay_builder"
+            onClick={() => closeRef.current?.click()}
+            aria-disabled={!count}
+            className={cn(
+              buttonVariants({ variant: "default", size: "sm" }),
+              "flex-1 min-w-0",
+              !count && "pointer-events-none opacity-50",
+            )}
+          >
+            Open builder
+          </Link>
         </div>
       </SheetContent>
     </Sheet>

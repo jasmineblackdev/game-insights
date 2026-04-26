@@ -25,7 +25,6 @@ import { sortPlayerEdgePredictions, type PlayerEdgePrediction } from "@/data/pla
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import { ParlayEdgeSection } from "@/components/ParlayEdgeSection";
 import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
@@ -1131,15 +1130,6 @@ const Index = () => {
                         oddsMap={oddsMapAll}
                         loading={false}
                       />
-                    </div>
-                  </details>
-                  <details className="rounded-lg border border-border bg-card/40 px-4 py-3 group">
-                    <summary className="cursor-pointer text-sm font-semibold text-foreground list-none flex items-center justify-between">
-                      <span>Auto-build presets (Safe / Balanced / Cashout)</span>
-                      <span className="text-xs text-muted-foreground group-open:hidden">Expand</span>
-                    </summary>
-                    <div className="mt-4">
-                      <ParlayEdgeSection allGames={allGames} oddsMap={oddsMapAll} currentLeague={league} />
                     </div>
                   </details>
                 </div>

@@ -110,10 +110,20 @@ async function fromTheOddsApi(sport: "mma" | "boxing"): Promise<CombatOddsEvent[
     oddsFormat: "american",
   });
   if (!res?.ok) {
-    // Propagate quota exhaustion
+    // Quota / rate-limit / unknown-sport responses surface via the
+    // oddsApiHealth banner (see oddsApiFetch.trackOddsResponse).
+    // Throwing here previously bubbled up as a RUNTIME_ERROR in the
+    // console even though the banner was already up. Return null so
+    // the multi-provider fallback chain proceeds to the next source.
     if (res?.status === 401 || res?.status === 402 || res?.status === 429) {
       const body = await res.json().catch(() => ({})) as { error_code?: string };
-      if (body.error_code === "OUT_OF_USAGE_CREDITS") throw new Error("quota_exhausted:the_odds_api");
+      if (body.error_code === "OUT_OF_USAGE_CREDITS") {
+        // Mark the sport so we don't keep retrying — the per-sport
+        // TTL lockout in oddsApiHealth handles the 5-minute cooldown.
+        const { markOddsApiStale } = await import("@/lib/oddsApiHealth");
+        markOddsApiStale({ reason: "quota", sportKey });
+        return null;
+      }
     }
     return null;
   }
