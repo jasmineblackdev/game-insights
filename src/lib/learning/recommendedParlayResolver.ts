@@ -31,6 +31,7 @@
 import type { GamePrediction } from "@/data/mockGames";
 import { supabase } from "@/lib/supabase";
 import { bridgeParlayLegs } from "@/lib/learning/parlayLegBridge";
+import { lookupAthleteStat, outcomeForOverUnder, espnLabelsForStat } from "@/lib/learning/espnBoxScoreLookup";
 
 type LegOutcome = "win" | "loss" | "push" | "pending";
 
@@ -40,10 +41,16 @@ interface PendingLeg {
   sport?: string;
   market_type?: string;
   pick_type?: string;
+  stat_type?: string;
+  line_value?: number | null;
+  /** "MORE" / "LESS" — direction for over/under markets. */
+  direction?: "MORE" | "LESS" | null;
   american_odds?: number | null;
   leg_outcome?: LegOutcome;
   /** Set to game.id when the resolver matches the leg back to a game. */
   game_id?: string;
+  /** Filled in when player-prop resolution succeeds. */
+  actual_value?: number | null;
 }
 
 interface PendingParlay {
@@ -69,6 +76,27 @@ function gameIdFromLegId(legId: string | undefined, marketType: string | undefin
   const m = /^vp-(.+)-ml-(home|away)$/.exec(legId);
   if (!m) return null;
   return { gameId: m[1], side: m[2] as "home" | "away" };
+}
+
+/**
+ * Parse player-prop leg id into its ESPN identifiers. The optimizer's
+ * enriched-prop builder produces ids shaped:
+ *   ml-prop-espn-{sport}-{gameId}-{athleteId}-{stat}
+ * Returns null when the id doesn't match — caller falls back to
+ * matching by player name + game search if/when we ever support it.
+ */
+function parsePropLegId(legId: string | undefined): { sport: string; gameId: string; athleteId: string } | null {
+  if (!legId) return null;
+  const m = /^(?:ml-prop|pe)-espn-([a-z]+)-(\d+)-(\d+)-/i.exec(legId);
+  if (!m) return null;
+  return { sport: m[1].toLowerCase(), gameId: m[2], athleteId: m[3] };
+}
+
+/** Pull player name out of "Ramon Laureano Under 18.5 rbis"-style strings. */
+function playerNameFromSelection(selection: string | undefined | null): string | null {
+  if (!selection) return null;
+  const m = /^([^\d]+?)\s+(?:Over|Under|O\/U|\d)/i.exec(selection.trim());
+  return m ? m[1].trim() : null;
 }
 
 function legOutcomeFromGame(game: GamePrediction, picked: "home" | "away"): LegOutcome | null {
@@ -164,18 +192,51 @@ export async function resolveRecommendedParlays(games: GamePrediction[]): Promis
       const leg = updatedLegs[i];
       if (leg.leg_outcome && leg.leg_outcome !== "pending") continue;
 
+      // ── Team moneyline: match against the games array we already have.
       const matched = gameIdFromLegId(leg.id, leg.market_type);
-      if (!matched) continue;
-      const game = gameById.get(matched.gameId);
-      if (!game) continue;
+      if (matched) {
+        const game = gameById.get(matched.gameId);
+        if (!game) continue;
+        const newOutcome = legOutcomeFromGame(game, matched.side);
+        if (!newOutcome) continue;
+        leg.leg_outcome = newOutcome;
+        leg.game_id = matched.gameId;
+        touchedAnyLeg = true;
+        result.legs_settled++;
+        continue;
+      }
 
-      const newOutcome = legOutcomeFromGame(game, matched.side);
-      if (!newOutcome) continue;
+      // ── Player prop: parse the ESPN-style id, look up the box score.
+      if (leg.market_type === "player_prop"
+          && leg.line_value != null
+          && leg.direction
+          && leg.stat_type) {
+        const propIds = parsePropLegId(leg.id);
+        if (!propIds) continue;
+        // Skip stats we don't know how to map to ESPN labels — better to
+        // leave pending than to write a wrong outcome.
+        if (!espnLabelsForStat(leg.stat_type)) continue;
 
-      leg.leg_outcome = newOutcome;
-      leg.game_id = matched.gameId;
-      touchedAnyLeg = true;
-      result.legs_settled++;
+        try {
+          const lookup = await lookupAthleteStat({
+            sport: propIds.sport,
+            gameId: propIds.gameId,
+            athleteId: propIds.athleteId,
+            playerName: playerNameFromSelection(leg.selection),
+            statType: leg.stat_type,
+          });
+          if (lookup.value == null) continue;
+
+          const newOutcome = outcomeForOverUnder(lookup.value, leg.line_value, leg.direction);
+          leg.leg_outcome = newOutcome;
+          leg.game_id = propIds.gameId;
+          leg.actual_value = lookup.value;
+          touchedAnyLeg = true;
+          result.legs_settled++;
+        } catch {
+          // ESPN unreachable / box not posted — leave pending, retry later.
+        }
+      }
     }
 
     if (!touchedAnyLeg) continue;
