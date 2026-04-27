@@ -6,6 +6,7 @@
  * individual pick so cards everywhere can show one clear next step.
  */
 
+import type { GamePrediction } from "@/data/mockGames";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { type AutoProfitAction } from "./autoProfit";
@@ -94,6 +95,29 @@ export function pickActionForCandidate(
   if (ctx.hadLossToday) return "SMALL_BET";
 
   // BET NOW
+  return "BET_NOW";
+}
+
+/**
+ * Resolve action label for a team-moneyline pick on the home view.
+ * Stripped down vs the prop / candidate variants — game-prediction
+ * data is sparser, so we lean primarily on the model's confidence and
+ * bankroll-state overrides.
+ */
+export function pickActionForGame(
+  game: GamePrediction,
+  ctx: PickActionContext = {},
+): AutoProfitAction {
+  const conf = game.confidence;
+  if (conf === "low") return "SKIP";
+
+  if (ctx.exposureCapHit) return "WAIT";
+  if ((ctx.lossStreak ?? 0) >= 2) return "WAIT";
+
+  if (conf === "medium") return "SMALL_BET";
+  if ((ctx.lossStreak ?? 0) >= 1) return "SMALL_BET";
+  if (ctx.hadLossToday) return "SMALL_BET";
+
   return "BET_NOW";
 }
 
