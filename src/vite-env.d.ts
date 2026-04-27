@@ -3,11 +3,6 @@
 interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
-  /**
-   * Legacy: Odds API key in the browser bundle. Prefer server-side `THE_ODDS_API_KEY` + Edge Function
-   * `odds-api-proxy` or dev proxy (see .env.example).
-   */
-  readonly VITE_THE_ODDS_API_KEY?: string;
   /** Optional full URL to `odds-api-proxy` (default: Supabase `/functions/v1/odds-api-proxy`). */
   readonly VITE_ODDS_API_PROXY_URL?: string;
   /**

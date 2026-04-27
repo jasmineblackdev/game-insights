@@ -94,8 +94,7 @@ export function CollegeFuturesSection() {
         </div>
       ) : note === "no_api" ? (
         <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground">
-          Configure The Odds API (Edge <span className="font-mono text-xs">odds-api-proxy</span> or{" "}
-          <span className="font-mono text-xs">VITE_THE_ODDS_API_KEY</span>) to load college futures.
+          Configure The Odds API via the Edge <span className="font-mono text-xs">odds-api-proxy</span> function (server-side <span className="font-mono text-xs">THE_ODDS_API_KEY</span> secret) to load college futures.
         </div>
       ) : !rows.length ? (
         <div className="rounded-lg border border-border bg-card/60 p-4 text-sm text-muted-foreground space-y-1">

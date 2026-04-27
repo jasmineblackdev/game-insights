@@ -1,16 +1,17 @@
 /**
- * Fetch The Odds API via (1) Vite dev proxy when `THE_ODDS_API_KEY` is set locally, (2) Edge `odds-api-proxy`,
- * or (3) legacy `VITE_THE_ODDS_API_KEY`. Dev proxy is tried first so local `.env.local` works without deploying Edge.
+ * Fetch The Odds API via either:
+ *   1. Vite dev proxy (server-side THE_ODDS_API_KEY in vite.config) — local dev only
+ *   2. Supabase Edge function `odds-api-proxy` (server-side key in env) — production
+ *
+ * The browser NEVER holds the Odds API key. The previous direct-from-browser
+ * path (legacy VITE_THE_ODDS_API_KEY) was removed for security: any VITE_-prefixed
+ * value gets bundled into the client JS, exposing the key to anyone who visits
+ * the site. If the Edge function is unreachable in production we surface a 503,
+ * which the StaleLinesBanner already handles.
  */
 
 import { trackOddsResponse, isOddsSportLocked } from "@/lib/oddsApiHealth";
 import { unwrapEdgeEnvelope as sharedUnwrap, logOddsApiCall } from "@/lib/oddsApiEnvelope";
-
-// Production fallback values — VITE_ prefix means these are intentionally public (client-bundled).
-// Used when Vercel build doesn't inject the env vars from .env.production.
-const _FB_URL  = "https://rxnqjdclqyazferbseeq.supabase.co";
-const _FB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4bnFqZGNscXlhemZlcmJzZWVxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEyODQ5NjcsImV4cCI6MjA4Njg2MDk2N30.MA1qhu_gU93MjoDiJsM2FFDlO2iYjSk_kAbwf0rx_9g";
-const _FB_ODDS = "1fd6d7a5b168bd5bc83f28ddd4f325ae";
 
 function trim(s: string | undefined): string {
   return (s ?? "").trim();
@@ -19,8 +20,8 @@ function trim(s: string | undefined): string {
 function resolveEdgeBase(): string | null {
   const custom = trim(import.meta.env.VITE_ODDS_API_PROXY_URL as string | undefined);
   if (custom) return custom.replace(/\/$/, "");
-  const url = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined) || _FB_URL;
-  const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || _FB_ANON;
+  const url = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined);
+  const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
   if (url && key) {
     return `${url.replace(/\/$/, "")}/functions/v1/odds-api-proxy`;
   }
@@ -28,7 +29,7 @@ function resolveEdgeBase(): string | null {
 }
 
 function shouldAttachSupabaseAnon(targetUrl: string): boolean {
-  const sup = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined) || _FB_URL;
+  const sup = trim(import.meta.env.VITE_SUPABASE_URL as string | undefined);
   if (!sup) return false;
   try {
     return new URL(targetUrl).origin === new URL(sup).origin;
@@ -40,18 +41,13 @@ function shouldAttachSupabaseAnon(targetUrl: string): boolean {
 function supabaseAnonHeaders(targetUrl: string): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (shouldAttachSupabaseAnon(targetUrl)) {
-    const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) || _FB_ANON;
+    const key = trim(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
     if (key) {
       headers.Authorization = `Bearer ${key}`;
       headers.apikey = key;
     }
   }
   return headers;
-}
-
-function legacyViteKey(): string | null {
-  const k = trim(import.meta.env.VITE_THE_ODDS_API_KEY as string | undefined) || _FB_ODDS;
-  return k || null;
 }
 
 function devProxyEnabled(): boolean {
@@ -93,19 +89,13 @@ async function fetchViaDevProxy(pathUnderV4: string): Promise<Response | null> {
   return fetch(`/__odds-api/${p}`, { headers: { Accept: "application/json" } });
 }
 
-async function fetchViaDirect(pathUnderV4: string): Promise<Response | null> {
-  const key = legacyViteKey();
-  if (!key) return null;
-  const u = new URL(pathUnderV4.replace(/^\//, ""), "https://api.the-odds-api.com/v4/");
-  u.searchParams.set("apiKey", key);
-  return fetch(u.toString(), { headers: { Accept: "application/json" } });
-}
-
 /**
- * Odds API is usable if any path can reach the API: Edge (Supabase), dev proxy + server key, or legacy VITE key.
+ * Odds API is usable when the Edge proxy can be reached (production)
+ * or the Vite dev proxy is enabled (local dev). The browser never has
+ * a usable key on its own.
  */
 export function isOddsApiAvailable(): boolean {
-  return Boolean(resolveEdgeBase() || devProxyEnabled() || legacyViteKey());
+  return Boolean(resolveEdgeBase() || devProxyEnabled());
 }
 
 /** GET /v4/sports/?all=true */
@@ -116,8 +106,6 @@ export async function fetchOddsSportsAll(): Promise<Response> {
   }
   const edge = await fetchViaEdge("sports", {});
   if (edge?.ok) return edge;
-  const direct = await fetchViaDirect("sports/?all=true");
-  if (direct) return direct;
   return new Response(JSON.stringify({ message: "odds_api_not_configured" }), {
     status: 503,
     headers: { "Content-Type": "application/json" },
@@ -164,17 +152,9 @@ export async function fetchOddsForSport(params: {
   const edgeParams: Record<string, string> = { sportKey, markets, regions, oddsFormat };
   if (eventIds?.trim()) edgeParams.eventIds = eventIds.trim();
   const edge = await fetchViaEdge("odds", edgeParams);
-  // Only use Edge response if it succeeded — fall through to direct if Edge errors
-  if (edge?.ok) {
+  if (edge) {
     void trackOddsResponse(edge, sportKey);
     return edge;
-  }
-
-  const direct = await fetchViaDirect(path);
-  if (direct) {
-    // Track the final response (edge errored, direct is the truth).
-    void trackOddsResponse(direct, sportKey);
-    return direct;
   }
 
   // No path worked — surface as a network failure so the banner shows.

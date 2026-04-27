@@ -13,7 +13,13 @@ playwright-report
 dist
 dist-ssr
 *.local
+# Exclude every .env variant. The only checked-in file is .env.example
+# (documents required vars without values). Production secrets live in
+# the deployment platform's env settings + Supabase Edge function
+# secrets — never in this repo.
 .env
+.env.*
+!.env.example
 
 # Supabase CLI local cache
 supabase/.temp/
