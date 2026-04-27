@@ -6,6 +6,7 @@
 
 import type { GamePrediction } from "@/data/mockGames";
 import { cn } from "@/lib/utils";
+import { MlReadinessBadge } from "@/components/MlReadinessBadge";
 
 export interface HomePickCardProps {
   game: GamePrediction;
@@ -36,6 +37,7 @@ export function HomePickCard({ game, rank, onSelect }: HomePickCardProps) {
         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
           {game.confidence.toUpperCase()}
         </span>
+        <MlReadinessBadge sport={game.league} marketType="team_moneyline" />
         <span className="text-[10px] font-medium text-muted-foreground ml-auto">{game.league.toUpperCase()}</span>
       </div>
       <p className="text-xs text-muted-foreground">

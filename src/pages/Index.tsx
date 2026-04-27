@@ -35,6 +35,7 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
+import { loadMlReadiness } from "@/lib/learning/mlReadiness";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
@@ -446,6 +447,9 @@ const Index = () => {
   // every 5 minutes via internal cache TTL — cheap.
   useEffect(() => {
     void loadUserBettingPatterns();
+    // ML readiness — drives the "RULES / LEARNING / CALIBRATED" badge
+    // shown on every pick. Same 5-min TTL.
+    void loadMlReadiness();
   }, []);
 
   // Auto-advance to "week" if no today fights exist (non-fight nights)

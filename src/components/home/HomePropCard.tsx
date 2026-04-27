@@ -5,6 +5,7 @@
 
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { cn } from "@/lib/utils";
+import { MlReadinessBadge } from "@/components/MlReadinessBadge";
 
 export interface HomePropCardProps {
   pred: PlayerEdgePrediction;
@@ -42,6 +43,7 @@ export function HomePropCard({ pred, rank }: HomePropCardProps) {
         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
           {pred.confidence}
         </span>
+        <MlReadinessBadge sport={pred.sport} marketType="player_prop" />
         {/* ML volatility flag */}
         {pred.volatility_flag && pred.consistency_label !== "volatile" && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">

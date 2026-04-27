@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPlayerLastGames, type PlayerGameStat } from "@/lib/playerGameLog";
+import { MlReadinessBadge } from "@/components/MlReadinessBadge";
 
 // ── Line movement helpers ─────────────────────────────────────────────────────
 
@@ -235,6 +236,12 @@ export function PropCard({
         <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full", confClass)}>
           {pred.confidence}
         </span>
+        {/* MlReadinessBadge replaces the legacy ModelStatusPill so the
+            "ML" indicator only fires when Platt calibration is actually
+            applied and the bucket has ≥100 resolved samples. The old
+            pill stayed mounted so its tooltip (ml_sample_size, data
+            quality, source) is still discoverable on hover. */}
+        <MlReadinessBadge sport={pred.sport} marketType="player_prop" />
         <ModelStatusPill pred={pred} />
         {pred.volatility_flag && pred.consistency_label !== "volatile" && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-600 dark:text-orange-400">
