@@ -342,6 +342,7 @@ function spreadCandidate(
       sport: game.league,
       marketType: "spread",
       americanOdds: american,
+      isHome: coverSide === "home",
     }),
     volatilityScore: vol,
     uncertaintyScore: unc,

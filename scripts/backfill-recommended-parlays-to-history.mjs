@@ -94,6 +94,13 @@ function modelProbForLeg(leg) {
   return { value: CONFIDENCE_HIT_PROB[conf] ?? 0.5, source: "confidence_proxy" };
 }
 
+function normalizeConfidence(v) {
+  const s = String(v ?? "medium").trim().toLowerCase();
+  if (s === "high" || s === "h" || s === "hi") return "high";
+  if (s === "low" || s === "l" || s === "lo") return "low";
+  return "medium";
+}
+
 function pickSideFor(leg, idx) {
   if (leg.market_type === "player_prop" || leg.direction) {
     return (leg.direction ?? "more").toLowerCase();
@@ -117,6 +124,35 @@ function oddsRangeBucket(american) {
   return "longshot";
 }
 
+const DAY_OF_WEEK = ["sun","mon","tue","wed","thu","fri","sat"];
+
+function parseHomeAwayContext(leg) {
+  const label = String(leg.game_label ?? "").trim();
+  const m = /^([A-Z][A-Z0-9]{1,4})\s*@\s*([A-Z][A-Z0-9]{1,4})$/.exec(label);
+  if (!m) return { is_home: null, opponent: null, home_team: null, away_team: null };
+  const [, away, home] = m;
+  if (leg.market_type === "team_moneyline") {
+    const sel = String(leg.selection ?? "").toUpperCase();
+    if (sel.includes(home)) return { is_home: true, opponent: away, home_team: home, away_team: away };
+    if (sel.includes(away)) return { is_home: false, opponent: home, home_team: home, away_team: away };
+  }
+  return { is_home: null, opponent: null, home_team: home, away_team: away };
+}
+
+function dayOfWeekFromIso(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return DAY_OF_WEEK[d.getDay()];
+}
+
+function monthFromIso(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.getMonth() + 1;
+}
+
 function buildPayload(parlay, leg, idx) {
   const sport = String(leg.sport ?? "").toLowerCase();
   const odds = leg.american_odds ?? leg.odds ?? null;
@@ -125,6 +161,8 @@ function buildPayload(parlay, leg, idx) {
     ? leg.market_type
     : (leg.stat_type ? "player_prop" : "team_moneyline");
   const signature = `${parlay.id}:L${idx}`;
+  const homeAway = parseHomeAwayContext(leg);
+  const dateForContext = parlay.recommended_at ?? parlay.date ?? null;
 
   return {
     external_game_id: signature,
@@ -136,7 +174,7 @@ function buildPayload(parlay, leg, idx) {
     implied_probability: odds != null ? String(americanToImplied(odds)) : "",
     model_probability: String(modelP),
     edge: "",
-    confidence: String(leg.confidence ?? "medium").toLowerCase(),
+    confidence: normalizeConfidence(leg.confidence),
     risk_score: "",
     reason_tags: [],
     checkpoint_stage: "",
@@ -163,6 +201,13 @@ function buildPayload(parlay, leg, idx) {
         final_score: leg.final_score ?? null,
         actual_value: leg.actual_value ?? null,
       },
+      // Phase-A context features (mirror src/lib/learning/parlayLegBridge.ts)
+      is_home:      homeAway.is_home,
+      opponent:     homeAway.opponent,
+      home_team:    homeAway.home_team,
+      away_team:    homeAway.away_team,
+      day_of_week:  dayOfWeekFromIso(dateForContext),
+      month:        monthFromIso(dateForContext),
       model_probability_source: modelPSource,
     },
   };

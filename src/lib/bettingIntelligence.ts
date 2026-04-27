@@ -320,6 +320,7 @@ export function evaluateMoneylineForParlay(
       sport: game.league,
       marketType: "team_moneyline",
       americanOdds: meta.americanOdds,
+      isHome: side === "home",
     }),
   });
 

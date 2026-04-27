@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { bridgeParlayLegs } from "@/lib/learning/parlayLegBridge";
@@ -58,6 +59,16 @@ interface ManualLeg {
   sport: string;
   bet_type: string;
   odds: string;
+  /** Per-leg result. Defaults to inheriting parlay-level result; the
+   *  screenshot extractor pre-fills this so user only confirms. */
+  leg_outcome: "win" | "loss" | "push" | "pending";
+  /** Vision-extracted context — passes through to the bridge so the
+   *  pattern coach can derive home/away, opponent etc. */
+  game_label?: string | null;
+  stat_type?: string;
+  line_value?: number | null;
+  direction?: "MORE" | "LESS" | null;
+  final_score?: string | null;
 }
 
 const blankLeg = (): ManualLeg => ({
@@ -66,7 +77,10 @@ const blankLeg = (): ManualLeg => ({
   sport: "NBA",
   bet_type: "",
   odds: "",
+  leg_outcome: "pending",
 });
+
+const LEG_OUTCOMES: ("pending" | "win" | "loss" | "push")[] = ["pending", "win", "loss", "push"];
 
 const SPORTS = ["NBA", "WNBA", "NFL", "MLB", "Boxing", "MMA", "Other"] as const;
 
@@ -162,6 +176,12 @@ export function ManualParlayEntryForm({
         sport:     sportFromCandidate(String(l.sport ?? "Other")),
         bet_type:  l.market_type ?? "",
         odds:      l.odds != null ? String(l.odds) : "",
+        leg_outcome: l.leg_outcome ?? "pending",
+        game_label:  l.game_label ?? null,
+        stat_type:   l.stat_type,
+        line_value:  l.line_value ?? null,
+        direction:   l.direction ?? null,
+        final_score: l.final_score ?? null,
       }));
       setLegs(next);
     }
@@ -228,6 +248,7 @@ export function ManualParlayEntryForm({
       sport:     sportFromCandidate(String(l.sport)),
       bet_type:  l.statType ?? l.marketType,
       odds:      String(l.americanOdds),
+      leg_outcome: "pending",
     }));
     setLegs(imported);
     toast.success(`Imported ${imported.length} leg${imported.length === 1 ? "" : "s"} from slip`);
@@ -258,23 +279,35 @@ export function ManualParlayEntryForm({
     const stakeNum  = Number(stake)  || null;
     const payoutNum = Number(payout) || null;
 
-    // Per-leg outcomes: when parlay won, every leg necessarily won
-    // (parlay logic). For lost / push / pending we don't know which
-    // legs hit, so leave them pending — the bridge will skip them
-    // until the user edits per-leg detail.
-    const inferredLegOutcome: "win" | "pending" = result === "won" ? "win" : "pending";
-
-    const builtLegs = cleanLegs.map((l) => ({
-      selection:     l.selection,
-      sport:         l.sport,
-      market_type:   l.bet_type || "manual",
-      american_odds: Number(l.odds),
-      implied_prob:  americanToImplied(Number(l.odds)),
-      confidence:    "MED",
-      model_status:  "user_manual",
-      reason_included: "User manual entry",
-      leg_outcome:   inferredLegOutcome,
-    }));
+    // Per-leg outcomes: prefer the per-leg value the user (or vision
+    // extractor) set. Only fall back to inferring from parlay-level
+    // result for legacy rows where leg_outcome is "pending" — and even
+    // then, only when parlay-level result is "won" (which requires every
+    // leg to have hit). For "lost" / "push" we leave pending legs alone
+    // so the bridge skips them.
+    const builtLegs = cleanLegs.map((l) => {
+      const legOutcome: "win" | "loss" | "push" | "pending" = l.leg_outcome !== "pending"
+        ? l.leg_outcome
+        : (result === "won" ? "win" : "pending");
+      return {
+        selection:     l.selection,
+        sport:         l.sport,
+        market_type:   l.bet_type || "manual",
+        american_odds: Number(l.odds),
+        implied_prob:  americanToImplied(Number(l.odds)),
+        confidence:    "MED",
+        model_status:  "user_manual",
+        reason_included: "User manual entry",
+        leg_outcome:   legOutcome,
+        // Vision-extracted context (when available) flows to the bridge
+        // for home/away + day-of-week feature derivation.
+        game_label:    l.game_label ?? null,
+        stat_type:     l.stat_type ?? null,
+        line_value:    l.line_value ?? null,
+        direction:     l.direction ?? null,
+        final_score:   l.final_score ?? null,
+      };
+    });
 
     setBusy(true);
     try {
@@ -314,10 +347,13 @@ export function ManualParlayEntryForm({
       if (insertErr) throw insertErr;
       toast.success("Manual parlay saved");
 
-      // Bridge settled legs into prediction_history so the ML
-      // feedback loop can learn from this parlay. Fire-and-forget;
-      // a bridge failure shouldn't block the save UX.
-      if (inserted && (result === "won" || result === "push")) {
+      // Bridge settled legs into prediction_history. Now that legs
+      // carry their own outcomes (from vision extract or per-leg
+      // dropdown), we can fire whenever ANY leg has a non-pending
+      // outcome — the bridge skips pending legs internally. This
+      // captures the legs-that-hit on a losing parlay too.
+      const hasSettledLeg = builtLegs.some((l) => l.leg_outcome !== "pending");
+      if (inserted && hasSettledLeg) {
         void bridgeParlayLegs({
           id: inserted.id as string,
           source: inserted.source as string,
@@ -478,10 +514,31 @@ export function ManualParlayEntryForm({
                     className="h-8 text-xs tabular-nums"
                   />
                 </div>
+                <div className="flex flex-col">
+                  <Label className="text-[10px] text-muted-foreground">Hit?</Label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const i = LEG_OUTCOMES.indexOf(leg.leg_outcome);
+                      const next = LEG_OUTCOMES[(i + 1) % LEG_OUTCOMES.length];
+                      setLegs((s) => s.map((x) => (x.id === leg.id ? { ...x, leg_outcome: next } : x)));
+                    }}
+                    title={`Per-leg outcome: ${leg.leg_outcome} (click to cycle)`}
+                    className={cn(
+                      "h-8 w-8 rounded border text-xs font-bold tabular-nums",
+                      leg.leg_outcome === "win"  && "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+                      leg.leg_outcome === "loss" && "border-red-500/40 bg-red-500/10 text-red-500",
+                      leg.leg_outcome === "push" && "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                      leg.leg_outcome === "pending" && "border-border bg-muted/40 text-muted-foreground",
+                    )}
+                  >
+                    {leg.leg_outcome === "win" ? "W" : leg.leg_outcome === "loss" ? "L" : leg.leg_outcome === "push" ? "P" : "—"}
+                  </button>
+                </div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                  className="h-8 w-8 p-0 mt-auto text-muted-foreground hover:text-destructive"
                   onClick={() => removeLeg(leg.id)}
                 >
                   <Trash2 className="w-3.5 h-3.5" />

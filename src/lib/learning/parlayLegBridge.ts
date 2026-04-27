@@ -95,6 +95,14 @@ function modelProbForLeg(leg: ParlayLegInput): { value: number; source: "implied
   return { value: CONFIDENCE_TO_HIT_PROB[conf] ?? 0.5, source: "confidence_proxy" };
 }
 
+/** Schema check accepts only ("high", "medium", "low"). Map common abbreviations. */
+function normalizeConfidence(v: string | undefined | null): "high" | "medium" | "low" {
+  const s = String(v ?? "medium").trim().toLowerCase();
+  if (s === "high" || s === "h" || s === "hi") return "high";
+  if (s === "low" || s === "l" || s === "lo") return "low";
+  return "medium";
+}
+
 function pickSideFor(leg: ParlayLegInput, idx: number): string {
   // Player props use direction (MORE/LESS) as the side for
   // backtest grouping. Team moneyline picks use the team token from
@@ -121,6 +129,50 @@ function oddsRangeBucket(american: number | null | undefined): string {
   return "longshot";
 }
 
+const DAY_OF_WEEK = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+/**
+ * game_label is "AWAY @ HOME" (e.g. "CHC @ LAD"). For team_moneyline
+ * legs we determine which side the user picked by matching the
+ * away/home tokens against pick_label or selection. Returns
+ * { is_home, opponent } when unambiguous; null fields otherwise so
+ * downstream code falls back to the coarse bucket.
+ */
+export function parseHomeAwayContext(leg: ParlayLegInput): {
+  is_home: boolean | null;
+  opponent: string | null;
+  home_team: string | null;
+  away_team: string | null;
+} {
+  const label = (leg.game_label ?? "").trim();
+  const m = /^([A-Z][A-Z0-9]{1,4})\s*@\s*([A-Z][A-Z0-9]{1,4})$/.exec(label);
+  if (!m) return { is_home: null, opponent: null, home_team: null, away_team: null };
+  const [, away, home] = m;
+
+  if (leg.market_type === "team_moneyline") {
+    const sel = String(leg.selection ?? "").toUpperCase();
+    if (sel.includes(home)) return { is_home: true,  opponent: away, home_team: home, away_team: away };
+    if (sel.includes(away)) return { is_home: false, opponent: home, home_team: home, away_team: away };
+  }
+  // Player props or other markets: surface the matchup but leave is_home
+  // null since we don't reliably know which team's player they're on.
+  return { is_home: null, opponent: null, home_team: home, away_team: away };
+}
+
+function dayOfWeekFromIso(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return DAY_OF_WEEK[d.getDay()];
+}
+
+function monthFromIso(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.getMonth() + 1;
+}
+
 function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number): Record<string, unknown> | null {
   if (!leg.leg_outcome || leg.leg_outcome === "pending") return null;
   const sport = String(leg.sport ?? "").toLowerCase();
@@ -136,6 +188,14 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
   const signature = `${parlay.id}:L${idx}`;
   const phase: "pregame" | "live" | "closing" = "pregame";
 
+  // Phase-A context features — derived from data we already have, no
+  // external lookup required. Pattern coach uses these as additional
+  // bucket dimensions so it can learn finer-grained edge:
+  //   "user wins 67% on NBA road dogs on Tuesdays" beats
+  //   "user wins 60% on NBA dogs"
+  const homeAway = parseHomeAwayContext(leg);
+  const dateForContext = parlay.recommended_at ?? parlay.date ?? null;
+
   return {
     external_game_id: signature, // synthetic — keyed per-leg-per-parlay
     sport,
@@ -146,7 +206,7 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
     implied_probability: odds != null ? String(americanToImplied(odds)) : "",
     model_probability: String(modelP),
     edge: "",
-    confidence: String(leg.confidence ?? "medium").toLowerCase(),
+    confidence: normalizeConfidence(leg.confidence),
     risk_score: "",
     reason_tags: [],
     checkpoint_stage: "",
@@ -173,6 +233,13 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
         final_score: leg.final_score ?? null,
         actual_value: leg.actual_value ?? null,
       },
+      // Phase-A context features
+      is_home:      homeAway.is_home,
+      opponent:     homeAway.opponent,
+      home_team:    homeAway.home_team,
+      away_team:    homeAway.away_team,
+      day_of_week:  dayOfWeekFromIso(dateForContext),
+      month:        monthFromIso(dateForContext),
       model_probability_source: modelPSource,
     },
   };

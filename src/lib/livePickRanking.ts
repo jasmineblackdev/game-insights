@@ -188,6 +188,7 @@ export function computeLivePickScore(game: GamePrediction, row: LiveBettingStage
       sport: game.league,
       marketType: "team_moneyline",
       americanOdds: null,
+      isHome: side === "home",
     }),
   });
   const value_score = value01 * 28;

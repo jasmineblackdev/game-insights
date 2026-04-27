@@ -28,10 +28,15 @@ export type OddsRange =
   | "longshot"        // > +250
   | "unknown";
 
+/** "home" / "away" / "any" — "any" means the bucket sums across both. */
+export type HomeAwayDim = "home" | "away" | "any";
+
 export interface UserPatternBucket {
   sport: string;
   market_type: string;
   odds_range: OddsRange;
+  /** "any" buckets aggregate across home and away — coarse fallback. */
+  home_away: HomeAwayDim;
   wins: number;
   losses: number;
   pushes: number;
@@ -62,8 +67,8 @@ export function oddsRange(american: number | null | undefined): OddsRange {
   return "longshot";
 }
 
-export function bucketKey(sport: string, marketType: string, range: OddsRange): string {
-  return `${sport.toLowerCase()}|${marketType}|${range}`;
+export function bucketKey(sport: string, marketType: string, range: OddsRange, homeAway: HomeAwayDim = "any"): string {
+  return `${sport.toLowerCase()}|${marketType}|${range}|${homeAway}`;
 }
 
 let _cached: UserPatternMap | null = null;
@@ -77,7 +82,7 @@ async function fetchAndAggregate(windowDays: number): Promise<UserPatternMap> {
 
   const { data, error } = await supabase
     .from("prediction_history")
-    .select("sport, market_type, american_odds, outcome")
+    .select("sport, market_type, american_odds, outcome, extra")
     .gte("settled_at", since)
     .in("outcome", ["win", "loss", "push"])
     .limit(10_000);
@@ -86,20 +91,33 @@ async function fetchAndAggregate(windowDays: number): Promise<UserPatternMap> {
     return { buckets: new Map(), loaded_at: Date.now(), total_samples: 0 };
   }
 
-  const tmp = new Map<string, { wins: number; losses: number; pushes: number; sport: string; market_type: string; odds_range: OddsRange }>();
-  for (const r of data as Array<{ sport: string; market_type: string; american_odds: number | null; outcome: "win" | "loss" | "push" }>) {
+  type Acc = { wins: number; losses: number; pushes: number; sport: string; market_type: string; odds_range: OddsRange; home_away: HomeAwayDim };
+  const tmp = new Map<string, Acc>();
+  const bump = (key: string, base: Omit<Acc, "wins"|"losses"|"pushes">, outcome: "win"|"loss"|"push") => {
+    let entry = tmp.get(key);
+    if (!entry) {
+      entry = { wins: 0, losses: 0, pushes: 0, ...base };
+      tmp.set(key, entry);
+    }
+    if (outcome === "win")       entry.wins++;
+    else if (outcome === "loss") entry.losses++;
+    else if (outcome === "push") entry.pushes++;
+  };
+
+  for (const r of data as Array<{ sport: string; market_type: string; american_odds: number | null; outcome: "win" | "loss" | "push"; extra: Record<string, unknown> | null }>) {
     const sport = String(r.sport).toLowerCase();
     const market = String(r.market_type);
     const range = oddsRange(r.american_odds);
-    const key = bucketKey(sport, market, range);
-    let entry = tmp.get(key);
-    if (!entry) {
-      entry = { wins: 0, losses: 0, pushes: 0, sport, market_type: market, odds_range: range };
-      tmp.set(key, entry);
+    const isHomeRaw = r.extra?.is_home;
+    const homeAway: HomeAwayDim | null = isHomeRaw === true ? "home" : isHomeRaw === false ? "away" : null;
+
+    // Coarse bucket — always counted ("any" home/away).
+    bump(bucketKey(sport, market, range, "any"), { sport, market_type: market, odds_range: range, home_away: "any" }, r.outcome);
+    // Fine bucket — only when is_home is known. Old rows without
+    // context don't pollute the home/away breakdown.
+    if (homeAway) {
+      bump(bucketKey(sport, market, range, homeAway), { sport, market_type: market, odds_range: range, home_away: homeAway }, r.outcome);
     }
-    if (r.outcome === "win")       entry.wins++;
-    else if (r.outcome === "loss") entry.losses++;
-    else if (r.outcome === "push") entry.pushes++;
   }
 
   const buckets = new Map<string, UserPatternBucket>();
@@ -111,6 +129,7 @@ async function fetchAndAggregate(windowDays: number): Promise<UserPatternMap> {
       sport: e.sport,
       market_type: e.market_type,
       odds_range: e.odds_range,
+      home_away: e.home_away,
       wins: e.wins,
       losses: e.losses,
       pushes: e.pushes,
@@ -149,33 +168,46 @@ export async function loadUserBettingPatterns(opts?: {
  * that callers add to the raw value score before clamping. Bucket key
  * + bucket are returned so callers can surface "matches your X bucket"
  * tooltips.
+ *
+ * When isHome is supplied, looks up the fine (sport × market × range
+ * × home/away) bucket first. Falls back to the coarse (any home/away)
+ * bucket when the fine bucket isn't strong yet — important early on
+ * when sample counts are too thin to populate the finer dimension.
  */
 export function patternBoostForLeg(
   patterns: UserPatternMap,
-  leg: { sport: string; marketType: string; americanOdds: number | null | undefined },
+  leg: { sport: string; marketType: string; americanOdds: number | null | undefined; isHome?: boolean | null },
 ): { boost: number; bucketKey: string; bucket: UserPatternBucket | null } {
   const range = oddsRange(leg.americanOdds);
-  const key = bucketKey(leg.sport, leg.marketType, range);
-  const bucket = patterns.buckets.get(key) ?? null;
-  if (!bucket || !bucket.is_strong) return { boost: 0, bucketKey: key, bucket };
-  // Linear ramp from 58% (boost 0) to 75% (boost MAX_BOOST). Caps at
-  // MAX_BOOST above 75% so a single hot streak in a 10-sample bucket
-  // doesn't drown out other signals.
-  const above = Math.max(0, bucket.win_rate - STRONG_THRESHOLD);
-  const ramp = Math.min(1, above / (0.75 - STRONG_THRESHOLD));
-  const boost = Math.round(ramp * MAX_BOOST * 1000) / 1000;
-  return { boost, bucketKey: key, bucket };
+  const homeAway: HomeAwayDim | null = leg.isHome === true ? "home" : leg.isHome === false ? "away" : null;
+
+  // Prefer fine bucket when known; fall back to coarse so the boost
+  // still fires before we have ≥10 samples in the fine bucket.
+  const candidates: HomeAwayDim[] = homeAway ? [homeAway, "any"] : ["any"];
+  for (const ha of candidates) {
+    const key = bucketKey(leg.sport, leg.marketType, range, ha);
+    const bucket = patterns.buckets.get(key);
+    if (!bucket || !bucket.is_strong) continue;
+    const above = Math.max(0, bucket.win_rate - STRONG_THRESHOLD);
+    const ramp = Math.min(1, above / (0.75 - STRONG_THRESHOLD));
+    const boost = Math.round(ramp * MAX_BOOST * 1000) / 1000;
+    return { boost, bucketKey: key, bucket };
+  }
+  return { boost: 0, bucketKey: bucketKey(leg.sport, leg.marketType, range, "any"), bucket: null };
 }
 
 /**
  * Sync convenience for value-score call sites: returns the boost
  * (0–MAX_BOOST) for a leg using the cached patterns. Returns 0 when
- * the cache hasn't loaded yet — callers don't need an await.
+ * the cache hasn't loaded yet — callers don't need an await. Pass
+ * isHome when the call site knows it (team_moneyline / spread); the
+ * lookup falls back to coarse-bucket if the fine bucket isn't strong.
  */
 export function computePatternBoostSync(leg: {
   sport: string;
   marketType: string;
   americanOdds: number | null | undefined;
+  isHome?: boolean | null;
 }): number {
   const cached = _cached;
   if (!cached) return 0;
