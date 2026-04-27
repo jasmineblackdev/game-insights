@@ -30,6 +30,7 @@ import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSect
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
@@ -829,6 +830,17 @@ const Index = () => {
                       mlbFastQuery.isPending ||
                       homePropsQuery.isPending
                     }
+                  />
+                </div>
+              ) : null}
+
+              {/* Daily nudge: surface when today's app_recommended
+                  parlays haven't been generated yet. Sends user to the
+                  parlay builder, which auto-saves on render. */}
+              {viewMode === "home" && homeDateMode === "today" ? (
+                <div className="mb-4">
+                  <DailyParlayCheckBanner
+                    onGenerate={() => handleViewModeChange("parlay_builder")}
                   />
                 </div>
               ) : null}
