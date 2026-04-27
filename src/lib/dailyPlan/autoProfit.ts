@@ -29,6 +29,7 @@
 
 import type { DailyPlanCard } from "@/lib/dailyPlan/dailyPlanGenerator";
 import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
+import { isBannedStatTypeForPrimary, passesQualityGates } from "@/lib/valueParlay/statTypeBans";
 import { roundStake, MAX_STAKE_PCT } from "@/lib/bankroll/staking";
 
 export type AutoProfitMode = "green" | "caution" | "no_bet";
@@ -58,13 +59,28 @@ export interface AutoProfitPlan {
 /** Daily exposure ceiling — sum of stakes today, expressed as % of bankroll. */
 const MAX_DAILY_EXPOSURE_PCT = 0.08;
 
-/** A "qualifying" ticket — passes optimizer rules with no card-level warnings. */
+/**
+ * A "qualifying" ticket — passes optimizer rules + Auto Profit's
+ * strict gates: no banned stat types in any leg, every leg passes
+ * the implied-prob/volatility/recent-hit-rate quality gates, no
+ * card-level warnings of substance, and ≤4 legs (we prefer 2-3).
+ */
 function isQualifying(card: DailyPlanCard | undefined): boolean {
   if (!card || !card.result || card.legs.length === 0) return false;
   if (card.result.cardConfidence === "low") return false;
   // High-risk-only parlays don't qualify for the safer/balanced lanes.
   const counts = card.result.riskLevelCounts;
   if (counts && counts.high > 1) return false;
+  // Hard cap: > 4 legs is too many for Auto Profit; that surface is
+  // for disciplined daily bets, not lottery tickets.
+  if (card.legs.length > 4) return false;
+  // Every leg must pass the strict quality gates and be free of
+  // banned stat types. Auto Profit/Big Win/Upside hard-fail if any
+  // leg fails implied probability, volatility, or recent hit rate.
+  for (const leg of card.legs) {
+    if (isBannedStatTypeForPrimary(leg)) return false;
+    if (!passesQualityGates(leg)) return false;
+  }
   return true;
 }
 
@@ -75,6 +91,24 @@ function isStrong(card: DailyPlanCard | undefined): boolean {
   // No optimizer warnings beyond the structural ones.
   if ((card!.result!.warnings ?? []).length >= 2) return false;
   return true;
+}
+
+/**
+ * Compare two qualifying tickets and prefer the one with 2–3 legs
+ * over a 4-leg ticket. When leg counts are equal or both ≤3,
+ * fall through to caller-decided priority (balanced > primary, etc).
+ */
+function preferFewerLegs(a: DailyPlanCard | undefined, b: DailyPlanCard | undefined): DailyPlanCard | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  const an = a.legs.length;
+  const bn = b.legs.length;
+  // Sweet spot is 2–3 legs. Penalize 4-leg parlays vs 2-3.
+  const aSweet = an >= 2 && an <= 3;
+  const bSweet = bn >= 2 && bn <= 3;
+  if (aSweet && !bSweet) return a;
+  if (bSweet && !aSweet) return b;
+  return undefined; // signal "no preference, caller picks"
 }
 
 /** Pick a HIGH-risk leg count across a card's legs. */
@@ -123,14 +157,32 @@ export function buildAutoProfit(input: BuildAutoProfitInput): AutoProfitPlan {
   }
 
   // ── Ticket selection ───────────────────────────────────────────
+  // Preference order: 2-3 strong legs > 2-3 qualifying > 4-leg
+  // qualifying. Balanced is preferred over Primary at equal
+  // sweetness because it has the best EV blend.
   let ticket: DailyPlanCard | null = null;
   if (mode === "green") {
-    // Prefer Balanced (best probability/payout balance) when strong;
-    // fall back to Primary if Balanced isn't qualifying.
-    if (isStrong(balanced)) ticket = balanced!;
-    else if (isStrong(primary)) ticket = primary!;
-    else if (isQualifying(balanced)) ticket = balanced!;
-    else if (isQualifying(primary)) ticket = primary!;
+    // First pass: pick the strongest 2-3 leg ticket.
+    const strongCandidates = [balanced, primary].filter(isStrong) as DailyPlanCard[];
+    const strongSweet = strongCandidates.find((c) => c.legs.length >= 2 && c.legs.length <= 3);
+    if (strongSweet) {
+      ticket = strongSweet;
+    } else if (strongCandidates.length > 0) {
+      ticket = strongCandidates[0];
+    } else {
+      // Fall back to qualifying — same sweet-spot preference.
+      const qualifyingCandidates = [balanced, primary].filter(isQualifying) as DailyPlanCard[];
+      const qualSweet = qualifyingCandidates.find((c) => c.legs.length >= 2 && c.legs.length <= 3);
+      ticket = qualSweet ?? qualifyingCandidates[0] ?? null;
+    }
+    // If upside is also qualifying, only prefer it when it has 2-3 legs
+    // AND no current ticket exists. The hard cap at 4 means upside with
+    // 4 legs is automatically rejected by isQualifying above.
+    if (!ticket && isQualifying(upside)) ticket = upside!;
+    if (ticket && isQualifying(upside)) {
+      const winner = preferFewerLegs(ticket, upside);
+      if (winner) ticket = winner;
+    }
   } else if (mode === "caution") {
     // Prefer Primary (safer) when in caution mode.
     if (isQualifying(primary)) ticket = primary!;

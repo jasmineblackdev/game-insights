@@ -21,6 +21,7 @@ import {
 } from "@/lib/valueParlay/parlayOptimizer";
 import type { SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
 import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
+import { isBannedStatTypeForPrimary, passesQualityGates } from "@/lib/valueParlay/statTypeBans";
 import type { StakeRiskLevel } from "@/lib/bankroll/types";
 
 export type DailyPlanTier = "primary" | "balanced" | "upside";
@@ -54,13 +55,20 @@ function combatPassesPrimary(c: ValueBetCandidate): boolean {
   return true;
 }
 
-/** Filter the pool down to "anchor-grade" candidates suitable for Primary. */
+/**
+ * Filter the pool down to "anchor-grade" candidates suitable for Primary.
+ * Bans high-variance stat types entirely (RBI, runs, HR, steals, blocks,
+ * combat exact-method) and requires the leg pass the implied-probability
+ * + volatility + recent-hit-rate quality gates.
+ */
 function anchorPool(candidates: ValueBetCandidate[]): ValueBetCandidate[] {
   return candidates.filter((c) => {
     if (!c.isRecommended) return false;
     if (c.confidence !== "high") return false;
     if (getPropRiskLevel(c) === "high") return false;
     if (!combatPassesPrimary(c)) return false;
+    if (isBannedStatTypeForPrimary(c)) return false;
+    if (!passesQualityGates(c)) return false;
     return true;
   });
 }
