@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { useBankroll } from "@/context/BankrollContext";
 import { BankrollPanel } from "./BankrollPanel";
 import { LocalOnlyBadge } from "@/components/LocalOnlyBadge";
+import { stageForBankroll } from "@/lib/bankroll/scalingLadder";
 import { cn } from "@/lib/utils";
 
 function fmt(n: number): string {
@@ -147,6 +148,29 @@ export function BankrollWidget({ compact = false }: { compact?: boolean }) {
 
       {open ? (
         <div className="border-t border-border p-3 sm:p-4 space-y-4">
+          {/* Scaling Ladder — surface the bankroll stage so users
+              understand WHY their stake suggestions are what they are. */}
+          {(() => {
+            const stage = stageForBankroll(currentBankroll);
+            return (
+              <div className="rounded-md border border-border/60 bg-background/40 p-2 flex items-start gap-2">
+                <span className={cn(
+                  "text-[10px] font-bold tracking-wider uppercase rounded-full px-2 py-0.5",
+                  stage.stage === "beginner"   && "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+                  stage.stage === "building"   && "bg-sky-500/15 text-sky-700 dark:text-sky-400",
+                  stage.stage === "established"&& "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+                  stage.stage === "pro"        && "bg-violet-500/15 text-violet-700 dark:text-violet-400",
+                )}>
+                  {stage.label}
+                </span>
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  Max stake: <span className="font-bold text-foreground tabular-nums">{(stage.maxStakePct * 100).toFixed(0)}%</span> per bet
+                  {" · "}
+                  {stage.description}
+                </p>
+              </div>
+            );
+          })()}
           <BankrollPanel onClose={() => setOpen(false)} />
         </div>
       ) : null}

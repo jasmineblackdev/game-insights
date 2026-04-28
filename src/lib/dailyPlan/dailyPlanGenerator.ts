@@ -23,6 +23,7 @@ import type { SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/typ
 import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
 import { isBannedStatTypeForPrimary, passesQualityGates } from "@/lib/valueParlay/statTypeBans";
 import { evaluateLeg, type SharpThresholds } from "@/lib/learning/sharpMode";
+import { isSportAvoided } from "@/lib/learning/sportPriority";
 import type { StakeRiskLevel } from "@/lib/bankroll/types";
 
 export type DailyPlanTier = "primary" | "balanced" | "upside";
@@ -167,8 +168,14 @@ export function generateDailyPlan(input: DailyPlanInput): DailyPlanCard[] {
     ? input.candidates.filter((c) => evaluateLeg(c, input.sharpThresholds).passes)
     : input.candidates;
 
+  // Sport Priority pre-filter — drop candidates from sports we've
+  // measured as avoid-tier (≥25 samples + shrunk win rate ≤40%). The
+  // cache is permissive when not loaded yet (no avoid list = no
+  // exclusions), so this never starves the pipeline before data lands.
+  const sportFiltered = sharpFiltered.filter((c) => !isSportAvoided(String(c.sport)));
+
   const filterPool = (extraExclude: Set<string>): ValueBetCandidate[] =>
-    sharpFiltered.filter((c) => !extraExclude.has(c.id) && !excludeIds.has(c.id));
+    sportFiltered.filter((c) => !extraExclude.has(c.id) && !excludeIds.has(c.id));
 
   // ── Primary ──────────────────────────────────────────────────────
   const primaryResult = buildPrimary(filterPool(new Set()));

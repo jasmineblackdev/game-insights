@@ -12,6 +12,7 @@
  */
 
 import type { StakeRiskLevel } from "./types";
+import { stageMaxStakePctFor } from "@/lib/bankroll/scalingLadder";
 
 export const MIN_STAKE = 1;
 export const MAX_STAKE_PCT = 0.05;
@@ -57,7 +58,10 @@ export function suggestStakeForRisk(
     return { stake: 0, pctOfBankroll: 0, capped: false };
   }
   const targetPct = RISK_PCT[risk] ?? RISK_PCT.medium;
-  const cap = bankroll * MAX_STAKE_PCT;
+  // Scaling Ladder — stage-aware cap. Smaller stages get a tighter
+  // cap to protect the roll; Pro stage tightens too (defend > grow).
+  const stagePct = stageMaxStakePctFor(bankroll);
+  const cap = bankroll * Math.min(MAX_STAKE_PCT, stagePct);
   const raw = Math.min(bankroll * targetPct, cap);
   const stake = roundStake(raw);
   const capped = stake >= Math.floor(cap);

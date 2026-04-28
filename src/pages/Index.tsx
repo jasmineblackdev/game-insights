@@ -32,11 +32,13 @@ import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
+import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
 import { loadMlReadiness } from "@/lib/learning/mlReadiness";
+import { loadSportPriority } from "@/lib/learning/sportPriority";
 import { useImpressionLogging } from "@/hooks/useImpressionLogging";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
@@ -453,6 +455,9 @@ const Index = () => {
     // ML readiness — drives the "RULES / LEARNING / CALIBRATED" badge
     // shown on every pick. Same 5-min TTL.
     void loadMlReadiness();
+    // Sport priority — drives the daily-plan avoid filter + (later)
+    // Pro Mode top/secondary sport selection.
+    void loadSportPriority();
   }, []);
 
   // Auto-advance to "week" if no today fights exist (non-fight nights)
@@ -857,6 +862,7 @@ const Index = () => {
                   are missing. */}
               {viewMode === "home" && homeDateMode === "today" ? (
                 <div className="mb-4 space-y-2">
+                  <BankrollDisciplineBanner />
                   <SharpModeBanner />
                   <DailyParlayCheckBanner
                     onGenerate={() => handleViewModeChange("parlay_builder")}

@@ -62,6 +62,7 @@ import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import { Disclosure } from "@/components/ui/disclosure";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
+import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
 import { useSharpMode } from "@/context/SharpModeContext";
 import { useImpressionLogging } from "@/hooks/useImpressionLogging";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
@@ -586,6 +587,7 @@ export default function DailyPlanPage() {
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6">
+        <BankrollDisciplineBanner />
         <SharpModeBanner />
         <BankrollWidget />
 
