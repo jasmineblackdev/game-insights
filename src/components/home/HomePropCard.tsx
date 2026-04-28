@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { cn } from "@/lib/utils";
 import { MlReadinessBadge } from "@/components/MlReadinessBadge";
+import { SharpBadges } from "@/components/SharpBadges";
 import { Disclosure } from "@/components/ui/disclosure";
 import { useBankroll } from "@/context/BankrollContext";
 import {
@@ -77,6 +78,11 @@ export function HomePropCard({ pred, rank }: HomePropCardProps) {
           </span>
           <span className="text-xs text-muted-foreground font-medium">Prop #{rank}</span>
           <MlReadinessBadge sport={pred.sport} marketType="player_prop" />
+          <SharpBadges
+            americanOdds={pred.american_odds ?? null}
+            modelProbability={pred.ml_hit_probability ?? null}
+            lineMovementPp={pred.line_delta != null ? -pred.line_delta : null}
+          />
           <span className="text-[10px] font-medium text-muted-foreground ml-auto">{pred.sport}</span>
         </div>
         <p className="text-xs text-muted-foreground">{pred.player_name}</p>

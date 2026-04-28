@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, XCircle, Minus, Clock, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SharpModeSettings } from "@/components/SharpModeSettings";
 import { cn } from "@/lib/utils";
 import {
   fetchMyPicks,
@@ -269,6 +270,11 @@ export default function PicksPage() {
       </header>
 
       <main className="container max-w-4xl mx-auto py-6 sm:py-8 space-y-6">
+        {/* Sharp Mode toggle — disciplined edge-only filter. Surface
+            here for now; will move to a dedicated /settings route
+            when one exists. */}
+        <SharpModeSettings />
+
         {/* ── Title + accuracy ──────────────────────── */}
         <div className="space-y-3">
           <h1 className="font-display font-bold text-2xl sm:text-3xl text-foreground">My Picks</h1>

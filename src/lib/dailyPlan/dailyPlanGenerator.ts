@@ -22,6 +22,7 @@ import {
 import type { SmartParlayResult, ValueBetCandidate } from "@/lib/valueParlay/types";
 import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
 import { isBannedStatTypeForPrimary, passesQualityGates } from "@/lib/valueParlay/statTypeBans";
+import { evaluateLeg, type SharpThresholds } from "@/lib/learning/sharpMode";
 import type { StakeRiskLevel } from "@/lib/bankroll/types";
 
 export type DailyPlanTier = "primary" | "balanced" | "upside";
@@ -44,6 +45,16 @@ export interface DailyPlanInput {
   lockedLegIds?: Set<string>;
   /** Legs already used in earlier tiers, excluded from this tier. */
   exclude?: Set<string>;
+  /**
+   * When true, Sharp Mode gates apply: candidate pool pre-filtered by
+   * evaluateLeg (edge / EV / quality / sample size), Upside tier is
+   * dropped entirely, and the generator may return only Primary +
+   * Balanced. Empty results are valid — UI surfaces "No sharp bets
+   * today" instead of degrading the filter.
+   */
+  sharpMode?: boolean;
+  /** Override default Sharp thresholds (from SharpModeContext). */
+  sharpThresholds?: SharpThresholds;
 }
 
 /** Combat-sport candidates only pass into Primary if data quality is strong. */
@@ -149,8 +160,15 @@ export function generateDailyPlan(input: DailyPlanInput): DailyPlanCard[] {
   const lockedIds = input.lockedLegIds ?? new Set<string>();
   const excludeIds = new Set<string>(input.exclude ?? []);
 
+  // Sharp Mode pre-filter — candidates that don't pass evaluateLeg
+  // never reach any tier. This is the single chokepoint so all three
+  // tiers (Primary/Balanced/Upside) inherit the strict filter.
+  const sharpFiltered = input.sharpMode
+    ? input.candidates.filter((c) => evaluateLeg(c, input.sharpThresholds).passes)
+    : input.candidates;
+
   const filterPool = (extraExclude: Set<string>): ValueBetCandidate[] =>
-    input.candidates.filter((c) => !extraExclude.has(c.id) && !excludeIds.has(c.id));
+    sharpFiltered.filter((c) => !extraExclude.has(c.id) && !excludeIds.has(c.id));
 
   // ── Primary ──────────────────────────────────────────────────────
   const primaryResult = buildPrimary(filterPool(new Set()));
@@ -165,13 +183,19 @@ export function generateDailyPlan(input: DailyPlanInput): DailyPlanCard[] {
   const balancedUsed = new Set<string>(balancedResult?.legs.map((l) => l.id) ?? []);
 
   // ── Upside ───────────────────────────────────────────────────────
-  // Exclude both prior tiers' legs unless locked.
-  const upExclude = new Set<string>(
-    [...primaryUsed, ...balancedUsed].filter((id) => !lockedIds.has(id)),
-  );
-  const upsideResult = optimizeForMode(filterPool(upExclude), "aggressive");
+  // Sharp Mode disables Upside entirely — that tier is by design
+  // higher-payout-higher-risk and doesn't fit the disciplined surface.
+  // Empty Upside in Sharp Mode shows as "—" in the UI; user gets
+  // Primary + Balanced only.
+  let upsideResult: SmartParlayResult | null = null;
+  if (!input.sharpMode) {
+    const upExclude = new Set<string>(
+      [...primaryUsed, ...balancedUsed].filter((id) => !lockedIds.has(id)),
+    );
+    upsideResult = optimizeForMode(filterPool(upExclude), "aggressive");
+  }
 
-  return [
+  const cards: DailyPlanCard[] = [
     {
       tier: "primary",
       legs: primaryResult?.legs ?? [],
@@ -188,15 +212,18 @@ export function generateDailyPlan(input: DailyPlanInput): DailyPlanCard[] {
       whyThisBet: whyForTier("balanced", balancedResult),
       weakestLegId: balancedResult?.weakestLegId,
     },
-    {
+  ];
+  if (!input.sharpMode) {
+    cards.push({
       tier: "upside",
       legs: upsideResult?.legs ?? [],
       result: upsideResult,
       stakeRisk: stakeRiskFor("upside"),
       whyThisBet: whyForTier("upside", upsideResult),
       weakestLegId: upsideResult?.weakestLegId,
-    },
-  ];
+    });
+  }
+  return cards;
 }
 
 export function tierLabel(t: DailyPlanTier): string {

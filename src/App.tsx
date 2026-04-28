@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { EdgeCardProvider } from "@/context/EdgeCardContext";
 import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { BankrollProvider } from "@/context/BankrollContext";
+import { SharpModeProvider } from "@/context/SharpModeContext";
 import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StickyParlaySlipDrawer } from "@/components/StickyParlaySlipDrawer";
@@ -75,6 +76,7 @@ const App = () => (
         <EdgeCardProvider>
           <ValueParlayProvider>
           <BankrollProvider>
+          <SharpModeProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
@@ -100,6 +102,7 @@ const App = () => (
               </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
+          </SharpModeProvider>
           </BankrollProvider>
           </ValueParlayProvider>
         </EdgeCardProvider>

@@ -61,6 +61,8 @@ import { useBankroll } from "@/context/BankrollContext";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import { Disclosure } from "@/components/ui/disclosure";
+import { SharpModeBanner } from "@/components/SharpModeBanner";
+import { useSharpMode } from "@/context/SharpModeContext";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
@@ -417,6 +419,10 @@ export default function DailyPlanPage() {
     publishCandidatePool(candidates);
   }, [candidates, publishCandidatePool]);
 
+  // Sharp Mode — when enabled, drives the generator's strict gate
+  // pipeline + drops the Upside tier.
+  const { enabled: sharpEnabled, thresholds: sharpThresholds } = useSharpMode();
+
   // ── Plan state ───────────────────────────────────────────────────
   const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());
   const [regenerateTick, setRegenerateTick] = useState(0);
@@ -425,12 +431,17 @@ export default function DailyPlanPage() {
   const [tierOverrides, setTierOverrides] = useState<Partial<Record<DailyPlanCard["tier"], DailyPlanCard>>>({});
 
   const generated = useMemo<DailyPlanCard[]>(
-    () => generateDailyPlan({ candidates, lockedLegIds: lockedIds }),
+    () => generateDailyPlan({
+      candidates,
+      lockedLegIds: lockedIds,
+      sharpMode: sharpEnabled,
+      sharpThresholds: sharpEnabled ? sharpThresholds : undefined,
+    }),
     // regenerateTick forces recompute when user hits Regenerate even if
     // candidates/lockedIds haven't changed; useful when the optimizer's
     // output is stable across the same input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [candidates, lockedIds, regenerateTick],
+    [candidates, lockedIds, regenerateTick, sharpEnabled, sharpThresholds],
   );
 
   /** Apply any per-tier overrides on top of the generator's plan. */
@@ -564,6 +575,7 @@ export default function DailyPlanPage() {
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-6">
+        <SharpModeBanner />
         <BankrollWidget />
 
         {!loading && plan.length > 0 ? (

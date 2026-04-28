@@ -10,6 +10,7 @@ import { useMemo } from "react";
 import type { GamePrediction } from "@/data/mockGames";
 import { cn } from "@/lib/utils";
 import { MlReadinessBadge } from "@/components/MlReadinessBadge";
+import { SharpBadges } from "@/components/SharpBadges";
 import { Disclosure } from "@/components/ui/disclosure";
 import { useBankroll } from "@/context/BankrollContext";
 import {
@@ -72,6 +73,11 @@ export function HomePickCard({ game, rank, onSelect }: HomePickCardProps) {
           </span>
           <span className="text-xs text-muted-foreground font-medium">Pick #{rank}</span>
           <MlReadinessBadge sport={game.league} marketType="team_moneyline" />
+          <SharpBadges
+            americanOdds={americanNum ?? null}
+            modelProbability={prob / 100}
+            lineMovementPp={game._meta?.quality?.market?.line_movement_home_pp ?? null}
+          />
           <span className="text-[10px] font-medium text-muted-foreground ml-auto">{game.league.toUpperCase()}</span>
         </div>
         <p className="font-display font-bold text-lg text-foreground leading-tight">

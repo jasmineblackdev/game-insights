@@ -160,7 +160,16 @@ function PlayerEdgeCard({
   const { lossStreak, hadLossToday } = useBankroll();
   const action = pickActionForPrediction(pred, { lossStreak, hadLossToday });
   const { addValueLeg, isValueLegAdded } = useValueParlay();
+  const addBlocked = action === "SKIP";
+  const addWarn = action === "WAIT";
+  const skipReason =
+    action === "SKIP"
+      ? "Filters say SKIP — add disabled. Override via the parlay builder."
+      : action === "WAIT"
+        ? "Bankroll says WAIT — proceeding at your own risk."
+        : "";
   const addToParlay = () => {
+    if (addWarn) toast.warning(skipReason);
     const candidate = buildEnrichedPropCandidates([pred])[0];
     if (!candidate) {
       toast.message("This prop can't be added directly — open the parlay builder.");
@@ -405,11 +414,11 @@ function PlayerEdgeCard({
           variant="default"
           className="flex-1 font-semibold min-h-11 sm:min-h-9 touch-manipulation gap-1.5"
           onClick={addToParlay}
-          disabled={action === "SKIP"}
-          title={action === "SKIP" ? "This pick is flagged SKIP — not recommended" : "Add this pick to your parlay slip"}
+          disabled={addBlocked}
+          title={addBlocked ? skipReason : addWarn ? skipReason : "Add this pick to your parlay slip"}
         >
           <Plus className="w-3.5 h-3.5" />
-          Add to Parlay
+          {addBlocked ? "SKIP — Add disabled" : "Add to Parlay"}
         </Button>
         <Button
           size="sm"

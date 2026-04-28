@@ -78,12 +78,13 @@ export function computeValueScore(args: {
    */
   oppositeImpliedProbability?: number;
   /**
-   * Additive boost from the user pattern coach (see
-   * src/lib/learning/userBettingPatterns.ts). When the leg falls
-   * into a (sport × market × odds_range) bucket where the user has
-   * a demonstrated edge over ≥10 samples, this nudges the raw score
-   * up by 0–0.05. Capped so a single hot streak can't drown out the
-   * other signals.
+   * Additive nudge from the user pattern coach (see
+   * src/lib/learning/userBettingPatterns.ts). Symmetric:
+   *   +0.00..+0.05 for "hot" buckets (≥10 samples, shrunk win rate ≥ 58%)
+   *   -0.05..-0.00 for "cold" buckets (≥10 samples, shrunk win rate ≤ 42%)
+   *   0 otherwise (insufficient samples or middling performance)
+   * Empirical-Bayes shrinkage protects against small-sample
+   * overconfidence — a 2/2 streak doesn't trigger anything.
    */
   userPatternBoost?: number;
 }): number {
@@ -104,8 +105,9 @@ export function computeValueScore(args: {
     lineM * 0.05 +
     rest * 0.05;
 
-  const boost = Math.max(0, Math.min(0.05, args.userPatternBoost ?? 0));
-  return Math.round(Math.min(1, raw + boost) * 1000) / 1000;
+  // Pattern-coach nudge is symmetric in [-0.05, +0.05].
+  const nudge = Math.max(-0.05, Math.min(0.05, args.userPatternBoost ?? 0));
+  return Math.round(Math.max(0, Math.min(1, raw + nudge)) * 1000) / 1000;
 }
 
 export function valueGrade(score: number): "A" | "B" | "C" | "D" {

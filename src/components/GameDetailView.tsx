@@ -25,6 +25,8 @@ import { buildPredictionVersions, phaseLabel, phaseColor, confColor, type Predic
 import { Switch } from "@/components/ui/switch";
 import { isMlbStartersUserConfirmed, setMlbStartersUserConfirmed } from "@/lib/mlbStarterConfirm";
 import { stagePendingTeamMoneyline } from "@/lib/predictionLearningIntelligence";
+import { pickActionForGame } from "@/lib/dailyPlan/pickAction";
+import { useBankroll } from "@/context/BankrollContext";
 
 interface GameDetailViewProps {
   game: GamePrediction;
@@ -78,6 +80,22 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
     if (side !== "home" && side !== "away" && side !== "draw") return;
     void stagePendingTeamMoneyline(game, side);
   }, [game]);
+
+  // Hard friction — when the per-game action returns SKIP we disable
+  // the Add-to-Parlay buttons and surface why. WAIT shows a warning
+  // toast but lets the user proceed.
+  const { lossStreak, hadLossToday } = useBankroll();
+  const pickAction = pickActionForGame(game, { lossStreak, hadLossToday });
+  const addBlocked = pickAction === "SKIP";
+  const addWarn = pickAction === "WAIT";
+  const skipReason =
+    pickAction === "SKIP"
+      ? game.confidence === "low"
+        ? "LOW confidence — add disabled. Override via the parlay builder."
+        : "Filters say SKIP. Override via the parlay builder."
+      : pickAction === "WAIT"
+        ? "Bankroll says WAIT — bet at your own risk."
+        : "";
 
   return (
     <motion.div
@@ -259,8 +277,10 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
             <Button
               size="sm"
               className="gap-1.5 font-semibold"
-              disabled={isValueLegAdded(favoredLegId) || builderLegs.length >= 12}
+              disabled={isValueLegAdded(favoredLegId) || builderLegs.length >= 12 || addBlocked}
+              title={addBlocked ? skipReason : undefined}
               onClick={() => {
+                if (addWarn) toast.warning(skipReason);
                 const leg = buildMoneylineLeg(game, favoredSide);
                 if (!leg) {
                   toast.message("No usable line for this side yet");
@@ -278,14 +298,18 @@ export function GameDetailView({ game, onBack, onMlbStartersConfirmChange }: Gam
               <Plus className="w-3.5 h-3.5" />
               {isValueLegAdded(favoredLegId)
                 ? "On parlay slip"
-                : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to parlay`}
+                : addBlocked
+                  ? `SKIP — ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} blocked`
+                  : `Add ${favoredSide === "home" ? game.homeTeam.abbreviation : game.awayTeam.abbreviation} to parlay`}
             </Button>
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5 text-xs"
-              disabled={isValueLegAdded(otherLegId) || builderLegs.length >= 12}
+              disabled={isValueLegAdded(otherLegId) || builderLegs.length >= 12 || addBlocked}
+              title={addBlocked ? skipReason : undefined}
               onClick={() => {
+                if (addWarn) toast.warning(skipReason);
                 const other: EdgeSide = favoredSide === "home" ? "away" : "home";
                 const leg = buildMoneylineLeg(game, other);
                 if (!leg) {

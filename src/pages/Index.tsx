@@ -31,6 +31,7 @@ import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
+import { SharpModeBanner } from "@/components/SharpModeBanner";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
@@ -838,11 +839,13 @@ const Index = () => {
                 </div>
               ) : null}
 
-              {/* Daily nudge: surface when today's app_recommended
-                  parlays haven't been generated yet. Sends user to the
-                  parlay builder, which auto-saves on render. */}
+              {/* Daily nudge + Sharp Mode banner. Sharp banner is
+                  always visible when Sharp is on; the parlay-check
+                  banner only fires when today's app_recommended rows
+                  are missing. */}
               {viewMode === "home" && homeDateMode === "today" ? (
-                <div className="mb-4">
+                <div className="mb-4 space-y-2">
+                  <SharpModeBanner />
                   <DailyParlayCheckBanner
                     onGenerate={() => handleViewModeChange("parlay_builder")}
                   />
