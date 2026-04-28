@@ -21,13 +21,17 @@ export interface DisciplineInput {
   lossStreak: number;
   /** Total stake committed today. */
   todaysExposure: number;
+  /** Highest bankroll value reached during the current local day.
+   *  Optional — when omitted, trailing-drawdown signal is skipped. */
+  sessionHigh?: number | null;
 }
 
 export type DisciplineState =
   | "ok"               // continue normally
   | "stop_loss_hit"    // daily loss ≥ 8% → SKIP rest of day
   | "profit_locked"    // ≥10% daily gain → reduce stakes
-  | "profit_target";   // ≥20% daily gain → suggest stopping
+  | "profit_target"    // ≥20% daily gain → suggest stopping
+  | "drawdown_wait";   // ≥15% off session high → WAIT for stabilization
 
 export interface DisciplineStatus {
   state: DisciplineState;
@@ -42,11 +46,15 @@ export interface DisciplineStatus {
 const STOP_LOSS_PCT      = 0.08;  // 8% daily down → stop
 const PROFIT_LOCK_PCT    = 0.10;  // 10% daily up → reduce stakes (×0.5)
 const PROFIT_TARGET_PCT  = 0.20;  // 20% daily up → suggest stop
+const DRAWDOWN_PCT       = 0.15;  // 15% off session high → WAIT
 
 export function computeDiscipline(input: DisciplineInput): DisciplineStatus {
   const start = Math.max(1, input.startOfDayBankroll);
   const dailyDownPct = input.todayPnl < 0 ? Math.abs(input.todayPnl) / start : 0;
   const dailyUpPct   = input.todayPnl > 0 ? input.todayPnl / start : 0;
+  const drawdownPct  = (input.sessionHigh != null && input.sessionHigh > input.currentBankroll)
+    ? (input.sessionHigh - input.currentBankroll) / Math.max(1, input.sessionHigh)
+    : 0;
 
   // Order matters — stop loss is the hardest guardrail; check first.
   if (dailyDownPct >= STOP_LOSS_PCT) {
@@ -62,6 +70,14 @@ export function computeDiscipline(input: DisciplineInput): DisciplineStatus {
       state: "profit_target",
       reason: `Up ${(dailyUpPct * 100).toFixed(1)}% — Profit Target reached. Locking in is the disciplined call.`,
       stakeMultiplier: 0.25,
+      blockNewBets: false,
+    };
+  }
+  if (drawdownPct >= DRAWDOWN_PCT) {
+    return {
+      state: "drawdown_wait",
+      reason: `${(drawdownPct * 100).toFixed(1)}% off your session high — WAIT for the next clean setup.`,
+      stakeMultiplier: 0.5,
       blockNewBets: false,
     };
   }
@@ -85,4 +101,5 @@ export const DISCIPLINE_THRESHOLDS = {
   STOP_LOSS_PCT,
   PROFIT_LOCK_PCT,
   PROFIT_TARGET_PCT,
+  DRAWDOWN_PCT,
 };

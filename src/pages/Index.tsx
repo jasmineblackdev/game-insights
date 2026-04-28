@@ -33,6 +33,12 @@ import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
 import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
+import { ProModeBanner } from "@/components/ProModeBanner";
+import { ProBetCard } from "@/components/ProBetCard";
+import { useProMode } from "@/context/ProModeContext";
+import { useSharpMode } from "@/context/SharpModeContext";
+import { useBankroll } from "@/context/BankrollContext";
+import { runProModePipeline } from "@/lib/learning/proModePipeline";
 import { Disclosure } from "@/components/ui/disclosure";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
@@ -516,6 +522,39 @@ const Index = () => {
     return [...team, ...props];
   }, [viewMode, allGamesWithIntel, oddsMapAll, homePropsQuery.data]);
 
+  // Pro Mode pipeline — fires once per session-per-day when enabled.
+  // The pipeline itself is idempotent (todaysProTrade gate), so even
+  // if the effect re-runs on candidate-pool changes the queue won't
+  // get duplicate rows.
+  const proMode = useProMode();
+  const sharpMode = useSharpMode();
+  const bankroll = useBankroll();
+  const [proPipelineSummary, setProPipelineSummary] = useState<string | null>(null);
+  const [proPipelineFired, setProPipelineFired] = useState(false);
+  useEffect(() => {
+    if (!proMode.enabled) return;
+    if (proPipelineFired) return;
+    if (!bankroll.isInitialized) return;
+    if (homeAutoProfitCandidates.length === 0) return;
+    setProPipelineFired(true);
+    void runProModePipeline({
+      candidates: homeAutoProfitCandidates,
+      bankroll: {
+        currentBankroll: bankroll.currentBankroll,
+        todayPnl: bankroll.todayPnl,
+        lossStreak: bankroll.lossStreak,
+        todaysExposure: bankroll.todaysExposure,
+      },
+      sharpThresholds: sharpMode.thresholds,
+    }).then((r) => {
+      setProPipelineSummary(r.emitted ? null : r.reason);
+    });
+  }, [
+    proMode.enabled, proPipelineFired, bankroll.isInitialized,
+    homeAutoProfitCandidates, bankroll.currentBankroll, bankroll.todayPnl,
+    bankroll.lossStreak, bankroll.todaysExposure, sharpMode.thresholds,
+  ]);
+
   const draftPicksQuery = useQuery({
     queryKey: ["draft-picks", league],
     queryFn: () => fetchDraftPicks(league),
@@ -863,7 +902,9 @@ const Index = () => {
               {viewMode === "home" && homeDateMode === "today" ? (
                 <div className="mb-4 space-y-2">
                   <BankrollDisciplineBanner />
+                  <ProModeBanner pipelineSummary={proPipelineSummary} />
                   <SharpModeBanner />
+                  <ProBetCard />
                   <DailyParlayCheckBanner
                     onGenerate={() => handleViewModeChange("parlay_builder")}
                   />

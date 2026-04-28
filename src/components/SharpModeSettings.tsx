@@ -4,19 +4,52 @@
  * PicksPage but can be dropped into a dedicated Settings route later.
  */
 
-import { Crosshair, RotateCcw } from "lucide-react";
+import { useEffect } from "react";
+import { Crosshair, Crown, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { useSharpMode } from "@/context/SharpModeContext";
+import { useProMode } from "@/context/ProModeContext";
 import { SHARP_DEFAULTS } from "@/lib/learning/sharpMode";
 
 export function SharpModeSettings() {
   const { enabled, thresholds, setEnabled, setThresholds, reset } = useSharpMode();
+  const pro = useProMode();
+
+  // Pro Mode forces Sharp on as a dependency — Sharp's filter pipeline
+  // is what produces the candidates the Pro pipeline ranks by EV.
+  // Toggling Sharp off while Pro is on is non-sensical, so we lock it.
+  useEffect(() => {
+    if (pro.enabled && !enabled) setEnabled(true);
+  }, [pro.enabled, enabled, setEnabled]);
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 space-y-4">
+    <div className="space-y-4">
+      {/* Pro Mode toggle — top-of-stack since it cascades. */}
+      <section className="rounded-lg border-2 border-violet-500/30 bg-violet-500/[0.04] p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2">
+            <Crown className="w-5 h-5 text-violet-600 dark:text-violet-400 mt-0.5" />
+            <div>
+              <h2 className="font-display font-bold text-base text-foreground">Pro Mode</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Disciplined daily decision pipeline. Sport Priority → Sharp filter → Bankroll
+                discipline → Scaling Ladder. Emits at most one Pro Bet per day to the queue.
+                Empty days are valid.
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Forces Sharp Mode on. One trade max per day. Bankroll guardrails (Stop Loss /
+                Profit Lock) gate Confirm.
+              </p>
+            </div>
+          </div>
+          <Switch checked={pro.enabled} onCheckedChange={pro.setEnabled} />
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-border bg-card p-4 space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
           <Crosshair className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mt-0.5" />
@@ -26,9 +59,14 @@ export function SharpModeSettings() {
               Stricter filter pipeline — only legs with measurable edge, positive EV, and enough
               sample-size history surface. Daily Plan drops the Upside tier. Empty days are valid.
             </p>
+            {pro.enabled ? (
+              <p className="text-[11px] text-violet-600 dark:text-violet-400 mt-1 font-semibold">
+                Required by Pro Mode — toggle disabled.
+              </p>
+            ) : null}
           </div>
         </div>
-        <Switch checked={enabled} onCheckedChange={setEnabled} />
+        <Switch checked={enabled} onCheckedChange={setEnabled} disabled={pro.enabled} />
       </div>
 
       {enabled ? (
@@ -90,6 +128,7 @@ export function SharpModeSettings() {
           </div>
         </div>
       ) : null}
-    </section>
+      </section>
+    </div>
   );
 }

@@ -9,6 +9,7 @@ import { EdgeCardProvider } from "@/context/EdgeCardContext";
 import { ValueParlayProvider } from "@/context/ValueParlayContext";
 import { BankrollProvider } from "@/context/BankrollContext";
 import { SharpModeProvider } from "@/context/SharpModeContext";
+import { ProModeProvider } from "@/context/ProModeContext";
 import { LiveEdgeNotificationProvider } from "@/context/LiveEdgeNotificationContext";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { StickyParlaySlipDrawer } from "@/components/StickyParlaySlipDrawer";
@@ -77,6 +78,7 @@ const App = () => (
           <ValueParlayProvider>
           <BankrollProvider>
           <SharpModeProvider>
+          <ProModeProvider>
           <TooltipProvider>
             <Toaster />
             <Sonner />
@@ -102,6 +104,7 @@ const App = () => (
               </LiveEdgeNotificationProvider>
             </BrowserRouter>
           </TooltipProvider>
+          </ProModeProvider>
           </SharpModeProvider>
           </BankrollProvider>
           </ValueParlayProvider>

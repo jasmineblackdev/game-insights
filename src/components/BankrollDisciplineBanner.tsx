@@ -5,10 +5,12 @@
  * applied at the autoProfit / suggestStake layer (next session).
  */
 
-import { Shield, ShieldAlert, ShieldCheck, Trophy } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Shield, ShieldAlert, ShieldCheck, Trophy, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBankroll } from "@/context/BankrollContext";
 import { computeDiscipline } from "@/lib/bankroll/discipline";
+import { pokeSessionHigh } from "@/lib/bankroll/sessionHigh";
 
 export function BankrollDisciplineBanner() {
   const {
@@ -19,6 +21,15 @@ export function BankrollDisciplineBanner() {
     todaysExposure,
   } = useBankroll();
 
+  // Track today's session high in localStorage. The poke updates the
+  // stored value when current exceeds it; the returned value is what
+  // we feed into computeDiscipline so trailing-drawdown can fire.
+  const [sessionHigh, setSessionHigh] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isInitialized || currentBankroll <= 0) return;
+    setSessionHigh(pokeSessionHigh(currentBankroll));
+  }, [isInitialized, currentBankroll]);
+
   if (!isInitialized) return null;
   if (currentBankroll <= 0) return null;
 
@@ -28,6 +39,7 @@ export function BankrollDisciplineBanner() {
     todayPnl,
     lossStreak,
     todaysExposure,
+    sessionHigh,
   });
 
   if (status.state === "ok") return null;
@@ -39,18 +51,23 @@ export function BankrollDisciplineBanner() {
         ? Trophy
         : status.state === "profit_locked"
           ? ShieldCheck
-          : Shield;
+          : status.state === "drawdown_wait"
+            ? TrendingDown
+            : Shield;
 
   const tone =
     status.state === "stop_loss_hit"
       ? "border-red-500/40 bg-red-500/[0.06] text-red-700 dark:text-red-400"
       : status.state === "profit_target"
         ? "border-violet-500/40 bg-violet-500/[0.06] text-violet-700 dark:text-violet-400"
-        : "border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-400";
+        : status.state === "drawdown_wait"
+          ? "border-amber-500/40 bg-amber-500/[0.06] text-amber-700 dark:text-amber-400"
+          : "border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-400";
 
   const label =
     status.state === "stop_loss_hit" ? "STOP LOSS"
     : status.state === "profit_target" ? "PROFIT TARGET"
+    : status.state === "drawdown_wait" ? "DRAWDOWN WAIT"
     : "PROFIT LOCK";
 
   return (
