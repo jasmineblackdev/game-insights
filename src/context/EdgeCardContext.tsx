@@ -31,6 +31,10 @@ import {
   slipAggregateConfidence,
   computeSlipCorrelationScore,
 } from "@/lib/edgeCardScoring";
+import {
+  upsertEdgeCardHistoryEntry,
+  loadRemoteHistoryMerge,
+} from "@/lib/edgeCard/edgeCardHistorySync";
 
 const STORAGE_SLIP = "gamelens-edge-slip-v1";
 const STORAGE_HISTORY = "gamelens-edge-history-v1";
@@ -116,6 +120,21 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_HISTORY, JSON.stringify(history));
   }, [history]);
+
+  // Pull any remote history the local cache doesn't have. Runs once
+  // on mount; the merge helper dedupes by client_id so re-runs are
+  // cheap. Recovers across browser-clear / device-switch.
+  useEffect(() => {
+    let cancelled = false;
+    loadRemoteHistoryMerge(history).then((merged) => {
+      if (cancelled) return;
+      // Only call setHistory if the merge added rows — avoids an
+      // infinite re-sync loop.
+      if (merged.length !== history.length) setHistory(merged);
+    }).catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const setCardSize = useCallback((n: EdgeCardSize) => {
     setSlipState((s) => ({ ...s, cardSize: n, items: s.items.slice(0, n) }));
@@ -255,20 +274,27 @@ export function EdgeCardProvider({ children }: { children: ReactNode }) {
       riskLabel,
     };
     setHistory((h) => [entry, ...h].slice(0, 30));
+    // Mirror to durable storage so a localStorage clear / device
+    // switch doesn't lose the saved slip.
+    void upsertEdgeCardHistoryEntry(entry);
   }, [slip, cardSize]);
 
   const setHistoryOutcome = useCallback((entryId: string, outcome: EdgeSlipOutcome | null) => {
-    setHistory((h) =>
-      h.map((e) => {
+    setHistory((h) => {
+      const next = h.map((e) => {
         if (e.id !== entryId) return e;
         if (outcome === null) {
-          const next = { ...e };
-          delete next.outcome;
-          return next;
+          const cleared = { ...e };
+          delete cleared.outcome;
+          return cleared;
         }
         return { ...e, outcome };
-      })
-    );
+      });
+      // Mirror the outcome change to the durable backup.
+      const updated = next.find((e) => e.id === entryId);
+      if (updated) void upsertEdgeCardHistoryEntry(updated);
+      return next;
+    });
   }, []);
 
   const isOnSlip = useCallback(
