@@ -74,6 +74,45 @@ const WINDOW_DAYS   = Number(args["window-days"] ?? 90);
 const SPORT_FILTER  = args.sport ? String(args.sport).toLowerCase() : null;
 const EMIT_JSON     = args.json === "true";
 
+// Source filtering — operate on the bridge's `extra.parlay_source`
+// label. --exclude-source drops matching rows entirely; --weight-source
+// scales their contribution to the metrics so the row counts toward
+// "saw it" but with reduced influence over win-rate / Brier / log-loss.
+//
+//   --exclude-source=user_manual
+//   --exclude-source=user_manual,edge_card_legacy
+//   --weight-source=user_manual:0.5
+//   --weight-source=user_manual:0.5,edge_card_legacy:0.25
+//
+// Rationale: manual entries use bookmaker-implied probability as the
+// model_probability proxy, so calibration metrics measure bookmaker
+// accuracy, not ours. The flags let the analyst decide whether to
+// keep them in (combined view), drop them (model-only view), or
+// down-weight them (anchored on app-generated samples).
+const EXCLUDE_SOURCES = new Set(
+  String(args["exclude-source"] ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+const WEIGHT_SOURCES = (() => {
+  const raw = String(args["weight-source"] ?? "").trim();
+  const map = new Map();
+  if (!raw) return map;
+  for (const pair of raw.split(",")) {
+    const [name, w] = pair.split(":").map((x) => x.trim());
+    if (!name || w === undefined) continue;
+    const n = Number(w);
+    if (Number.isFinite(n) && n >= 0) map.set(name.toLowerCase(), n);
+  }
+  return map;
+})();
+const sourceWeight = (src) => {
+  const k = String(src ?? "").toLowerCase();
+  if (EXCLUDE_SOURCES.has(k)) return 0;
+  return WEIGHT_SOURCES.has(k) ? WEIGHT_SOURCES.get(k) : 1;
+};
+
 // ── Metric helpers ──────────────────────────────────────────────────
 
 function brierScore(rows) {
@@ -84,8 +123,10 @@ function brierScore(rows) {
     const p = Number(r.hit_probability_at_prediction);
     const y = r.outcome === "win" ? 1 : 0;
     if (!Number.isFinite(p)) continue;
-    sum += (p - y) ** 2;
-    n++;
+    const w = r._weight ?? 1;
+    if (w === 0) continue;
+    sum += w * (p - y) ** 2;
+    n   += w;
   }
   return n ? sum / n : null;
 }
@@ -98,8 +139,10 @@ function logLoss(rows) {
     if (r.outcome !== "win" && r.outcome !== "loss") continue;
     const p = Math.min(1 - eps, Math.max(eps, Number(r.hit_probability_at_prediction)));
     const y = r.outcome === "win" ? 1 : 0;
-    sum += -(y * Math.log(p) + (1 - y) * Math.log(1 - p));
-    n++;
+    const w = r._weight ?? 1;
+    if (w === 0) continue;
+    sum += w * -(y * Math.log(p) + (1 - y) * Math.log(1 - p));
+    n   += w;
   }
   return n ? sum / n : null;
 }
@@ -121,14 +164,16 @@ function calibrationBuckets(rows) {
     if (r.outcome !== "win" && r.outcome !== "loss") continue;
     const p = Number(r.hit_probability_at_prediction);
     if (!Number.isFinite(p)) continue;
+    const w = r._weight ?? 1;
+    if (w === 0) continue;
     const idx = Math.min(9, Math.max(0, Math.floor(p * 10)));
-    bins[idx].predicted += p;
-    bins[idx].observed  += r.outcome === "win" ? 1 : 0;
-    bins[idx].n++;
+    bins[idx].predicted += w * p;
+    bins[idx].observed  += w * (r.outcome === "win" ? 1 : 0);
+    bins[idx].n         += w;
   }
   return bins.map((b) => ({
     range:          `${b.low.toFixed(1)}-${b.high.toFixed(1)}`,
-    n:              b.n,
+    n:              Math.round(b.n * 100) / 100,
     avg_predicted:  b.n ? Math.round((b.predicted / b.n) * 1000) / 1000 : null,
     observed:       b.n ? Math.round((b.observed  / b.n) * 1000) / 1000 : null,
     gap:            b.n
@@ -168,10 +213,17 @@ function clvMetrics(rows) {
 }
 
 function winRate(rows) {
-  const decided = rows.filter((r) => r.outcome === "win" || r.outcome === "loss");
-  if (!decided.length) return null;
-  const wins = decided.filter((r) => r.outcome === "win").length;
-  return Math.round((100 * wins / decided.length) * 10) / 10;
+  let weightedWins = 0;
+  let weightedTotal = 0;
+  for (const r of rows) {
+    if (r.outcome !== "win" && r.outcome !== "loss") continue;
+    const w = r._weight ?? 1;
+    if (w === 0) continue;
+    weightedTotal += w;
+    if (r.outcome === "win") weightedWins += w;
+  }
+  if (!weightedTotal) return null;
+  return Math.round((100 * weightedWins / weightedTotal) * 10) / 10;
 }
 
 // ── Main ────────────────────────────────────────────────────────────
@@ -192,7 +244,7 @@ async function main() {
     .select(
       "id, sport, market_type, prediction_phase, confidence, " +
       "model_probability, edge, outcome, settled_at, " +
-      "american_odds, implied_probability"
+      "american_odds, implied_probability, extra"
     )
     .gte("settled_at", cutoff)
     .in("outcome", ["win", "loss"])
@@ -210,21 +262,32 @@ async function main() {
   }
 
   // Normalize to the field names the metric helpers + group key use.
-  const data = raw.map((r) => ({
-    prediction_id:                  r.id,
-    sport:                          r.sport,
-    market_type:                    r.market_type,
-    context:                        r.prediction_phase,
-    confidence:                     r.confidence,
-    hit_probability_at_prediction:  r.model_probability,
-    edge_at_prediction:             r.edge,
-    outcome:                        r.outcome,
-    resolved_at:                    r.settled_at,
-    clv_pp:                         null,
-    closing_line_american:          null,
-    opening_line_american:          null,
-    pre_confirmation_flag:          false,
-  }));
+  // Each row also carries _weight (from --exclude-source/--weight-source)
+  // and parlay_source (read from extra) for downstream rollups.
+  const data = raw.map((r) => {
+    const parlaySource = r.extra?.parlay_source ?? null;
+    const clvFromExtra = r.extra?.clv_pp;
+    const clvNum = typeof clvFromExtra === "number" ? clvFromExtra
+      : typeof clvFromExtra === "string" ? Number(clvFromExtra)
+      : null;
+    return {
+      prediction_id:                  r.id,
+      sport:                          r.sport,
+      market_type:                    r.market_type,
+      context:                        r.prediction_phase,
+      confidence:                     r.confidence,
+      hit_probability_at_prediction:  r.model_probability,
+      edge_at_prediction:             r.edge,
+      outcome:                        r.outcome,
+      resolved_at:                    r.settled_at,
+      clv_pp:                         clvNum != null && Number.isFinite(clvNum) ? clvNum : null,
+      closing_line_american:          null,
+      opening_line_american:          null,
+      pre_confirmation_flag:          false,
+      parlay_source:                  parlaySource,
+      _weight:                        sourceWeight(parlaySource),
+    };
+  });
 
   const overall = {
     window_days:        WINDOW_DAYS,
