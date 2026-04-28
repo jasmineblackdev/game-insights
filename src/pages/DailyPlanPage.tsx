@@ -63,6 +63,7 @@ import { AutoProfitCard } from "@/components/dailyPlan/AutoProfitCard";
 import { Disclosure } from "@/components/ui/disclosure";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
 import { useSharpMode } from "@/context/SharpModeContext";
+import { useImpressionLogging } from "@/hooks/useImpressionLogging";
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
@@ -159,6 +160,7 @@ function PlanCard({ card, lockedIds, onToggleLock, onRegenerate, onPlaced, onRep
       result: card.result,
       reasons: card.whyThisBet,
       modelVersion: "daily-plan-v1",
+      source: "daily_plan",
     });
     toast.success(`${tierLabel(card.tier)} marked as placed`);
     onPlaced();
@@ -422,6 +424,15 @@ export default function DailyPlanPage() {
   // Sharp Mode — when enabled, drives the generator's strict gate
   // pipeline + drops the Upside tier.
   const { enabled: sharpEnabled, thresholds: sharpThresholds } = useSharpMode();
+
+  // Forward-proof tracking — fire impression loggers when the daily
+  // pool changes. Same dedup-by-(id, day) protection applies.
+  useImpressionLogging({
+    surface: "daily_plan",
+    games: enrichedGames,
+    props: propsQuery.data?.items ?? [],
+    oddsMap,
+  });
 
   // ── Plan state ───────────────────────────────────────────────────
   const [lockedIds, setLockedIds] = useState<Set<string>>(new Set());

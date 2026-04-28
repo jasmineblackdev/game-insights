@@ -37,6 +37,7 @@ import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
 import { loadMlReadiness } from "@/lib/learning/mlReadiness";
+import { useImpressionLogging } from "@/hooks/useImpressionLogging";
 import { buildAllValueCandidates, buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
@@ -443,6 +444,7 @@ const Index = () => {
     void resolveRecommendedParlays(allGamesWithIntel);
   }, [allGamesWithIntel]);
 
+
   // Warm the user-betting-pattern cache on first render so the value
   // score boost is available for the next pick rebuild. Refreshes
   // every 5 minutes via internal cache TTL — cheap.
@@ -488,6 +490,16 @@ const Index = () => {
     () => sortPlayerEdgePredictions(homePropsQuery.data?.items ?? []).slice(0, 3),
     [homePropsQuery.data]
   );
+
+  // Forward-proof tracking — fire impression loggers from the home
+  // view too, not just the parlay builder. The underlying writers
+  // dedupe by (id, day) so this is cheap to repeat across surfaces.
+  useImpressionLogging({
+    surface: "home",
+    games: allGamesWithIntel,
+    props: topHomeProps,
+    oddsMap: oddsMapAll,
+  });
 
   // Cross-sport candidate pool for the Home Auto Profit card. Same
   // builder the parlay surface and /daily use, so picks line up.

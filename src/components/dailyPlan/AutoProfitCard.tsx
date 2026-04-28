@@ -135,6 +135,7 @@ export function AutoProfitCard({ plan, onReplaceWeakest }: Props) {
         ...skeleton.notes,
       ],
       modelVersion: "auto-profit-v1",
+      source: "auto_profit",
     });
     toast.success(`Auto Profit ticket marked as placed`);
   };

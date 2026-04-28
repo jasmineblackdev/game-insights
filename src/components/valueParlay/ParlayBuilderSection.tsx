@@ -494,14 +494,14 @@ export function ParlayBuilderSection({
     };
 
     if (triple) {
-      fire("best_value",    { tier: parlayMode, variant: "best_value",    result: triple.bestValue });
-      fire("safer",         { tier: parlayMode, variant: "safer",         result: triple.safer });
-      fire("higher_payout", { tier: parlayMode, variant: "higher_payout", result: triple.higherPayout });
+      fire("best_value",    { tier: parlayMode, variant: "best_value",    result: triple.bestValue,    source: "parlay_builder" });
+      fire("safer",         { tier: parlayMode, variant: "safer",         result: triple.safer,        source: "parlay_builder" });
+      fire("higher_payout", { tier: parlayMode, variant: "higher_payout", result: triple.higherPayout, source: "parlay_builder" });
     }
     if (cashoutTriple) {
-      fire("cashout_best",   { tier: "cashout", variant: "cashout_best",   result: cashoutTriple.bestValue });
-      fire("cashout_safer",  { tier: "cashout", variant: "cashout_safer",  result: cashoutTriple.safer });
-      fire("cashout_upside", { tier: "cashout", variant: "cashout_upside", result: cashoutTriple.higherPayout });
+      fire("cashout_best",   { tier: "cashout", variant: "cashout_best",   result: cashoutTriple.bestValue,    source: "parlay_builder" });
+      fire("cashout_safer",  { tier: "cashout", variant: "cashout_safer",  result: cashoutTriple.safer,         source: "parlay_builder" });
+      fire("cashout_upside", { tier: "cashout", variant: "cashout_upside", result: cashoutTriple.higherPayout, source: "parlay_builder" });
     }
   }, [triple, cashoutTriple, parlayMode]);
 

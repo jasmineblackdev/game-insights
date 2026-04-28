@@ -91,6 +91,22 @@ function legPayload(l: ValueBetCandidate, modelStatus: string | null): Record<st
   };
 }
 
+/**
+ * Source label categories — must match the check constraint on
+ * recommended_parlays.source (see migration
+ * 20260507000000_recommended_parlays_source_labels.sql).
+ *
+ * Defaults to "app_recommended" when callers omit the field, matching
+ * pre-migration behavior. New surfaces should pass the most specific
+ * label so analytics can split rollups by surface.
+ */
+export type RecommendedParlaySource =
+  | "app_recommended"
+  | "auto_profit"
+  | "daily_plan"
+  | "parlay_builder"
+  | "edge_card_legacy";
+
 export interface LogRecommendedParlayInput {
   tier: ParlayBuildMode;
   variant: ParlayVariant;
@@ -102,6 +118,8 @@ export interface LogRecommendedParlayInput {
   mlActive?: boolean;
   /** Build version of the model — bumps on tuning. */
   modelVersion?: string;
+  /** Surface that produced this parlay. Defaults to "app_recommended". */
+  source?: RecommendedParlaySource;
 }
 
 /**
@@ -146,7 +164,7 @@ export async function logRecommendedParlay(input: LogRecommendedParlayInput): Pr
   const marketMix = [...new Set(legs.map((l) => l.marketType))].sort().join(",");
 
   const row: Record<string, unknown> = {
-    source:                  "app_recommended",
+    source:                  input.source ?? "app_recommended",
     recommended_at:          new Date().toISOString(),
     date:                    new Date().toISOString().slice(0, 10),
     model_version:           input.modelVersion ?? "v1",
