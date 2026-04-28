@@ -359,7 +359,12 @@ export function ParlayBuilderSection({
     publishCandidatePool,
   } = useValueParlay();
 
-  const [tripleOpen, setTripleOpen] = useState(false);
+  // Default OPEN — users were missing the "Best parlays today" card
+  // because they didn't realize they had to toggle "Show triple card".
+  // The cash-out triple already shows automatically; this brings the
+  // regular triple to parity. Toggle still available for users who
+  // want the surface compacted.
+  const [tripleOpen, setTripleOpen] = useState(true);
 
   // Load Platt calibration params once per session — used by candidate
   // builders to scale raw model probabilities to observed hit rates.
@@ -755,7 +760,7 @@ export function ParlayBuilderSection({
                 Best parlays today
               </p>
               <div className="grid md:grid-cols-3 gap-3 text-xs">
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5">
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 space-y-1.5 flex flex-col">
                   <div className="flex items-center justify-between">
                     <p className="font-display font-bold text-foreground">Best value parlay</p>
                     <WouldITakePill result={triple.bestValue} />
@@ -767,8 +772,19 @@ export function ParlayBuilderSection({
                   {parlayReasons(triple.bestValue).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(triple.bestValue.legs);
+                      toast.success("Best value parlay applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
-                <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5">
+                <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-1.5 flex flex-col">
                   <div className="flex items-center justify-between">
                     <p className="font-display font-bold text-foreground">Safer alternative</p>
                     <WouldITakePill result={triple.safer} />
@@ -779,8 +795,19 @@ export function ParlayBuilderSection({
                   {parlayReasons(triple.safer).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(triple.safer.legs);
+                      toast.success("Safer alternative applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
-                <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5">
+                <div className="rounded-xl border border-violet-500/20 bg-violet-500/[0.06] p-4 space-y-1.5 flex flex-col">
                   <div className="flex items-center justify-between">
                     <p className="font-display font-bold text-foreground">Higher payout</p>
                     <WouldITakePill result={triple.higherPayout} />
@@ -791,6 +818,17 @@ export function ParlayBuilderSection({
                   {parlayReasons(triple.higherPayout).map((r) => (
                     <p key={r} className="text-[9px] text-muted-foreground/60 italic leading-snug">{r}</p>
                   ))}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(triple.higherPayout.legs);
+                      toast.success("Higher payout applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
               </div>
             </div>
@@ -808,7 +846,7 @@ export function ParlayBuilderSection({
                 </p>
               </div>
               <div className="grid md:grid-cols-3 gap-3 text-xs">
-                <div className="rounded-xl border border-sky-500/30 bg-sky-500/[0.06] p-4 space-y-1.5">
+                <div className="rounded-xl border border-sky-500/30 bg-sky-500/[0.06] p-4 space-y-1.5 flex flex-col">
                   <p className="font-display font-bold text-foreground">Best cash-out</p>
                   <p className="text-muted-foreground">{cashoutTriple.bestValue.legs.length} legs · staggered</p>
                   <p className="tabular-nums font-semibold">
@@ -817,11 +855,23 @@ export function ParlayBuilderSection({
                   <p className="tabular-nums text-muted-foreground">
                     Payout {cashoutTriple.bestValue.projectedPayoutMultiplier.toFixed(2)}x
                   </p>
+                  <LegBreakdown result={cashoutTriple.bestValue} />
                   <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
                     Legs ordered high-prob → upside. Supports early cash-out offers.
                   </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(cashoutTriple.bestValue.legs);
+                      toast.success("Best cash-out applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
-                <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-4 space-y-1.5">
+                <div className="rounded-xl border border-sky-500/20 bg-sky-500/[0.03] p-4 space-y-1.5 flex flex-col">
                   <p className="font-display font-bold text-foreground">Safer cash-out</p>
                   <p className="text-muted-foreground">{cashoutTriple.safer.legs.length} legs · safer first</p>
                   <p className="tabular-nums font-semibold">
@@ -830,11 +880,23 @@ export function ParlayBuilderSection({
                   <p className="tabular-nums text-muted-foreground">
                     Payout {cashoutTriple.safer.projectedPayoutMultiplier.toFixed(2)}x
                   </p>
+                  <LegBreakdown result={cashoutTriple.safer} />
                   <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
                     Prioritises early-leg resolution. Lower variance.
                   </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(cashoutTriple.safer.legs);
+                      toast.success("Safer cash-out applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
-                <div className="rounded-xl border border-sky-400/30 bg-sky-400/[0.05] p-4 space-y-1.5">
+                <div className="rounded-xl border border-sky-400/30 bg-sky-400/[0.05] p-4 space-y-1.5 flex flex-col">
                   <p className="font-display font-bold text-foreground">Upside cash-out</p>
                   <p className="text-muted-foreground">{cashoutTriple.higherPayout.legs.length} legs · capper last</p>
                   <p className="tabular-nums font-semibold">
@@ -843,9 +905,21 @@ export function ParlayBuilderSection({
                   <p className="tabular-nums text-muted-foreground">
                     Hit {(cashoutTriple.higherPayout.projectedHitProbability * 100).toFixed(1)}%
                   </p>
+                  <LegBreakdown result={cashoutTriple.higherPayout} />
                   <p className="text-[9px] text-muted-foreground/60 italic leading-snug">
                     Safer early legs, bigger payout leg last for cash-out growth.
                   </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-auto w-full h-8 gap-1 text-xs"
+                    onClick={() => {
+                      setBuilderLegs(cashoutTriple.higherPayout.legs);
+                      toast.success("Upside cash-out applied to slip");
+                    }}
+                  >
+                    Apply to slip
+                  </Button>
                 </div>
               </div>
             </div>
