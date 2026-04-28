@@ -163,6 +163,12 @@ function buildPayload(parlay, leg, idx) {
   const signature = `${parlay.id}:L${idx}`;
   const homeAway = parseHomeAwayContext(leg);
   const dateForContext = parlay.recommended_at ?? parlay.date ?? null;
+  // Partial CLV — same logic as src/lib/learning/parlayLegBridge.ts
+  const oddsRec = leg.american_odds ?? leg.odds ?? null;
+  const oddsPlc = leg.odds_at_placement ?? null;
+  const clvAtPlacement = (oddsRec != null && oddsPlc != null)
+    ? Math.round((americanToImplied(oddsPlc) - americanToImplied(oddsRec)) * 10000) / 10000
+    : null;
 
   return {
     external_game_id: signature,
@@ -208,6 +214,9 @@ function buildPayload(parlay, leg, idx) {
       away_team:    homeAway.away_team,
       day_of_week:  dayOfWeekFromIso(dateForContext),
       month:        monthFromIso(dateForContext),
+      odds_at_recommendation: oddsRec,
+      odds_at_placement:      oddsPlc,
+      clv_at_placement:       clvAtPlacement,
       model_probability_source: modelPSource,
     },
   };

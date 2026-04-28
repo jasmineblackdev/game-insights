@@ -153,9 +153,27 @@ function ParlayRowCard({
     if (!supabase) return;
     setBusy(true);
     try {
+      // Stamp each leg with its current american_odds as
+      // odds_at_placement so the bridge can compute partial CLV
+      // (clv_at_placement = implied(placement) − implied(recommend)).
+      // We don't refetch here — the user marking placed soon after
+      // recommendation gets identical recommend/placement odds (zero
+      // signal); marking later captures stale odds (small signal).
+      // Real CLV closing-line is a separate polling job.
+      const legsAtPlacement = Array.isArray(row.legs)
+        ? (row.legs as Array<Record<string, unknown>>).map((l) => ({
+            ...l,
+            odds_at_placement: l.american_odds ?? null,
+          }))
+        : row.legs;
       await supabase
         .from("recommended_parlays")
-        .update({ user_placed: true, source: "app_recommended_and_placed" })
+        .update({
+          user_placed: true,
+          source: "app_recommended_and_placed",
+          placed_at: new Date().toISOString(),
+          legs: legsAtPlacement,
+        })
         .eq("id", row.id);
       toast.success("Marked as placed");
       onUpdate();

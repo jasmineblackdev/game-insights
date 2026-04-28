@@ -57,6 +57,9 @@ export interface ParlayLegInput {
   final_score?: string | null;
   actual_value?: number | null;
   reason_included?: string;
+  /** American odds at the moment user clicked "Mark as placed". Used
+   *  to compute the partial CLV signal `clv_at_placement`. */
+  odds_at_placement?: number | null;
 }
 
 export interface ParlayRowInput {
@@ -196,6 +199,16 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
   const homeAway = parseHomeAwayContext(leg);
   const dateForContext = parlay.recommended_at ?? parlay.date ?? null;
 
+  // Partial CLV signal — only meaningful when the user clicked Mark
+  // as Placed AFTER the line moved. Same-second mark-as-placed yields
+  // 0 signal (placement odds == recommend odds), which is correct.
+  // Closing-line CLV needs a separate polling job — not yet wired.
+  const oddsRec = leg.american_odds ?? leg.odds ?? null;
+  const oddsPlc = leg.odds_at_placement ?? null;
+  const clvAtPlacement = (oddsRec != null && oddsPlc != null)
+    ? Math.round((americanToImplied(oddsPlc) - americanToImplied(oddsRec)) * 10000) / 10000
+    : null;
+
   return {
     external_game_id: signature, // synthetic — keyed per-leg-per-parlay
     sport,
@@ -240,6 +253,11 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
       away_team:    homeAway.away_team,
       day_of_week:  dayOfWeekFromIso(dateForContext),
       month:        monthFromIso(dateForContext),
+      // Partial CLV — odds movement between recommend and place. The
+      // closing-line half (true CLV) needs a separate polling job.
+      odds_at_recommendation: oddsRec,
+      odds_at_placement:      oddsPlc,
+      clv_at_placement:       clvAtPlacement,
       model_probability_source: modelPSource,
     },
   };
