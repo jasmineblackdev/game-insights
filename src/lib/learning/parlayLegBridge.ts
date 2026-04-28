@@ -60,6 +60,9 @@ export interface ParlayLegInput {
   /** American odds at the moment user clicked "Mark as placed". Used
    *  to compute the partial CLV signal `clv_at_placement`. */
   odds_at_placement?: number | null;
+  /** Closing-line American odds (latest snapshot before kickoff). Set
+   *  by the closing-odds-poller edge function on its 15-min cycle. */
+  closing_odds_american?: number | null;
 }
 
 export interface ParlayRowInput {
@@ -199,12 +202,21 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
   const homeAway = parseHomeAwayContext(leg);
   const dateForContext = parlay.recommended_at ?? parlay.date ?? null;
 
-  // Partial CLV signal — only meaningful when the user clicked Mark
-  // as Placed AFTER the line moved. Same-second mark-as-placed yields
-  // 0 signal (placement odds == recommend odds), which is correct.
-  // Closing-line CLV needs a separate polling job — not yet wired.
+  // CLV signals — three odds snapshots in priority order:
+  //   - oddsRec: at recommendation
+  //   - oddsPlc: at "Mark as placed" (RecommendedParlaysPage handler)
+  //   - oddsCls: closing line (closing-odds-poller edge function)
+  // Prefer the placement → close diff (true CLV); fall back to the
+  // recommend → close diff when no placement was recorded; fall back
+  // again to recommend → place when no close was captured.
   const oddsRec = leg.american_odds ?? leg.odds ?? null;
   const oddsPlc = leg.odds_at_placement ?? null;
+  const oddsCls = leg.closing_odds_american ?? null;
+  const clvPp = (() => {
+    const fromOdds = oddsPlc ?? oddsRec;
+    if (fromOdds == null || oddsCls == null) return null;
+    return Math.round((americanToImplied(oddsCls) - americanToImplied(fromOdds)) * 10000) / 10000;
+  })();
   const clvAtPlacement = (oddsRec != null && oddsPlc != null)
     ? Math.round((americanToImplied(oddsPlc) - americanToImplied(oddsRec)) * 10000) / 10000
     : null;
@@ -253,11 +265,14 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
       away_team:    homeAway.away_team,
       day_of_week:  dayOfWeekFromIso(dateForContext),
       month:        monthFromIso(dateForContext),
-      // Partial CLV — odds movement between recommend and place. The
-      // closing-line half (true CLV) needs a separate polling job.
+      // CLV — three snapshots stored alongside the computed deltas.
+      // clv_pp is the canonical CLV the backtest reads (extra->>'clv_pp'),
+      // populated when both placement (or recommend) AND close are known.
       odds_at_recommendation: oddsRec,
       odds_at_placement:      oddsPlc,
+      closing_odds_american:  oddsCls,
       clv_at_placement:       clvAtPlacement,
+      clv_pp:                 clvPp,
       model_probability_source: modelPSource,
     },
   };
