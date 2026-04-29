@@ -30,6 +30,7 @@ import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSect
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { BestPlayerPropToday } from "@/components/home/BestPlayerPropToday";
 import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
 import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
@@ -838,7 +839,11 @@ const Index = () => {
               {/* Auto Profit top card on Home (today only — Tomorrow
                   view shows the cross-sport TomorrowTab instead). */}
               {viewMode === "home" && homeDateMode === "today" ? (
-                <div className="mb-6">
+                <div className="mb-6 space-y-6">
+                  <BestPlayerPropToday
+                    predictions={homePropsQuery.data?.items ?? []}
+                    isPending={homePropsQuery.isPending}
+                  />
                   <HomeAutoProfit
                     candidates={homeAutoProfitCandidates}
                     loading={
