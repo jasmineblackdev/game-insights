@@ -44,6 +44,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ShadowPickLearningSection } from "@/components/ShadowPickLearningSection";
 
 // ── Existing rollup types ────────────────────────────────────────────────────
 interface SportRow      { sport: string; resolved_count: number; won: number; lost: number; win_pct: number | null }
@@ -433,6 +434,9 @@ export function MLPerformanceContent({ embedded = false }: { embedded?: boolean 
         ]}
         empty="No filtered candidates in the last 30 days — either filters are off or no parlays were built."
       />
+
+      {/* ── 5. Shadow Pick Learning — every generated prediction, classified ── */}
+      <ShadowPickLearningSection windowDays={30} />
 
       <StatTable<LossReasonRow>
         title="Worst-performing stat categories (most common losses)"
