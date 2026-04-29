@@ -137,10 +137,26 @@ export function computeValueScore(args: {
    * overconfidence — a 2/2 streak doesn't trigger anything.
    */
   userPatternBoost?: number;
+  /**
+   * League key (e.g. "nba", "mlb", "mma"). When provided, the
+   * de-vig fallback uses sport-specific vig instead of a flat 4.5%
+   * — important for combat sports (~6.5–7%) and prop-heavy markets.
+   * Ignored when `oppositeImpliedProbability` is supplied (exact
+   * normalization is always preferred).
+   */
+  sport?: League | string;
+  /** Market category — biases vig fallback wider for props / alt lines. */
+  marketKind?: ValueScoreMarketKind;
 }): number {
   const edge01 = Math.max(0, Math.min(1, args.edge * 8));
   const conf01 = confidence01(args.confidence);
-  const oddsEff = oddsEfficiency01(args.impliedProbability, args.modelProbability, args.oppositeImpliedProbability);
+  const vigRatio = vigRatioFor(args.sport, args.marketKind);
+  const oddsEff = oddsEfficiency01(
+    args.impliedProbability,
+    args.modelProbability,
+    args.oppositeImpliedProbability,
+    vigRatio,
+  );
   const dataCert = dataCertainty01(args.uncertaintyScore);
   const lowVol = lowVolatility01(args.volatilityScore);
   const lineM = lineMovement01(args.lineMovementDeltaPp != null ? Math.abs(args.lineMovementDeltaPp) : null);
