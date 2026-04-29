@@ -30,7 +30,7 @@ import {
   todaysExposure,
   wipeBankroll,
 } from "@/lib/bankroll/store";
-import { suggestAllStakes, suggestStakeForRisk } from "@/lib/bankroll/staking";
+import { suggestAllStakes, suggestStakeForRisk, suggestSmartStake } from "@/lib/bankroll/staking";
 import type { BankrollEvent, StakeRiskLevel } from "@/lib/bankroll/types";
 
 interface BankrollContextValue {
