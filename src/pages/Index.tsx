@@ -30,6 +30,7 @@ import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSect
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { BestPlayerPropToday } from "@/components/home/BestPlayerPropToday";
 import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
 import { SharpModeBanner } from "@/components/SharpModeBanner";
 import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
