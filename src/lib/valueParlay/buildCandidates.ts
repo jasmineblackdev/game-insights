@@ -427,6 +427,8 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     confidence: row.confidence,
     impliedProbability: implied,
     modelProbability: modelP,
+    sport: game.league,
+    marketKind: "player_prop",
     volatilityScore: Math.min(100, volB),
     uncertaintyScore: Math.min(100, uncB),
     userPatternBoost: computePatternBoostSync({
