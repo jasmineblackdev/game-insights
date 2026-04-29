@@ -82,15 +82,23 @@ function riskLabel(t: PlayerRiskTier): string {
 }
 
 // ── Bet label (DK-style headline for the card) ────────────────────────────────
+//
+// Headline always uses the DraftKings market name when available so what the
+// app shows matches what the user will see on DK. Falls back to the local
+// statFilter label only when the stat is unknown to the catalog.
 
 function betHeadline(p: PlayerEdgePrediction): string {
-  const stat = statFilterLabel(p.stat_type as PlayerEdgeStatFilter) || p.stat_type.replace(/_/g, " ");
+  const dkMap = getDkMapping(p.sport, p.stat_type);
+  const stat = dkMap?.dkLabel
+    ?? statFilterLabel(p.stat_type as PlayerEdgeStatFilter)
+    ?? p.stat_type.replace(/_/g, " ");
   if (p.stat_type === "fight_winner")  return "To Win";
   if (p.stat_type === "ko_tko")        return "Win by KO/TKO";
   if (p.stat_type === "submission")    return "Win by Submission";
   if (p.stat_type === "decision")      return "Win by Decision";
   if (p.stat_type === "draw")          return "Fight Ends in Draw";
   if (p.stat_type === "goes_distance") return "Goes Distance";
+  if (p.stat_type === "anytime_td")    return dkMap?.dkLabel ?? "Anytime Touchdown";
   if (p.stat_type === "total_rounds")
     return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} Rounds`;
   return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} ${stat}`;
