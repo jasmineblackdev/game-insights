@@ -192,19 +192,16 @@ function timingMultiplier(urgency: PlayerEdgePrediction["timing_urgency"]): numb
 }
 
 /**
- * Compute composite player edge score from available fields.
- *
- * When ML fields are present, the score incorporates:
- *  - ml_hit_probability (replaces rules-only confidence component)
- *  - timing_urgency     (multiplier on total score)
- *  - volatility_flag    (additional penalty when ML flags high variance)
+ * player_edge_score (Best-Player-Prop weighting):
+ *   edge          * 0.40
+ * + volume        * 0.25   (projection_confidence proxy: minutes/usage/role weight)
+ * + matchup       * 0.15
+ * + recent_trend  * 0.10
+ * + line_value    * 0.10   (market_value: line vs model gap as risk-adjusted upside)
+ * - variance_penalty       (consistency_label + ML volatility_flag)
+ *  * timing_multiplier
  *
  * Rules engine fields remain primary; ML fields are a conservative modifier.
- *
- * player_edge_score = (model_edge * 0.30) + (projection_confidence * 0.20)
- *   + (matchup_advantage * 0.15) + (role_stability * 0.10)
- *   + (recent_form * 0.10) + (market_value * 0.10) - (volatility_penalty * 0.05)
- *   * timing_multiplier
  */
 export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
   if (pred.player_edge_score != null) return pred.player_edge_score;
@@ -213,55 +210,43 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
   const maxEdge = pred.sport === "NBA" ? 8 : pred.sport === "NFL" ? 30 : pred.sport === "MLB" ? 3 : 15;
   const model_edge = Math.min(1, Math.abs(pred.edge) / maxEdge);
 
-  // When ML hit probability is available, blend it with rules confidence signal
-  // ml_hit_probability is in [0.05, 0.95] — scale to [0, 1] from the 0.5 midpoint
+  // Volume / projection confidence — blends rules confidence with ML hit prob.
   const mlHitSignal = pred.ml_hit_probability != null
-    ? (pred.ml_hit_probability - 0.50) * 2  // Centered: 0.5→0, 0.75→0.5, 0.95→0.9
+    ? (pred.ml_hit_probability - 0.50) * 2
     : null;
-
   const rawConf = pred.confidence_score_0_100
     ?? (pred.confidence === "HIGH" ? 72 : pred.confidence === "MED" ? 58 : 44);
   const rulesConfSignal = rawConf / 100;
-
-  // Blend rules confidence with ML hit probability (ML only when active)
-  const projection_confidence = mlHitSignal != null && pred.ml_active
+  const volume_score = mlHitSignal != null && pred.ml_active
     ? rulesConfSignal * 0.60 + Math.max(0, mlHitSignal) * 0.40
     : rulesConfSignal;
 
   const matchup_advantage =
     pred.confidence === "HIGH" ? 1.0 : pred.confidence === "MED" ? 0.6 : 0.3;
 
-  const role_stability =
-    pred.consistency_label === "stable" ? 1.0
-    : pred.consistency_label === "medium" ? 0.6
-    : 0.2;
+  const recent_trend = pred.trend_note ? 0.8 : 0.5;
 
-  const recent_form = pred.trend_note ? 0.8 : 0.5;
-
-  const market_value =
+  const line_value =
     pred.risk_tier === "safe" ? 0.7
     : pred.risk_tier === "high_upside" ? 1.0
     : pred.risk_tier === "longshot" ? 0.9
     : 0.6;
 
-  // ML volatility flag adds to penalty when present
   const mlVolatilityExtra = pred.volatility_flag ? 0.5 : 0;
-  const volatility_penalty =
+  const variance_penalty =
     pred.consistency_label === "volatile" ? 1.0 + mlVolatilityExtra
     : pred.consistency_label === "medium" ? 0.5 + mlVolatilityExtra * 0.5
     : mlVolatilityExtra * 0.5;
 
   const rawScore = (
-    model_edge * 0.30
-    + projection_confidence * 0.20
+    model_edge        * 0.40
+    + volume_score    * 0.25
     + matchup_advantage * 0.15
-    + role_stability * 0.10
-    + recent_form * 0.10
-    + market_value * 0.10
-    - volatility_penalty * 0.05
+    + recent_trend    * 0.10
+    + line_value      * 0.10
+    - variance_penalty * 0.05
   ) * 100;
 
-  // Timing urgency adjusts the raw score post-computation
   return rawScore * timingMultiplier(pred.timing_urgency);
 }
 
