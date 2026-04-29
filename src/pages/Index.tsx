@@ -874,10 +874,6 @@ const Index = () => {
                   isPropsPending={homePropsQuery.isPending}
                   league={league}
                   onSelectGame={setSelectedGame}
-                  // "See all picks" — Best Picks tab was merged into
-                  // Home. No separate destination; scroll-to-top is
-                  // the closest behavior.
-                  onNavigateBestPicks={() => window.scrollTo({ top: 0, behavior: "smooth" })}
                   onNavigatePlayerProps={() => handleViewModeChange("player_props")}
                   onNavigateToParlay={handleNavigateToParlay}
                 />
