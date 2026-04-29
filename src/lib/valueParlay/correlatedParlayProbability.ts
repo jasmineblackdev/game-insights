@@ -70,45 +70,61 @@ function sigma(p: number): number {
 
 /**
  * Infer the correlation category for two legs.
+ *
+ * Same-sport pair keys are prefixed with the sport (e.g.
+ * `nba|same_game:team:team`) so the learned-override layer can
+ * specialise per league — MLB pitcher props, NBA scoring props,
+ * and NFL spread/ML pairs each have their own dynamics. The
+ * fallback PAIR_RHO table is consulted with the *unprefixed* key
+ * so research defaults still apply when no sport-specific learned
+ * row exists yet.
  */
-function pairKey(a: ValueBetCandidate, b: ValueBetCandidate): string {
-  const sameSport = String(a.sport).toLowerCase() === String(b.sport).toLowerCase();
-  if (!sameSport) return "cross_sport";
+function pairKey(a: ValueBetCandidate, b: ValueBetCandidate): { sportKey: string; baseKey: string } {
+  const sportA = String(a.sport).toLowerCase();
+  const sportB = String(b.sport).toLowerCase();
+  const sameSport = sportA === sportB;
+  if (!sameSport) return { sportKey: "cross_sport", baseKey: "cross_sport" };
 
-  if (a.gameId !== b.gameId) return "same_sport_diff_game";
+  if (a.gameId !== b.gameId) {
+    return { sportKey: `${sportA}|same_sport_diff_game`, baseKey: "same_sport_diff_game" };
+  }
 
   const aTeamBet = a.pickType !== "player_prop";
   const bTeamBet = b.pickType !== "player_prop";
-  if (aTeamBet && bTeamBet) return "same_game:team:team";
+  let base: string;
 
-  // MLB pitcher-vs-pitcher special case
-  if (
-    String(a.sport).toLowerCase() === "mlb" &&
+  if (aTeamBet && bTeamBet) {
+    base = "same_game:team:team";
+  } else if (
+    sportA === "mlb" &&
     a.pickType === "player_prop" && b.pickType === "player_prop" &&
     (a.statType ?? "").toLowerCase().includes("strike") &&
     (b.statType ?? "").toLowerCase().includes("strike")
-  ) return "same_game:prop:prop_pitcher";
-
-  if (a.pickType === "player_prop" && b.pickType === "player_prop") {
-    return a.teamId && a.teamId === b.teamId
+  ) {
+    base = "same_game:prop:prop_pitcher";
+  } else if (a.pickType === "player_prop" && b.pickType === "player_prop") {
+    base = a.teamId && a.teamId === b.teamId
       ? "same_game:prop:prop_same_team"
       : "same_game:prop:prop_opp_team";
+  } else {
+    const prop = a.pickType === "player_prop" ? a : b;
+    const team = a.pickType === "player_prop" ? b : a;
+    base = prop.teamId === team.teamId
+      ? "same_game:team:prop_same_team"
+      : "same_game:team:prop_opp_team";
   }
-
-  // Mixed: one team bet + one prop
-  const prop = a.pickType === "player_prop" ? a : b;
-  const team = a.pickType === "player_prop" ? b : a;
-  return prop.teamId === team.teamId
-    ? "same_game:team:prop_same_team"
-    : "same_game:team:prop_opp_team";
+  return { sportKey: `${sportA}|${base}`, baseKey: base };
 }
 
 function rhoFor(a: ValueBetCandidate, b: ValueBetCandidate): number {
-  const key = pairKey(a, b);
-  // Learned override wins when the bucket has enough samples; fall
-  // through to the hard-coded PAIR_RHO research defaults otherwise.
-  const learned = getCorrelationOverride(key);
-  const rho = learned ?? PAIR_RHO[key] ?? 0;
+  const { sportKey, baseKey } = pairKey(a, b);
+  // Prefer sport-specific learned override → fall back to generic
+  // learned override → fall back to research default. This stops
+  // NBA-prop correlation from polluting MLB pitcher pairs.
+  const learned =
+    getCorrelationOverride(sportKey) ??
+    (sportKey !== baseKey ? getCorrelationOverride(baseKey) : null);
+  const rho = learned ?? PAIR_RHO[baseKey] ?? 0;
   return Math.max(-RHO_CAP, Math.min(RHO_CAP, rho));
 }
 
