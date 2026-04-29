@@ -1071,9 +1071,6 @@ const Index = () => {
           )}
         </AnimatePresence>
       </main>
-      {(league === "mma" || league === "boxing") && (
-        <OddsDebugBadge sport={league} />
-      )}
     </div>
   );
 };
