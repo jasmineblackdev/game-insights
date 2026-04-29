@@ -209,6 +209,7 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
     reset,
     stakeSuggestions,
     suggestStake,
+    suggestSmart,
     winStreak: streaks.winStreak,
     lossStreak: streaks.lossStreak,
     lastResult: streaks.lastResult,
@@ -217,7 +218,7 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
   }), [
     isInitialized, snapshot, balance, todayPnl, totalPnl,
     initStartingBankroll, deposit, withdraw, recordBetPlaced, recordBetSettled,
-    adjust, reset, stakeSuggestions, suggestStake,
+    adjust, reset, stakeSuggestions, suggestStake, suggestSmart,
     streaks.winStreak, streaks.lossStreak, streaks.lastResult,
     exposure, hadLossToday,
   ]);
