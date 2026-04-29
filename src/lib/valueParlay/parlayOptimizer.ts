@@ -291,8 +291,8 @@ interface TierFloors {
 
 function tierFloors(mode: ParlayBuildMode): TierFloors {
   if (mode === "safe") {
-    // SAFE only accepts legs that imply ≥ 55% hit rate from the odds alone.
-    // Roughly equivalent to "no worse than about -120 American".
+    // SAFE — discipline checklist: "only -120 to -200" + only legs you'd
+    // bet straight. Tight price band; eligibleAsSingle required.
     return {
       maxVolatility: 45,
       minStability:  0.62,
@@ -303,6 +303,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.45,
       minImpliedProbability: 0.55,
+      priceMin: -250,
+      priceMax: -110,
+      requireSingleBetEligible: true,
     };
   }
   if (mode === "balanced") {
@@ -317,10 +320,14 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 2,
       minRecentHitRate: 0.35,
       minImpliedProbability: 0.44,
+      priceMin: -300,
+      priceMax: 130,
+      requireSingleBetEligible: false,
     };
   }
   if (mode === "cashout") {
-    // Cash-out early legs must resolve reliably — same implied floor as SAFE.
+    // Cash-out early legs must resolve reliably — same discipline as SAFE
+    // but a touch wider on the favorite side to source enough early legs.
     return {
       maxVolatility: 55,
       minStability:  0.58,
@@ -331,6 +338,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.40,
       minImpliedProbability: 0.52,
+      priceMin: -300,
+      priceMax: -105,
+      requireSingleBetEligible: true,
     };
   }
   if (mode === "bigwin") {
@@ -348,6 +358,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 2,
       minRecentHitRate: 0.40,
       minImpliedProbability: 0.40,
+      priceMin: -350,
+      priceMax: 200,
+      requireSingleBetEligible: false,
     };
   }
   if (mode === "lotto") {
@@ -363,6 +376,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
       minRecentHitRate: 0,
       minImpliedProbability: 0,
+      priceMin: Number.NEGATIVE_INFINITY,
+      priceMax: Number.POSITIVE_INFINITY,
+      requireSingleBetEligible: false,
     };
   }
   // aggressive
@@ -376,6 +392,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
     maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
     minRecentHitRate: 0,
     minImpliedProbability: 0,
+    priceMin: Number.NEGATIVE_INFINITY,
+    priceMax: Number.POSITIVE_INFINITY,
+    requireSingleBetEligible: false,
   };
 }
 
