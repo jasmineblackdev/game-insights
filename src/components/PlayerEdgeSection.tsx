@@ -15,6 +15,7 @@ import { logPick, fetchAccuracyStats } from "@/lib/picksLog";
 import { useBankroll } from "@/context/BankrollContext";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
+import { getDkMapping, isDraftKingsAvailable } from "@/lib/draftkings/dkMarketCatalog";
 import {
   pickActionForPrediction,
   pickActionLabel,
