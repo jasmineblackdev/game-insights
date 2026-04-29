@@ -687,6 +687,8 @@ export function buildEnrichedPropCandidates(
       confidence: conf,
       impliedProbability: marketProb,
       modelProbability: modelP,
+      sport: pred.sport,
+      marketKind: "player_prop",
       volatilityScore,
       uncertaintyScore,
       lineMovementDeltaPp: pred.line_delta ?? null,
