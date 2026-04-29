@@ -65,6 +65,17 @@ interface BankrollContextValue {
   stakeSuggestions: ReturnType<typeof suggestAllStakes>;
   /** Suggest stake for a specific risk tier. */
   suggestStake: (risk: StakeRiskLevel) => ReturnType<typeof suggestStakeForRisk>;
+  /**
+   * Smart stake — fractional Kelly when modelProb + odds are
+   * available, falls back to flat tier sizing. Prefers
+   * calibratedProb (Platt-scaled) over raw modelProb.
+   */
+  suggestSmart: (args: {
+    risk: StakeRiskLevel;
+    modelProb?: number;
+    calibratedProb?: number;
+    americanOdds?: number;
+  }) => ReturnType<typeof suggestSmartStake>;
   /** Current consecutive-win count from bet_settled events. */
   winStreak: number;
   /** Current consecutive-loss count. */
@@ -173,6 +184,11 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
 
   const stakeSuggestions = useMemo(() => suggestAllStakes(balance), [balance]);
   const suggestStake = useCallback((risk: StakeRiskLevel) => suggestStakeForRisk(balance, risk), [balance]);
+  const suggestSmart = useCallback(
+    (args: { risk: StakeRiskLevel; modelProb?: number; calibratedProb?: number; americanOdds?: number }) =>
+      suggestSmartStake({ bankroll: balance, ...args }),
+    [balance],
+  );
   const streaks = useMemo(() => resultStreaks(snapshot), [snapshot]);
   const exposure = useMemo(() => todaysExposure(snapshot, todayIsoDay()), [snapshot]);
   const hadLossToday = useMemo(() => hasTodaysLoss(snapshot, todayIsoDay()), [snapshot]);
