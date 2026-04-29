@@ -574,6 +574,26 @@ export function ParlayBuilderSection({
             <div className="rounded-xl border border-border/80 bg-background/70 px-3 py-2.5">
               <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">Pool</p>
               <p className="text-base font-bold tabular-nums text-foreground">{candidates.length}</p>
+              {(() => {
+                // Integrity-gate exclusions: surface count so users
+                // know the pool was actively filtered for safety, not
+                // that the day is light. Stale = bookmaker line >5min
+                // old; Late = roster/lineup change after model scored.
+                const stale = candidates.filter((c) => c.staleLineFlag).length;
+                const late  = candidates.filter((c) => c.lateChangeInvalidated).length;
+                if (stale + late === 0) return null;
+                const parts: string[] = [];
+                if (stale) parts.push(`${stale} stale`);
+                if (late)  parts.push(`${late} late chg`);
+                return (
+                  <p
+                    className="text-[9px] text-amber-600 dark:text-amber-400 leading-tight pt-0.5"
+                    title="Picks excluded by integrity gates and not eligible for parlays."
+                  >
+                    {parts.join(" · ")} excluded
+                  </p>
+                );
+              })()}
             </div>
             <div className="rounded-xl border border-border/80 bg-background/70 px-3 py-2.5">
               <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide">On slip</p>

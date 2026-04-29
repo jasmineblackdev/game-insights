@@ -30,7 +30,7 @@ import {
   todaysExposure,
   wipeBankroll,
 } from "@/lib/bankroll/store";
-import { suggestAllStakes, suggestStakeForRisk } from "@/lib/bankroll/staking";
+import { suggestAllStakes, suggestStakeForRisk, suggestSmartStake } from "@/lib/bankroll/staking";
 import type { BankrollEvent, StakeRiskLevel } from "@/lib/bankroll/types";
 
 interface BankrollContextValue {
@@ -65,6 +65,17 @@ interface BankrollContextValue {
   stakeSuggestions: ReturnType<typeof suggestAllStakes>;
   /** Suggest stake for a specific risk tier. */
   suggestStake: (risk: StakeRiskLevel) => ReturnType<typeof suggestStakeForRisk>;
+  /**
+   * Smart stake — fractional Kelly when modelProb + odds are
+   * available, falls back to flat tier sizing. Prefers
+   * calibratedProb (Platt-scaled) over raw modelProb.
+   */
+  suggestSmart: (args: {
+    risk: StakeRiskLevel;
+    modelProb?: number;
+    calibratedProb?: number;
+    americanOdds?: number;
+  }) => ReturnType<typeof suggestSmartStake>;
   /** Current consecutive-win count from bet_settled events. */
   winStreak: number;
   /** Current consecutive-loss count. */
@@ -173,6 +184,11 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
 
   const stakeSuggestions = useMemo(() => suggestAllStakes(balance), [balance]);
   const suggestStake = useCallback((risk: StakeRiskLevel) => suggestStakeForRisk(balance, risk), [balance]);
+  const suggestSmart = useCallback(
+    (args: { risk: StakeRiskLevel; modelProb?: number; calibratedProb?: number; americanOdds?: number }) =>
+      suggestSmartStake({ bankroll: balance, ...args }),
+    [balance],
+  );
   const streaks = useMemo(() => resultStreaks(snapshot), [snapshot]);
   const exposure = useMemo(() => todaysExposure(snapshot, todayIsoDay()), [snapshot]);
   const hadLossToday = useMemo(() => hasTodaysLoss(snapshot, todayIsoDay()), [snapshot]);
@@ -193,6 +209,7 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
     reset,
     stakeSuggestions,
     suggestStake,
+    suggestSmart,
     winStreak: streaks.winStreak,
     lossStreak: streaks.lossStreak,
     lastResult: streaks.lastResult,
@@ -201,7 +218,7 @@ export function BankrollProvider({ children }: { children: ReactNode }) {
   }), [
     isInitialized, snapshot, balance, todayPnl, totalPnl,
     initStartingBankroll, deposit, withdraw, recordBetPlaced, recordBetSettled,
-    adjust, reset, stakeSuggestions, suggestStake,
+    adjust, reset, stakeSuggestions, suggestStake, suggestSmart,
     streaks.winStreak, streaks.lossStreak, streaks.lastResult,
     exposure, hadLossToday,
   ]);

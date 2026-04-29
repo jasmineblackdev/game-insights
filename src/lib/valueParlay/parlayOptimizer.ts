@@ -1029,6 +1029,12 @@ function greedyBuild(
     remaining.sort(compare);
     for (let i = 0; i < remaining.length; i++) {
       const c = remaining[i];
+      // Hard integrity gates — apply on BOTH passes. Stale prices and
+      // late-roster-change picks must never enter a parlay, even when
+      // the recommended pool is thin. Otherwise Pass 2 would silently
+      // re-include the exact picks our integrity layer rejected.
+      if (c.staleLineFlag) continue;
+      if (c.lateChangeInvalidated) continue;
       if (!fallback) {
         if (!opts.skipRecommendedFilter && !c.isRecommended) continue;
       } else {
