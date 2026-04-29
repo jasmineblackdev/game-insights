@@ -274,12 +274,25 @@ interface TierFloors {
    * longshot is still a longshot — this floor cuts them at the door.
    */
   minImpliedProbability: number;
+  /**
+   * Hard American-odds price range. Implements the discipline rule
+   * "only -120 to -200" (relaxed slightly per tier). Anything outside
+   * this band is rejected before tier scoring even runs.
+   */
+  priceMin: number;
+  priceMax: number;
+  /**
+   * SAFE / CASHOUT only — require eligibleAsSingle. Enforces Step 8
+   * of the discipline checklist: don't parlay legs you wouldn't bet
+   * straight. Balanced/Big-Win/Lotto allow non-single-eligible legs.
+   */
+  requireSingleBetEligible: boolean;
 }
 
 function tierFloors(mode: ParlayBuildMode): TierFloors {
   if (mode === "safe") {
-    // SAFE only accepts legs that imply ≥ 55% hit rate from the odds alone.
-    // Roughly equivalent to "no worse than about -120 American".
+    // SAFE — discipline checklist: "only -120 to -200" + only legs you'd
+    // bet straight. Tight price band; eligibleAsSingle required.
     return {
       maxVolatility: 45,
       minStability:  0.62,
@@ -290,6 +303,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.45,
       minImpliedProbability: 0.55,
+      priceMin: -250,
+      priceMax: -110,
+      requireSingleBetEligible: true,
     };
   }
   if (mode === "balanced") {
@@ -304,10 +320,14 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 2,
       minRecentHitRate: 0.35,
       minImpliedProbability: 0.44,
+      priceMin: -300,
+      priceMax: 130,
+      requireSingleBetEligible: false,
     };
   }
   if (mode === "cashout") {
-    // Cash-out early legs must resolve reliably — same implied floor as SAFE.
+    // Cash-out early legs must resolve reliably — same discipline as SAFE
+    // but a touch wider on the favorite side to source enough early legs.
     return {
       maxVolatility: 55,
       minStability:  0.58,
@@ -318,6 +338,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 1,
       minRecentHitRate: 0.40,
       minImpliedProbability: 0.52,
+      priceMin: -300,
+      priceMax: -105,
+      requireSingleBetEligible: true,
     };
   }
   if (mode === "bigwin") {
@@ -335,6 +358,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: 2,
       minRecentHitRate: 0.40,
       minImpliedProbability: 0.40,
+      priceMin: -350,
+      priceMax: 200,
+      requireSingleBetEligible: false,
     };
   }
   if (mode === "lotto") {
@@ -350,6 +376,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
       maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
       minRecentHitRate: 0,
       minImpliedProbability: 0,
+      priceMin: Number.NEGATIVE_INFINITY,
+      priceMax: Number.POSITIVE_INFINITY,
+      requireSingleBetEligible: false,
     };
   }
   // aggressive
@@ -363,6 +392,9 @@ function tierFloors(mode: ParlayBuildMode): TierFloors {
     maxMediumConfidenceLegs: Number.POSITIVE_INFINITY,
     minRecentHitRate: 0,
     minImpliedProbability: 0,
+    priceMin: Number.NEGATIVE_INFINITY,
+    priceMax: Number.POSITIVE_INFINITY,
+    requireSingleBetEligible: false,
   };
 }
 
@@ -391,6 +423,18 @@ export function diagnoseLegRejection(
   if (c.americanOdds <= -350 && c.edge < 0.07) return "heavy_favorite_low_edge";
 
   const floors = tierFloors(mode);
+
+  // Hard price-range gate — implements "only -120 to -200" discipline rule.
+  // Rejects chalky favorites and longshot dogs before any other scoring.
+  if (c.americanOdds < floors.priceMin) return "price_too_chalky";
+  if (c.americanOdds > floors.priceMax) return "price_too_long";
+
+  // Single-bet eligibility ("Would I bet this as a straight?") — required
+  // for SAFE / CASHOUT. A leg unworthy of a straight bet is unworthy of
+  // a parlay slot in disciplined modes.
+  if (floors.requireSingleBetEligible && c.eligibleAsSingle === false) {
+    return "not_single_bet_eligible";
+  }
 
   if (c.volatilityScore >= floors.maxVolatility) return "tier_floor_volatility";
   if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return "tier_floor_stability";

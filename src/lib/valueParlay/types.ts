@@ -141,6 +141,20 @@ export interface ValueBetCandidate {
    * isRecommended forced to false, exclusionReason set.
    */
   lateChangeInvalidated?: boolean;
+  /**
+   * "Would I bet this as a single?" gate (Step 8 of the discipline
+   * checklist). When false, SAFE / CASHOUT parlays must NOT include
+   * this leg even if it has positive edge — a leg unworthy of a
+   * straight bet is unworthy of a parlay slot.
+   *
+   * Computed once in buildCandidates from: modelProbability ≥ 0.58,
+   * confidence != "low", volatility < 60, recentHitRate ≥ 0.45 (when
+   * sampled), edge > 0.02, no stale/late-change flags, price within
+   * the single-bet range (-300 .. +110).
+   */
+  eligibleAsSingle?: boolean;
+  /** Short reason this leg is NOT single-bet eligible. Undefined when eligible. */
+  singleBetReason?: string;
 }
 
 export interface PlayerPropModelRow {

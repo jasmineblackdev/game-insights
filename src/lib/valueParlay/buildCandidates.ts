@@ -17,6 +17,7 @@ import {
   riskBandLabel,
 } from "@/lib/valueParlay/riskScore";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import { attachSingleBetEligibility } from "@/lib/valueParlay/singleBetEligibility";
 import { getConfidenceAdjustment } from "@/lib/ml/confidenceCalibrationMap";
 import {
   mlbPropCategory,
@@ -566,7 +567,7 @@ export function buildAllValueCandidates(
 ): ValueBetCandidate[] {
   const out: ValueBetCandidate[] = [];
   const gate = (c: ValueBetCandidate, g: GamePrediction, b: GameOddsBundle | undefined) =>
-    applyIntegrityGates(applyPreConfirmationDowngrade(c, g), g, b);
+    attachSingleBetEligibility(applyIntegrityGates(applyPreConfirmationDowngrade(c, g), g, b));
   for (const g of games) {
     const b = oddsMap.get(g.id);
     const h = moneylineCandidate(g, "home", b);
@@ -841,5 +842,6 @@ export function buildEnrichedPropCandidates(
     });
   }
 
+  for (const c of out) attachSingleBetEligibility(c);
   return out;
 }

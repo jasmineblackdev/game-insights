@@ -981,6 +981,21 @@ export function ParlayBuilderSection({
                             PROP
                           </span>
                         ) : null}
+                        {l.eligibleAsSingle === true ? (
+                          <span
+                            className="text-[10px] font-bold tracking-wide text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full"
+                            title="Passes the 'would I bet this straight?' gate"
+                          >
+                            SINGLE-OK
+                          </span>
+                        ) : l.eligibleAsSingle === false ? (
+                          <span
+                            className="text-[10px] font-bold tracking-wide text-amber-700 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full"
+                            title={l.singleBetReason ?? "Not single-bet eligible"}
+                          >
+                            PARLAY-ONLY
+                          </span>
+                        ) : null}
                       </div>
                       <p className="font-semibold text-foreground text-sm">{l.selectionLabel}</p>
                       <p className="text-muted-foreground tabular-nums">
