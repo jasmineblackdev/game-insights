@@ -51,53 +51,14 @@ import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { useSearchParams } from "react-router-dom";
 import { TomorrowTab } from "@/components/TomorrowTab";
 import { CollegeFuturesSection } from "@/components/collegeFutures/CollegeFuturesSection";
-import { OddsDebugBadge } from "@/components/OddsDebugBadge";
+
 import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
 
 type ViewMode = "home" | "best_picks" | "player_props" | "parlay_builder" | "live" | "draft" | "college_futures" | "tomorrow";
 
-function DataSourceStatus() {
-  // Supabase health: just verify the connection is live, don't require specific tables
-  const health = useQuery({
-    queryKey: ["supabase", "health", "v2"],
-    queryFn: async () => {
-      if (!supabase) throw new Error("Supabase client not configured");
-      const { error } = await supabase.from("boxing_fights").select("fight_id").limit(1);
-      if (error && error.code !== "42P01" && !error.message?.includes("does not exist")) throw error;
-      return true;
-    },
-    enabled: !!supabase,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
-    retry: 1,
-    // Delay health check so it doesn't compete with the primary ESPN fetch on cold load
-    refetchOnMount: "always",
-    refetchOnWindowFocus: false,
-  });
-
-  if (health.isPending) {
-    return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="w-2 h-2 rounded-full bg-muted-foreground/40 animate-pulse" />
-        Connecting…
-      </div>
-    );
-  }
-  if (health.isError) {
-    return (
-      <span className="text-xs text-muted-foreground" title="ESPN data active; Supabase optional">
-        ESPN Live
-      </span>
-    );
-  }
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span className="w-2 h-2 rounded-full bg-confidence-high animate-pulse-glow" />
-      Live data
-    </div>
-  );
-}
+// DataSourceStatus removed — the StaleLinesBanner already surfaces
+// real outages, and the always-green "Live data" pill was UI noise.
 
 function LeaguePicker({
   value,
@@ -617,7 +578,6 @@ const Index = () => {
               </div>
               <div className="hidden sm:flex items-center gap-2">
                 <UnitSizeCalculator variant="compact" className="h-9 w-9" />
-                <DataSourceStatus />
                 <LeaguePicker value={league} onChange={handleLeagueChange} />
               </div>
             </div>
@@ -626,7 +586,6 @@ const Index = () => {
             <div className="overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:thin]">
               <LeaguePicker value={league} onChange={handleLeagueChange} />
             </div>
-            <DataSourceStatus />
           </div>
         </div>
       </header>
