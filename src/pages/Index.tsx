@@ -839,7 +839,11 @@ const Index = () => {
               {/* Auto Profit top card on Home (today only — Tomorrow
                   view shows the cross-sport TomorrowTab instead). */}
               {viewMode === "home" && homeDateMode === "today" ? (
-                <div className="mb-6">
+                <div className="mb-6 space-y-6">
+                  <BestPlayerPropToday
+                    predictions={homePropsQuery.data?.items ?? []}
+                    isPending={homePropsQuery.isPending}
+                  />
                   <HomeAutoProfit
                     candidates={homeAutoProfitCandidates}
                     loading={
