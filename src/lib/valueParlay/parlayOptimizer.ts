@@ -274,6 +274,19 @@ interface TierFloors {
    * longshot is still a longshot — this floor cuts them at the door.
    */
   minImpliedProbability: number;
+  /**
+   * Hard American-odds price range. Implements the discipline rule
+   * "only -120 to -200" (relaxed slightly per tier). Anything outside
+   * this band is rejected before tier scoring even runs.
+   */
+  priceMin: number;
+  priceMax: number;
+  /**
+   * SAFE / CASHOUT only — require eligibleAsSingle. Enforces Step 8
+   * of the discipline checklist: don't parlay legs you wouldn't bet
+   * straight. Balanced/Big-Win/Lotto allow non-single-eligible legs.
+   */
+  requireSingleBetEligible: boolean;
 }
 
 function tierFloors(mode: ParlayBuildMode): TierFloors {
