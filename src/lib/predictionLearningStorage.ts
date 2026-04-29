@@ -259,6 +259,53 @@ async function flushUserLearningSnapshotToSupabase(): Promise<void> {
   }
 }
 
+/**
+ * One-shot rehydrate from `user_learning_snapshots` into localStorage.
+ * Call once at app boot (App.tsx) — fixes the "lose calibration when
+ * the user clears their browser" gap. Only overwrites local state when
+ * the server snapshot is *newer* than what's in localStorage so a
+ * fresh device gets the user's history without a logged-in user
+ * having their in-flight session learning clobbered by a stale row.
+ *
+ * Gated on the same VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE flag so the
+ * push and pull stay symmetric. No-ops when not signed in.
+ */
+export async function rehydrateUserLearningFromSupabase(): Promise<void> {
+  const v = import.meta.env.VITE_SYNC_CLIENT_LEARNING_TO_SUPABASE;
+  if (v !== "1" && v !== "true") return;
+  if (!isSupabaseConfigured || !supabase) return;
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user?.id) return;
+
+    const { data, error } = await supabase
+      .from("user_learning_snapshots")
+      .select("accuracy_summary, edge_floors, confidence_curve, updated_at")
+      .eq("user_id", session.user.id)
+      .maybeSingle();
+    if (error || !data) return;
+
+    const localUpdated = getPredictionAccuracySummary().lastUpdated;
+    const remoteUpdated = data.updated_at as string | null;
+    if (
+      localUpdated &&
+      remoteUpdated &&
+      new Date(localUpdated).getTime() >= new Date(remoteUpdated).getTime()
+    ) {
+      // Local is fresher — keep it; the next push will sync up.
+      return;
+    }
+
+    if (data.accuracy_summary) writeJson(KEY_ACCURACY, data.accuracy_summary);
+    if (data.edge_floors)      writeJson(KEY_THRESHOLDS, data.edge_floors);
+    if (data.confidence_curve) writeJson(KEY_CURVE,      data.confidence_curve);
+  } catch {
+    // Network / auth flake — silent. Next outcome write retriggers push.
+  }
+}
+
 export function getPredictionAccuracySummary(): PredictionAccuracySummary {
   return readJson(KEY_ACCURACY, {
     bySport: {},
