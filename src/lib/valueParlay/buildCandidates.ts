@@ -238,11 +238,16 @@ function totalCandidate(
   const vol = volatilityNumeric(game) + 6;
   const unc = confidenceToUncertaintyBase(game.confidence) + 8;
 
+  const oppAmerican = side === "over" ? bundle.total.under : bundle.total.over;
+  const oppImplied = americanToImpliedProb(oppAmerican);
   const valueScore = computeValueScore({
     edge,
     confidence: game.confidence,
     impliedProbability: implied,
     modelProbability: modelP,
+    oppositeImpliedProbability: oppImplied,
+    sport: game.league,
+    marketKind: "total",
     volatilityScore: vol,
     uncertaintyScore: unc,
     lineMovementDeltaPp: game._meta?.quality?.market?.line_movement_home_pp,
