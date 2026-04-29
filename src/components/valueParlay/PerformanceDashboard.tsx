@@ -12,7 +12,8 @@
  */
 
 import { useState, useMemo } from "react";
-import { BarChart2, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { BarChart2, ChevronDown, ChevronUp, ChevronRight, AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   useTimingPerformance,
@@ -1445,8 +1446,8 @@ export function PerformanceDashboard() {
 
       {open && (
         <div className="px-4 pb-4 space-y-5 border-t border-border">
-          {/* Lookback toggle */}
-          <div className="flex gap-2 pt-3">
+          {/* Lookback toggle + Model Intelligence link */}
+          <div className="flex gap-2 pt-3 items-center flex-wrap">
             <p className="text-[10px] text-muted-foreground self-center">Window:</p>
             {([7, 30] as const).map((d) => (
               <button
@@ -1461,6 +1462,13 @@ export function PerformanceDashboard() {
                 {d}d
               </button>
             ))}
+            <Link
+              to="/ml-performance"
+              className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:opacity-80"
+            >
+              Model Intelligence
+              <ChevronRight className="w-3 h-3" />
+            </Link>
           </div>
 
           {/* 0. Trend overview */}

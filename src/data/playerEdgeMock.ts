@@ -192,25 +192,37 @@ function timingMultiplier(urgency: PlayerEdgePrediction["timing_urgency"]): numb
 }
 
 /**
- * player_edge_score (Best-Player-Prop weighting):
- *   edge          * 0.40
- * + volume        * 0.25   (projection_confidence proxy: minutes/usage/role weight)
- * + matchup       * 0.15
- * + recent_trend  * 0.10
- * + line_value    * 0.10   (market_value: line vs model gap as risk-adjusted upside)
- * - variance_penalty       (consistency_label + ML volatility_flag)
- *  * timing_multiplier
- *
- * Rules engine fields remain primary; ML fields are a conservative modifier.
+ * Per-component contribution breakdown — same numbers `computePlayerEdgeScore`
+ * uses internally, exposed so UI can render a "Why this pick" panel without
+ * re-implementing the formula. All component values are 0–1 scaled; the
+ * `weighted` field is the value × weight × 100 (so they sum to roughly the
+ * raw score).
  */
-export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
-  if (pred.player_edge_score != null) return pred.player_edge_score;
+export interface PlayerEdgeScoreBreakdown {
+  components: {
+    edge:           { value: number; weight: number; weighted: number };
+    volume:         { value: number; weight: number; weighted: number };
+    matchup:        { value: number; weight: number; weighted: number };
+    trend:          { value: number; weight: number; weighted: number };
+    line_value:     { value: number; weight: number; weighted: number };
+    variance:       { value: number; weight: number; weighted: number; isPenalty: true };
+    ml_boost:       { value: number; active: boolean };
+  };
+  riskFlags: {
+    high_variance: boolean;
+    low_role_stability: boolean;
+    blowout_risk: boolean;
+    line_moving_against: boolean;
+  };
+  timing_multiplier: number;
+  raw_score: number;
+  final_score: number;
+}
 
-  // Normalize edge to 0–1 by sport
+export function computeEdgeScoreBreakdown(pred: PlayerEdgePrediction): PlayerEdgeScoreBreakdown {
   const maxEdge = pred.sport === "NBA" ? 8 : pred.sport === "NFL" ? 30 : pred.sport === "MLB" ? 3 : 15;
   const model_edge = Math.min(1, Math.abs(pred.edge) / maxEdge);
 
-  // Volume / projection confidence — blends rules confidence with ML hit prob.
   const mlHitSignal = pred.ml_hit_probability != null
     ? (pred.ml_hit_probability - 0.50) * 2
     : null;
@@ -238,7 +250,9 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
     : pred.consistency_label === "medium" ? 0.5 + mlVolatilityExtra * 0.5
     : mlVolatilityExtra * 0.5;
 
-  const rawScore = (
+  const tm = timingMultiplier(pred.timing_urgency);
+
+  const raw_score = (
     model_edge        * 0.40
     + volume_score    * 0.25
     + matchup_advantage * 0.15
@@ -247,7 +261,54 @@ export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
     - variance_penalty * 0.05
   ) * 100;
 
-  return rawScore * timingMultiplier(pred.timing_urgency);
+  // ── Risk flags surfaced to the UI explanation panel ───────────────────
+  const lineDelta = pred.line_delta ?? 0;
+  // "Moving against" depends on direction: line up hurts Over, line down hurts Under.
+  const lineMovingAgainst =
+    (pred.prediction_direction === "MORE" && lineDelta >  0.3) ||
+    (pred.prediction_direction === "LESS" && lineDelta < -0.3);
+
+  const ml_boost = mlHitSignal != null && pred.ml_active
+    ? Math.max(0, mlHitSignal) * 0.40
+    : 0;
+
+  return {
+    components: {
+      edge:       { value: model_edge,         weight: 0.40, weighted: model_edge        * 0.40 * 100 },
+      volume:     { value: volume_score,       weight: 0.25, weighted: volume_score      * 0.25 * 100 },
+      matchup:    { value: matchup_advantage,  weight: 0.15, weighted: matchup_advantage * 0.15 * 100 },
+      trend:      { value: recent_trend,       weight: 0.10, weighted: recent_trend      * 0.10 * 100 },
+      line_value: { value: line_value,         weight: 0.10, weighted: line_value        * 0.10 * 100 },
+      variance:   { value: variance_penalty,   weight: 0.05, weighted: variance_penalty  * 0.05 * 100, isPenalty: true },
+      ml_boost:   { value: ml_boost,           active: !!(pred.ml_active && pred.ml_hit_probability != null) },
+    },
+    riskFlags: {
+      high_variance: !!pred.volatility_flag,
+      low_role_stability: pred.consistency_label === "volatile",
+      blowout_risk: !!pred.is_home === false && rawConf < 50,  // proxy: away + low conf
+      line_moving_against: lineMovingAgainst,
+    },
+    timing_multiplier: tm,
+    raw_score,
+    final_score: raw_score * tm,
+  };
+}
+
+/**
+ * player_edge_score (Best-Player-Prop weighting):
+ *   edge          * 0.40
+ * + volume        * 0.25   (projection_confidence proxy: minutes/usage/role weight)
+ * + matchup       * 0.15
+ * + recent_trend  * 0.10
+ * + line_value    * 0.10   (market_value: line vs model gap as risk-adjusted upside)
+ * - variance_penalty       (consistency_label + ML volatility_flag)
+ *  * timing_multiplier
+ *
+ * Rules engine fields remain primary; ML fields are a conservative modifier.
+ */
+export function computePlayerEdgeScore(pred: PlayerEdgePrediction): number {
+  if (pred.player_edge_score != null) return pred.player_edge_score;
+  return computeEdgeScoreBreakdown(pred).final_score;
 }
 
 /**
