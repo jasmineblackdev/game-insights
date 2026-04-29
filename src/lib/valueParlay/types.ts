@@ -118,6 +118,21 @@ export interface ValueBetCandidate {
    * OUT-status injuries affect the relevant positions.
    */
   injuryImpactAdj?: number;
+  /**
+   * Bookmaker line freshness — ISO timestamp of the upstream
+   * `last_update` field for the price used. Older than
+   * STALE_LINE_MAX_AGE_MS triggers `staleLineFlag` and excludes the
+   * leg from parlay recommendation.
+   */
+  bookmakerLastUpdate?: string;
+  /** True when the price used is older than STALE_LINE_MAX_AGE_MS. */
+  staleLineFlag?: boolean;
+  /**
+   * True when a late roster / lineup change was detected for this
+   * game after the model was scored. Hard-invalidates parlay use:
+   * isRecommended forced to false, exclusionReason set.
+   */
+  lateChangeInvalidated?: boolean;
 }
 
 export interface PlayerPropModelRow {

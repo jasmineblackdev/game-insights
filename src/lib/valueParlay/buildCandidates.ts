@@ -117,6 +117,63 @@ function applyPreConfirmationDowngrade(
   };
 }
 
+/**
+ * Hard accuracy gates applied to every emitted candidate. Two cases:
+ *
+ *  1. Stale bookmaker price — if `bookmakerLastUpdate` is older than
+ *     STALE_LINE_MAX_AGE_MS the price we de-vigged against is no longer
+ *     trustworthy. Edge inflates artificially against a moved market;
+ *     do NOT recommend for parlays.
+ *
+ *  2. Late roster / lineup change — `late_change_flag` is set when the
+ *     pre-game roster signature changed after the model scored. The
+ *     pick was generated against a stale roster; invalidate hard
+ *     instead of merely nudging confidence.
+ *
+ * Both cases preserve the candidate (so the UI can explain *why* it
+ * was excluded) but force `isRecommended=false` with an explicit
+ * `exclusionReason`. Parlay builders already filter on isRecommended.
+ */
+const STALE_LINE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+function applyIntegrityGates(
+  candidate: ValueBetCandidate,
+  game: GamePrediction,
+  bundle: GameOddsBundle | undefined,
+): ValueBetCandidate {
+  let next = candidate;
+
+  // (1) Staleness — only meaningful when we have a bookmaker timestamp.
+  const lu = bundle?.bookmakerLastUpdate;
+  if (lu) {
+    const ageMs = Date.now() - new Date(lu).getTime();
+    if (Number.isFinite(ageMs) && ageMs > STALE_LINE_MAX_AGE_MS) {
+      next = {
+        ...next,
+        bookmakerLastUpdate: lu,
+        staleLineFlag: true,
+        isRecommended: false,
+        exclusionReason: next.exclusionReason
+          ?? `Stale price (${Math.round(ageMs / 60000)}m old)`,
+      };
+    } else {
+      next = { ...next, bookmakerLastUpdate: lu };
+    }
+  }
+
+  // (2) Late roster / lineup change — invalidates the model's input.
+  if (game._meta?.quality?.predictionIntel?.late_change_flag) {
+    next = {
+      ...next,
+      lateChangeInvalidated: true,
+      isRecommended: false,
+      exclusionReason: next.exclusionReason ?? "Late lineup / roster change after model scored",
+    };
+  }
+
+  return next;
+}
+
 export function buildMoneylineLeg(
   game: GamePrediction,
   side: EdgeSide,
@@ -507,23 +564,25 @@ export function buildAllValueCandidates(
   oddsMap: Map<string, GameOddsBundle>
 ): ValueBetCandidate[] {
   const out: ValueBetCandidate[] = [];
+  const gate = (c: ValueBetCandidate, g: GamePrediction, b: GameOddsBundle | undefined) =>
+    applyIntegrityGates(applyPreConfirmationDowngrade(c, g), g, b);
   for (const g of games) {
     const b = oddsMap.get(g.id);
     const h = moneylineCandidate(g, "home", b);
     const a = moneylineCandidate(g, "away", b);
-    if (h) out.push(applyPreConfirmationDowngrade(h, g));
-    if (a) out.push(applyPreConfirmationDowngrade(a, g));
+    if (h) out.push(gate(h, g, b));
+    if (a) out.push(gate(a, g, b));
     const to = totalCandidate(g, b, "over");
     const tu = totalCandidate(g, b, "under");
-    if (to) out.push(applyPreConfirmationDowngrade(to, g));
-    if (tu) out.push(applyPreConfirmationDowngrade(tu, g));
+    if (to) out.push(gate(to, g, b));
+    if (tu) out.push(gate(tu, g, b));
     const sh = spreadCandidate(g, b, "home");
     const sa = spreadCandidate(g, b, "away");
-    if (sh) out.push(applyPreConfirmationDowngrade(sh, g));
-    if (sa) out.push(applyPreConfirmationDowngrade(sa, g));
+    if (sh) out.push(gate(sh, g, b));
+    if (sa) out.push(gate(sa, g, b));
     const props = buildPlayerPropProjectionsForGame(g);
     for (const row of props) {
-      out.push(applyPreConfirmationDowngrade(propCandidate(g, row), g));
+      out.push(gate(propCandidate(g, row), g, b));
     }
   }
   return out.sort((x, y) => y.valueScore - x.valueScore);
