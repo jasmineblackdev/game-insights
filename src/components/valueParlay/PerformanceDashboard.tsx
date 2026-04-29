@@ -12,7 +12,8 @@
  */
 
 import { useState, useMemo } from "react";
-import { BarChart2, ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { BarChart2, ChevronDown, ChevronUp, ChevronRight, AlertTriangle } from "lucide-react";
+import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import {
   useTimingPerformance,
