@@ -27,6 +27,14 @@ export interface ValueBetCandidate {
   americanOdds: number;
   impliedProbability: number;
   modelProbability: number;
+  /**
+   * Pre-calibration model probability. When set, `modelProbability`
+   * is the Platt-scaled / calibrated value and this field carries
+   * the raw blend output. Kelly + value-gate logic should prefer
+   * `modelProbability` (calibrated); diagnostics use the delta.
+   * Undefined when no calibration was applied (raw == final).
+   */
+  rawModelProbability?: number;
   edge: number;
   /** Edge vs implied in percentage points (e.g. 6.5 = +6.5%). */
   edgeScore: number;

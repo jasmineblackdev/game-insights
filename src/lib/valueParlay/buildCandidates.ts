@@ -237,6 +237,7 @@ function moneylineCandidate(
     americanOdds: american,
     impliedProbability: implied,
     modelProbability: adjustedModelP,
+    rawModelProbability: adjustedModelP !== modelP ? modelP : undefined,
     edge: adjustedEdge,
     edgeScore: Math.round(adjustedEdge * 1000) / 10,
     betQualityRating: meta.betQualityRating,
