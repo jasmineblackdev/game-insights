@@ -161,9 +161,30 @@ async function recalibrateWeights(
 
   if (error || !records || records.length < RECALIBRATION_THRESHOLD) return;
 
-  // Compute simple win-rate by binned edge value as a weight proxy
-  const wins = records.filter(r => r.outcome === "win").length;
-  const winRate = wins / records.length;
+  // CLV-weighted win rate. Each resolved outcome contributes a weight
+  // of (1 + max(-0.5, min(0.5, clv_pp / 10))). Sharps' wisdom: a win
+  // beating closing line by +5pp is signal; a win on a steam'd line is
+  // mostly noise. Weighting wins/losses by realized CLV moves the
+  // learning signal toward beats that the closing market later agreed
+  // with — exactly the predictions worth amplifying. When clv_pp is
+  // missing the row falls back to weight 1 so legacy data still counts.
+  type Row = { outcome: string | null; extra: Record<string, unknown> | null };
+  let weightedWins = 0;
+  let totalWeight = 0;
+  for (const r of records as Row[]) {
+    const clvRaw = r.extra?.clv_pp;
+    const clv = typeof clvRaw === "number"
+      ? clvRaw
+      : typeof clvRaw === "string"
+        ? Number(clvRaw)
+        : NaN;
+    const w = Number.isFinite(clv)
+      ? 1 + Math.max(-0.5, Math.min(0.5, clv / 10))
+      : 1;
+    totalWeight += w;
+    if (r.outcome === "win") weightedWins += w;
+  }
+  const winRate = totalWeight > 0 ? weightedWins / totalWeight : 0.5;
 
   // Update weights proportional to the win rate signal
   // (A full implementation would do per-feature gradient updates)
