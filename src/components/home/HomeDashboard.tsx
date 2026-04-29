@@ -63,8 +63,7 @@ export interface HomeDashboardProps {
   isPropsPending: boolean;
   league: League;
   onSelectGame: (g: GamePrediction) => void;
-  /** Called when "See all picks" / "See all props" links fire. */
-  onNavigateBestPicks: () => void;
+  /** Called when "See all props" link fires. */
   onNavigatePlayerProps: () => void;
   onNavigateToParlay: (mode: ParlayBuildMode) => void;
 }
@@ -75,7 +74,6 @@ export const HomeDashboard = forwardRef<HTMLDivElement, HomeDashboardProps>(func
   isPropsPending,
   league,
   onSelectGame,
-  onNavigateBestPicks,
   onNavigatePlayerProps,
   onNavigateToParlay,
 }, ref) {
@@ -83,20 +81,11 @@ export const HomeDashboard = forwardRef<HTMLDivElement, HomeDashboardProps>(func
     <div ref={ref} className="space-y-10">
       {/* Top AI Picks Today */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="font-display font-bold text-lg text-foreground">Top AI Picks Today</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Highest-confidence {league.toUpperCase()} picks right now
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onNavigateBestPicks}
-            className="text-xs text-primary font-semibold hover:opacity-80 shrink-0"
-          >
-            See all picks →
-          </button>
+        <div className="mb-4">
+          <h3 className="font-display font-bold text-lg text-foreground">Top AI Picks Today</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Highest-confidence {league.toUpperCase()} picks right now
+          </p>
         </div>
         {topGames.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
