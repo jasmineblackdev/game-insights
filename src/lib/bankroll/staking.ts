@@ -158,14 +158,27 @@ export function suggestKellyStake(args: {
 export function suggestSmartStake(args: {
   bankroll: number;
   risk: StakeRiskLevel;
+  /** Raw model probability — used only when calibratedProb missing. */
   modelProb?: number;
+  /**
+   * Empirically-calibrated probability (Platt / isotonic). Preferred
+   * input for Kelly so we size off realized hit rate, not raw model
+   * output. When present, takes precedence over modelProb.
+   */
+  calibratedProb?: number;
   americanOdds?: number;
-}): { stake: number; pctOfBankroll: number; capped: boolean; method: "kelly" | "flat" } {
-  const { bankroll, risk, modelProb, americanOdds } = args;
-  if (modelProb != null && americanOdds != null) {
+}): { stake: number; pctOfBankroll: number; capped: boolean; method: "kelly" | "flat" | "no-edge" } {
+  const { bankroll, risk, modelProb, calibratedProb, americanOdds } = args;
+  // Prefer calibrated over raw — calibrated reflects realized hit rate.
+  const probForKelly = calibratedProb ?? modelProb;
+  if (probForKelly != null && americanOdds != null) {
     const tierCapPct = RISK_PCT[risk] ?? RISK_PCT.medium;
-    const k = suggestKellyStake({ bankroll, modelProb, americanOdds });
-    if (k && k.stake > 0) {
+    const k = suggestKellyStake({ bankroll, modelProb: probForKelly, americanOdds });
+    // No edge → do not flat-fall back. A negative-EV bet should size to 0.
+    if (k === null) {
+      return { stake: 0, pctOfBankroll: 0, capped: false, method: "no-edge" };
+    }
+    if (k.stake > 0) {
       // Apply the tier ceiling (so high-risk Kelly can't exceed 1%).
       const tierCap = bankroll * tierCapPct;
       if (k.stake <= tierCap) {
