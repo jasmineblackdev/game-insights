@@ -31,3 +31,6 @@ major_version = 17
 
 [functions.odds-persist]
 verify_jwt = false
+
+[functions.dk-execution-assistant]
+verify_jwt = false
