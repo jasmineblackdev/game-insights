@@ -333,7 +333,9 @@ function spreadCandidate(
         sigmoid((ph - pa) * 6 + favCoversBoost - Math.abs(sn) * 0.02);
 
   const american = coverSide === "home" ? bundle.spread.home : bundle.spread.away;
+  const oppAmerican = coverSide === "home" ? bundle.spread.away : bundle.spread.home;
   const implied = americanToImpliedProb(american);
+  const oppImplied = americanToImpliedProb(oppAmerican);
   const edge = modelCover - implied;
   const picked = coverSide === "home" ? game.homeTeam : game.awayTeam;
   const vol = volatilityNumeric(game) + 10;
@@ -343,6 +345,9 @@ function spreadCandidate(
     confidence: game.confidence,
     impliedProbability: implied,
     modelProbability: modelCover,
+    oppositeImpliedProbability: oppImplied,
+    sport: game.league,
+    marketKind: "spread",
     userPatternBoost: computePatternBoostSync({
       sport: game.league,
       marketType: "spread",
