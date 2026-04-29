@@ -1,4 +1,4 @@
-import type { ConfidenceLevel } from "@/data/mockGames";
+import type { ConfidenceLevel, League } from "@/data/mockGames";
 
 function confidence01(c: ConfidenceLevel): number {
   if (c === "high") return 1;
@@ -7,34 +7,84 @@ function confidence01(c: ConfidenceLevel): number {
 }
 
 /**
- * Average US-book vig on a two-way moneyline (~4.5%). Used as a
- * fallback when we don't have the opposite side's implied prob —
- * de-vigging with the average is closer to fair than not de-vigging
- * at all, and the error is bounded.
+ * Sport-aware vig assumptions. Calibrated against typical US-book
+ * two-way moneyline overrounds. MLB/NHL run tight at popular books;
+ * NFL/NBA mains sit near the canonical −110/−110; combat sports,
+ * alt-lines, and props carry meaningfully wider vig.
+ *
+ * These are *fallbacks* used only when the opposite-side implied
+ * probability is not provided. When the caller supplies the opposite
+ * side, deVigImplied normalizes exactly (fair = p/(p+q)) and ignores
+ * the table.
+ *
+ * Market-specific overrides (e.g. player props ~6–8% vig regardless of
+ * sport) can be passed via `marketKind` to bias toward a wider book.
  */
-const ASSUMED_VIG_RATIO = 0.045;
+const DEFAULT_VIG_RATIO = 0.045;
+
+const SPORT_VIG_RATIO: Record<League, number> = {
+  nba: 0.045,
+  wnba: 0.05,
+  nfl: 0.045,
+  mlb: 0.038,
+  boxing: 0.07,
+  mma: 0.065,
+};
+
+export type ValueScoreMarketKind =
+  | "moneyline"
+  | "spread"
+  | "total"
+  | "player_prop"
+  | "alt_line";
+
+const MARKET_VIG_FLOOR: Partial<Record<ValueScoreMarketKind, number>> = {
+  player_prop: 0.06,
+  alt_line: 0.06,
+};
+
+function normalizeSportKey(sport: string | League | undefined): League | null {
+  if (!sport) return null;
+  const k = String(sport).toLowerCase();
+  if (k === "nba" || k === "wnba" || k === "nfl" || k === "mlb" || k === "boxing" || k === "mma") {
+    return k as League;
+  }
+  return null;
+}
+
+function vigRatioFor(sport: string | League | undefined, marketKind?: ValueScoreMarketKind): number {
+  const league = normalizeSportKey(sport);
+  const base = league ? SPORT_VIG_RATIO[league] : DEFAULT_VIG_RATIO;
+  const floor = marketKind ? MARKET_VIG_FLOOR[marketKind] ?? 0 : 0;
+  return Math.max(base, floor);
+}
 
 /**
  * Strip the bookmaker vig from the implied probability. When the
  * opposite side's implied is supplied, normalize: fair = p / (p + q).
- * When it's missing, divide by (1 + average vig) — gets us most of
- * the way there for the typical −110/−110 market. Either way the
+ * When it's missing, divide by (1 + sport-specific vig) — gets us
+ * most of the way there for the typical market. Either way the
  * caller compares model_prob to a fair number, which stops chalk
  * markets from being systematically underweighted by the score.
  */
-function deVigImplied(implied: number, oppositeImplied?: number): number {
+function deVigImplied(implied: number, oppositeImplied?: number, vigRatio: number = DEFAULT_VIG_RATIO): number {
   if (!Number.isFinite(implied) || implied <= 0 || implied >= 1) return implied;
   if (oppositeImplied != null && oppositeImplied > 0 && oppositeImplied < 1) {
     const sum = implied + oppositeImplied;
     if (sum > 1.001) return implied / sum;
     return implied;
   }
-  return implied / (1 + ASSUMED_VIG_RATIO);
+  return implied / (1 + vigRatio);
 }
 
 /** 0–1: tighter book vs fair (de-vigged). */
-function oddsEfficiency01(impliedProb: number, modelProb: number, oppositeImpliedProb?: number): number {
-  const fair = deVigImplied(impliedProb, oppositeImpliedProb);
+function oddsEfficiency01(
+  impliedProb: number,
+  modelProb: number,
+  oppositeImpliedProb: number | undefined,
+  vigRatio: number,
+): number {
+  const fair = deVigImplied(impliedProb, oppositeImpliedProb, vigRatio);
   const gap = Math.abs(fair - modelProb);
   return Math.min(1, gap * 4 + 0.15);
 }
@@ -87,10 +137,26 @@ export function computeValueScore(args: {
    * overconfidence — a 2/2 streak doesn't trigger anything.
    */
   userPatternBoost?: number;
+  /**
+   * League key (e.g. "nba", "mlb", "mma"). When provided, the
+   * de-vig fallback uses sport-specific vig instead of a flat 4.5%
+   * — important for combat sports (~6.5–7%) and prop-heavy markets.
+   * Ignored when `oppositeImpliedProbability` is supplied (exact
+   * normalization is always preferred).
+   */
+  sport?: League | string;
+  /** Market category — biases vig fallback wider for props / alt lines. */
+  marketKind?: ValueScoreMarketKind;
 }): number {
   const edge01 = Math.max(0, Math.min(1, args.edge * 8));
   const conf01 = confidence01(args.confidence);
-  const oddsEff = oddsEfficiency01(args.impliedProbability, args.modelProbability, args.oppositeImpliedProbability);
+  const vigRatio = vigRatioFor(args.sport, args.marketKind);
+  const oddsEff = oddsEfficiency01(
+    args.impliedProbability,
+    args.modelProbability,
+    args.oppositeImpliedProbability,
+    vigRatio,
+  );
   const dataCert = dataCertainty01(args.uncertaintyScore);
   const lowVol = lowVolatility01(args.volatilityScore);
   const lineM = lineMovement01(args.lineMovementDeltaPp != null ? Math.abs(args.lineMovementDeltaPp) : null);

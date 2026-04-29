@@ -238,11 +238,16 @@ function totalCandidate(
   const vol = volatilityNumeric(game) + 6;
   const unc = confidenceToUncertaintyBase(game.confidence) + 8;
 
+  const oppAmerican = side === "over" ? bundle.total.under : bundle.total.over;
+  const oppImplied = americanToImpliedProb(oppAmerican);
   const valueScore = computeValueScore({
     edge,
     confidence: game.confidence,
     impliedProbability: implied,
     modelProbability: modelP,
+    oppositeImpliedProbability: oppImplied,
+    sport: game.league,
+    marketKind: "total",
     volatilityScore: vol,
     uncertaintyScore: unc,
     lineMovementDeltaPp: game._meta?.quality?.market?.line_movement_home_pp,
@@ -328,7 +333,9 @@ function spreadCandidate(
         sigmoid((ph - pa) * 6 + favCoversBoost - Math.abs(sn) * 0.02);
 
   const american = coverSide === "home" ? bundle.spread.home : bundle.spread.away;
+  const oppAmerican = coverSide === "home" ? bundle.spread.away : bundle.spread.home;
   const implied = americanToImpliedProb(american);
+  const oppImplied = americanToImpliedProb(oppAmerican);
   const edge = modelCover - implied;
   const picked = coverSide === "home" ? game.homeTeam : game.awayTeam;
   const vol = volatilityNumeric(game) + 10;
@@ -338,6 +345,9 @@ function spreadCandidate(
     confidence: game.confidence,
     impliedProbability: implied,
     modelProbability: modelCover,
+    oppositeImpliedProbability: oppImplied,
+    sport: game.league,
+    marketKind: "spread",
     userPatternBoost: computePatternBoostSync({
       sport: game.league,
       marketType: "spread",
@@ -417,6 +427,8 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
     confidence: row.confidence,
     impliedProbability: implied,
     modelProbability: modelP,
+    sport: game.league,
+    marketKind: "player_prop",
     volatilityScore: Math.min(100, volB),
     uncertaintyScore: Math.min(100, uncB),
     userPatternBoost: computePatternBoostSync({
@@ -675,6 +687,8 @@ export function buildEnrichedPropCandidates(
       confidence: conf,
       impliedProbability: marketProb,
       modelProbability: modelP,
+      sport: pred.sport,
+      marketKind: "player_prop",
       volatilityScore,
       uncertaintyScore,
       lineMovementDeltaPp: pred.line_delta ?? null,

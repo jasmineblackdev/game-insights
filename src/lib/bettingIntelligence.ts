@@ -313,6 +313,8 @@ export function evaluateMoneylineForParlay(
     volatilityScore: vol,
     uncertaintyScore: unc,
     lineMovementDeltaPp: lineDelta,
+    sport: game.league,
+    marketKind: "moneyline",
     scheduleRestHint: game._meta?.quality?.fatigue
       ? 100 - (game._meta.quality.fatigue.fatigue_penalty ?? 30)
       : undefined,
