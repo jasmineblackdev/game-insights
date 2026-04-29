@@ -672,5 +672,10 @@ export async function syncPickResolution(
   if (mlSport) {
     // Fire-and-forget recalibration — never blocks the caller
     maybeRecalibrate(mlSport, "pregame").catch(() => {});
+    // Alpha contribution check — every resolved pick is a chance to
+    // re-evaluate ml_blended vs rules. Internally throttled by the
+    // RPC's own sample requirements (≥10 per variant), so calling on
+    // every resolution is safe and just no-ops when data is thin.
+    maybeAdjustAlphaFromContribution(sport).catch(() => {});
   }
 }
