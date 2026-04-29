@@ -139,7 +139,7 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
               <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary">#1 Pick</span>
               <span>{top.sport}</span>
               <span>·</span>
-              <span>{top.matchup ?? top.player_name}</span>
+              <span>{top.team} vs {top.opponent}</span>
             </div>
             <p className="font-display font-bold text-lg text-foreground truncate">
               {top.player_name}
