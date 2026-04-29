@@ -25,7 +25,7 @@ import { sortPlayerEdgePredictions, type PlayerEdgePrediction } from "@/data/pla
 import { cn } from "@/lib/utils";
 import { enrichGamesWithBettingIntelligence } from "@/lib/bettingIntelligence";
 import { fetchAllOddsBundles, type GameOddsBundle } from "@/lib/valueParlay/oddsEvents";
-import { BestValuePicksSection } from "@/components/valueParlay/BestValuePicksSection";
+
 import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSection";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
@@ -39,7 +39,7 @@ import { useProMode } from "@/context/ProModeContext";
 import { useSharpMode } from "@/context/SharpModeContext";
 import { useBankroll } from "@/context/BankrollContext";
 import { runProModePipeline } from "@/lib/learning/proModePipeline";
-import { Disclosure } from "@/components/ui/disclosure";
+
 import { settleFinalGames } from "@/lib/predictionHistorySettler";
 import { loadUserBettingPatterns } from "@/lib/learning/userBettingPatterns";
 import { resolveRecommendedParlays } from "@/lib/learning/recommendedParlayResolver";
@@ -172,10 +172,6 @@ const Index = () => {
   // dedicated "Tomorrow" nav tab. When toggled to "tomorrow", the
   // Home view renders TomorrowTab content inline.
   const [homeDateMode, setHomeDateMode] = useState<"today" | "tomorrow">("today");
-  // Auto / Manual sub-tab inside Parlay Builder — replaces the
-  // dedicated Daily Plan nav tab. Auto = HomeAutoProfit + 3-tier
-  // recommendations; Manual = ParlayBuilderSection.
-  const [parlayBuilderMode, setParlayBuilderMode] = useState<"manual" | "auto">("manual");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     // Allow deep links like /?view=parlay_builder so the slip drawer's
     // "Open builder" button (and any future external links) land on the
@@ -904,76 +900,15 @@ const Index = () => {
                   }
                 />
               ) : viewMode === "parlay_builder" ? (
-                <div className="space-y-6">
-                  {/* Manual / Auto sub-tabs — Auto used to be the
-                      separate "Daily Plan" nav tab; folded in here so
-                      there's a single parlay surface. */}
-                  <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-                    {(["manual", "auto"] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setParlayBuilderMode(m)}
-                        className={cn(
-                          "px-4 py-1.5 rounded-full text-xs font-semibold transition-colors capitalize",
-                          parlayBuilderMode === m
-                            ? "bg-card text-foreground shadow-sm"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        {m === "auto" ? "Auto Parlay" : "Manual Build"}
-                      </button>
-                    ))}
-                  </div>
-
-                  {parlayBuilderMode === "auto" ? (
-                    <div className="space-y-4">
-                      <HomeAutoProfit
-                        candidates={homeAutoProfitCandidates}
-                        loading={
-                          nbaFastQuery.isPending ||
-                          mlbFastQuery.isPending ||
-                          homePropsQuery.isPending
-                        }
-                      />
-                      <p className="text-xs text-muted-foreground text-center">
-                        Want the full 3-tier breakdown (Primary / Balanced / Upside)?{" "}
-                        <Link to="/daily" className="text-primary hover:underline">
-                          Open Daily Plan →
-                        </Link>
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-10">
-                      {/*
-                        Manual builder — ParlayBuilderSection includes its own
-                        leg picker via RankedLiveParlayPresets. The
-                        BestValuePicksSection details below is for users who
-                        want the explicit individual-leg list.
-                      */}
-                      <ParlayBuilderSection
-                        games={allGamesWithIntel}
-                        oddsMap={oddsMapAll}
-                        gamesLoading={allGamesWithIntel.length === 0 && (
-                          nbaFastQuery.isPending ||
-                          mlbFastQuery.isPending
-                        )}
-                        bookOddsLoading={false}
-                      />
-                      <Disclosure
-                        variant="card"
-                        title="Best-value picks (individual leg list)"
-                        showHint
-                      >
-                        <BestValuePicksSection
-                          games={allGamesWithIntel}
-                          oddsMap={oddsMapAll}
-                          loading={false}
-                        />
-                      </Disclosure>
-                    </div>
+                <ParlayBuilderSection
+                  games={allGamesWithIntel}
+                  oddsMap={oddsMapAll}
+                  gamesLoading={allGamesWithIntel.length === 0 && (
+                    nbaFastQuery.isPending ||
+                    mlbFastQuery.isPending
                   )}
-                </div>
+                  bookOddsLoading={false}
+                />
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
               ) : viewMode === "player_props" ? (
