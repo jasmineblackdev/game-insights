@@ -564,23 +564,25 @@ export function buildAllValueCandidates(
   oddsMap: Map<string, GameOddsBundle>
 ): ValueBetCandidate[] {
   const out: ValueBetCandidate[] = [];
+  const gate = (c: ValueBetCandidate, g: GamePrediction, b: GameOddsBundle | undefined) =>
+    applyIntegrityGates(applyPreConfirmationDowngrade(c, g), g, b);
   for (const g of games) {
     const b = oddsMap.get(g.id);
     const h = moneylineCandidate(g, "home", b);
     const a = moneylineCandidate(g, "away", b);
-    if (h) out.push(applyPreConfirmationDowngrade(h, g));
-    if (a) out.push(applyPreConfirmationDowngrade(a, g));
+    if (h) out.push(gate(h, g, b));
+    if (a) out.push(gate(a, g, b));
     const to = totalCandidate(g, b, "over");
     const tu = totalCandidate(g, b, "under");
-    if (to) out.push(applyPreConfirmationDowngrade(to, g));
-    if (tu) out.push(applyPreConfirmationDowngrade(tu, g));
+    if (to) out.push(gate(to, g, b));
+    if (tu) out.push(gate(tu, g, b));
     const sh = spreadCandidate(g, b, "home");
     const sa = spreadCandidate(g, b, "away");
-    if (sh) out.push(applyPreConfirmationDowngrade(sh, g));
-    if (sa) out.push(applyPreConfirmationDowngrade(sa, g));
+    if (sh) out.push(gate(sh, g, b));
+    if (sa) out.push(gate(sa, g, b));
     const props = buildPlayerPropProjectionsForGame(g);
     for (const row of props) {
-      out.push(applyPreConfirmationDowngrade(propCandidate(g, row), g));
+      out.push(gate(propCandidate(g, row), g, b));
     }
   }
   return out.sort((x, y) => y.valueScore - x.valueScore);
