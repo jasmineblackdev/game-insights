@@ -117,6 +117,63 @@ function applyPreConfirmationDowngrade(
   };
 }
 
+/**
+ * Hard accuracy gates applied to every emitted candidate. Two cases:
+ *
+ *  1. Stale bookmaker price — if `bookmakerLastUpdate` is older than
+ *     STALE_LINE_MAX_AGE_MS the price we de-vigged against is no longer
+ *     trustworthy. Edge inflates artificially against a moved market;
+ *     do NOT recommend for parlays.
+ *
+ *  2. Late roster / lineup change — `late_change_flag` is set when the
+ *     pre-game roster signature changed after the model scored. The
+ *     pick was generated against a stale roster; invalidate hard
+ *     instead of merely nudging confidence.
+ *
+ * Both cases preserve the candidate (so the UI can explain *why* it
+ * was excluded) but force `isRecommended=false` with an explicit
+ * `exclusionReason`. Parlay builders already filter on isRecommended.
+ */
+const STALE_LINE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
+function applyIntegrityGates(
+  candidate: ValueBetCandidate,
+  game: GamePrediction,
+  bundle: GameOddsBundle | undefined,
+): ValueBetCandidate {
+  let next = candidate;
+
+  // (1) Staleness — only meaningful when we have a bookmaker timestamp.
+  const lu = bundle?.bookmakerLastUpdate;
+  if (lu) {
+    const ageMs = Date.now() - new Date(lu).getTime();
+    if (Number.isFinite(ageMs) && ageMs > STALE_LINE_MAX_AGE_MS) {
+      next = {
+        ...next,
+        bookmakerLastUpdate: lu,
+        staleLineFlag: true,
+        isRecommended: false,
+        exclusionReason: next.exclusionReason
+          ?? `Stale price (${Math.round(ageMs / 60000)}m old)`,
+      };
+    } else {
+      next = { ...next, bookmakerLastUpdate: lu };
+    }
+  }
+
+  // (2) Late roster / lineup change — invalidates the model's input.
+  if (game._meta?.quality?.predictionIntel?.late_change_flag) {
+    next = {
+      ...next,
+      lateChangeInvalidated: true,
+      isRecommended: false,
+      exclusionReason: next.exclusionReason ?? "Late lineup / roster change after model scored",
+    };
+  }
+
+  return next;
+}
+
 export function buildMoneylineLeg(
   game: GamePrediction,
   side: EdgeSide,
