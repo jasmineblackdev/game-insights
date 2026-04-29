@@ -424,6 +424,18 @@ export function diagnoseLegRejection(
 
   const floors = tierFloors(mode);
 
+  // Hard price-range gate — implements "only -120 to -200" discipline rule.
+  // Rejects chalky favorites and longshot dogs before any other scoring.
+  if (c.americanOdds < floors.priceMin) return "price_too_chalky";
+  if (c.americanOdds > floors.priceMax) return "price_too_long";
+
+  // Single-bet eligibility ("Would I bet this as a straight?") — required
+  // for SAFE / CASHOUT. A leg unworthy of a straight bet is unworthy of
+  // a parlay slot in disciplined modes.
+  if (floors.requireSingleBetEligible && c.eligibleAsSingle === false) {
+    return "not_single_bet_eligible";
+  }
+
   if (c.volatilityScore >= floors.maxVolatility) return "tier_floor_volatility";
   if (c.stabilityScore !== undefined && c.stabilityScore < floors.minStability) return "tier_floor_stability";
   if ((c.modelProbability ?? 0) < floors.minHitProb) return "tier_floor_hit_prob";
