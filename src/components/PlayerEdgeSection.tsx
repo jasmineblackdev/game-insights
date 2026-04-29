@@ -334,7 +334,9 @@ function PlayerEdgeCard({
 
       {/* ── Expandable Details (raw stats, full reasons, matchup notes) ── */}
       <Disclosure variant="dashed" title="Details">
-        <div className="space-y-2 text-[11px]">
+        <div className="space-y-3 text-[11px]">
+          {/* Why-this-pick contribution breakdown */}
+          <PickContributionPanel pred={pred} />
           {/* Raw projection / edge / form */}
           <div className="flex items-center gap-4">
             <div>
