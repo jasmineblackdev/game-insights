@@ -239,10 +239,27 @@ function PlayerEdgeCard({
               <Star className={cn("w-4 h-4", favorited && "fill-current")} />
             </button>
           )}
-          {/* Sport badge only — confidence moves below headline */}
-          <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-            {pred.sport}
-          </span>
+          {/* Sport badge + DK availability — confidence moves below headline */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+              {pred.sport}
+            </span>
+            {isDraftKingsAvailable(pred.sport, pred.stat_type) ? (
+              <span
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                title={`DraftKings market: ${getDkMapping(pred.sport, pred.stat_type)?.dkLabel ?? ""}`}
+              >
+                DK · {getDkMapping(pred.sport, pred.stat_type)?.shortLabel}
+              </span>
+            ) : (
+              <span
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                title="DraftKings does not currently offer this market"
+              >
+                Not on DK
+              </span>
+            )}
+          </div>
           <p className="font-display font-bold text-sm text-foreground mt-1 truncate">{pred.player_name}</p>
           <p className="text-xs text-muted-foreground">
             {isCombatSport ? `vs ${pred.opponent}` : `${pred.team} vs ${pred.opponent}`}
