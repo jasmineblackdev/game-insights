@@ -19,6 +19,7 @@ import { queryClient } from "@/lib/queryClient.ts";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { pullMlbStarterConfirmationsFromSupabase } from "@/lib/mlbStarterConfirm";
 import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
+import { rehydrateUserLearningFromSupabase } from "@/lib/predictionLearningStorage";
 import { StaleLinesBanner } from "@/components/StaleLinesBanner";
 import Index from "./pages/Index.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
@@ -63,6 +64,22 @@ function PlattParamsSync() {
   return null;
 }
 
+/**
+ * Pull the user's last `user_learning_snapshots` row into localStorage
+ * once per signed-in session. Closes the gap where a fresh device or
+ * cleared browser would lose all calibration history while the server
+ * had it persisted. The push side already exists in
+ * `scheduleUserLearningSnapshotSync` — this is the symmetric pull.
+ */
+function UserLearningRehydrate() {
+  const session = useSupabaseSession();
+  useEffect(() => {
+    if (!session?.user) return;
+    void rehydrateUserLearningFromSupabase();
+  }, [session?.user?.id]);
+  return null;
+}
+
 function LiveEdgeNotificationRunner() {
   useLiveEdgeNotifications();
   return null;
@@ -73,6 +90,7 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <MlbStarterSupabaseSync />
       <PlattParamsSync />
+      <UserLearningRehydrate />
       <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
         <EdgeCardProvider>
           <ValueParlayProvider>
