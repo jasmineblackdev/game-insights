@@ -15,6 +15,7 @@ import { logPick, fetchAccuracyStats } from "@/lib/picksLog";
 import { useBankroll } from "@/context/BankrollContext";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
+import { getDkMapping, isDraftKingsAvailable } from "@/lib/draftkings/dkMarketCatalog";
 import {
   pickActionForPrediction,
   pickActionLabel,
@@ -82,15 +83,23 @@ function riskLabel(t: PlayerRiskTier): string {
 }
 
 // ── Bet label (DK-style headline for the card) ────────────────────────────────
+//
+// Headline always uses the DraftKings market name when available so what the
+// app shows matches what the user will see on DK. Falls back to the local
+// statFilter label only when the stat is unknown to the catalog.
 
 function betHeadline(p: PlayerEdgePrediction): string {
-  const stat = statFilterLabel(p.stat_type as PlayerEdgeStatFilter) || p.stat_type.replace(/_/g, " ");
+  const dkMap = getDkMapping(p.sport, p.stat_type);
+  const stat = dkMap?.dkLabel
+    ?? statFilterLabel(p.stat_type as PlayerEdgeStatFilter)
+    ?? p.stat_type.replace(/_/g, " ");
   if (p.stat_type === "fight_winner")  return "To Win";
   if (p.stat_type === "ko_tko")        return "Win by KO/TKO";
   if (p.stat_type === "submission")    return "Win by Submission";
   if (p.stat_type === "decision")      return "Win by Decision";
   if (p.stat_type === "draw")          return "Fight Ends in Draw";
   if (p.stat_type === "goes_distance") return "Goes Distance";
+  if (p.stat_type === "anytime_td")    return dkMap?.dkLabel ?? "Anytime Touchdown";
   if (p.stat_type === "total_rounds")
     return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} Rounds`;
   return `${p.prediction_direction === "MORE" ? "Over" : "Under"} ${p.line_value} ${stat}`;
@@ -230,10 +239,27 @@ function PlayerEdgeCard({
               <Star className={cn("w-4 h-4", favorited && "fill-current")} />
             </button>
           )}
-          {/* Sport badge only — confidence moves below headline */}
-          <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-            {pred.sport}
-          </span>
+          {/* Sport badge + DK availability — confidence moves below headline */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+              {pred.sport}
+            </span>
+            {isDraftKingsAvailable(pred.sport, pred.stat_type) ? (
+              <span
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                title={`DraftKings market: ${getDkMapping(pred.sport, pred.stat_type)?.dkLabel ?? ""}`}
+              >
+                DK · {getDkMapping(pred.sport, pred.stat_type)?.shortLabel}
+              </span>
+            ) : (
+              <span
+                className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30"
+                title="DraftKings does not currently offer this market"
+              >
+                Not on DK
+              </span>
+            )}
+          </div>
           <p className="font-display font-bold text-sm text-foreground mt-1 truncate">{pred.player_name}</p>
           <p className="text-xs text-muted-foreground">
             {isCombatSport ? `vs ${pred.opponent}` : `${pred.team} vs ${pred.opponent}`}

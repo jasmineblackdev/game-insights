@@ -1,20 +1,25 @@
 /**
  * BestPlayerPropToday — Home hero card.
  *
- * Surfaces the single highest-ranked player prop across all sports
- * using the existing `computePlayerEdgeScore` (weights: edge .40,
- * volume .25, matchup .15, trend .10, line .10 − variance).
+ * Surfaces the single highest-ranked **DraftKings-supported** player prop across
+ * all sports using the existing `computePlayerEdgeScore` (weights: edge .40,
+ * volume .25, matchup .15, trend .10, line .10 − variance) with a small DK-
+ * priority tie-break so the top recommendation favours the bet types DK
+ * markets prioritise per spec (NBA: Pts > Reb > Ast > PRA …, etc.).
  *
  * Eligibility gates applied here (in addition to the engine's own):
+ *   - DraftKings market must be supported (`isDraftKingsAvailable`)
  *   - model probability  ≥ 0.57   (proxied via confidence_score_0_100 ≥ 57
  *                                  or ml_hit_probability ≥ 0.57)
  *   - |edge|             ≥ 5 %    (sport-normalised via maxEdge in scorer)
  *   - role stability     ≥ 70/100 (consistency_label !== "volatile")
  *   - high-variance props (volatility_flag) only when edge ≥ 10 %
  *
+ * Each row exposes: Sport · Player · DK bet type · Over/Under · DK line ·
+ * Odds · Model projection · Edge % · Confidence · Action verdict · Reason.
+ *
  * Action verdict: Bet now / Monitor / Pass — derived from
- * `pickActionForPrediction` so it stays in lockstep with the rest of
- * the app.
+ * `pickActionForPrediction` so it stays in lockstep with the rest of the app.
  */
 
 import { useMemo } from "react";
@@ -30,6 +35,13 @@ import {
   pickActionLabel,
   pickActionClass,
 } from "@/lib/dailyPlan/pickAction";
+import {
+  isDraftKingsAvailable,
+  dkLabelFor,
+  dkShortLabelFor,
+  dkPriorityFor,
+  getDkMapping,
+} from "@/lib/draftkings/dkMarketCatalog";
 import { cn } from "@/lib/utils";
 
 export interface BestPlayerPropTodayProps {
@@ -38,17 +50,15 @@ export interface BestPlayerPropTodayProps {
 }
 
 /** Sport-normalised edge floor (5 %) expressed in raw stat units. */
-function meetsEdgeFloor(p: PlayerEdgePrediction): boolean {
-  // computePlayerEdgeScore uses these maxEdge anchors; 5% of max keeps
-  // the gate consistent across sports without re-implementing units.
-  const maxEdge =
-    p.sport === "NBA" ? 8 :
-    p.sport === "NFL" ? 30 :
-    p.sport === "MLB" ? 3 :
-    15;
-  return Math.abs(p.edge) / maxEdge >= 0.05;
+function maxEdgeFor(sport: PlayerEdgePrediction["sport"]): number {
+  return sport === "NBA" || sport === "WNBA" ? 8
+       : sport === "NFL" ? 30
+       : sport === "MLB" ? 3
+       : 15;
 }
-
+function meetsEdgeFloor(p: PlayerEdgePrediction): boolean {
+  return Math.abs(p.edge) / maxEdgeFor(p.sport) >= 0.05;
+}
 function meetsProbabilityFloor(p: PlayerEdgePrediction): boolean {
   if (p.ml_hit_probability != null && p.ml_active) {
     return p.ml_hit_probability >= 0.57;
@@ -57,46 +67,63 @@ function meetsProbabilityFloor(p: PlayerEdgePrediction): boolean {
     ?? (p.confidence === "HIGH" ? 72 : p.confidence === "MED" ? 58 : 44);
   return conf >= 57;
 }
-
 function meetsRoleFloor(p: PlayerEdgePrediction): boolean {
   return p.consistency_label !== "volatile";
 }
-
 function passesVarianceRule(p: PlayerEdgePrediction): boolean {
   if (!p.volatility_flag) return true;
-  // High-variance props only when edge ≥ 10 %
-  const maxEdge =
-    p.sport === "NBA" ? 8 :
-    p.sport === "NFL" ? 30 :
-    p.sport === "MLB" ? 3 :
-    15;
-  return Math.abs(p.edge) / maxEdge >= 0.10;
+  return Math.abs(p.edge) / maxEdgeFor(p.sport) >= 0.10;
 }
-
+/** Spec: do not recommend DK-unsupported markets — mark unavailable and skip. */
+function meetsDkSupport(p: PlayerEdgePrediction): boolean {
+  return isDraftKingsAvailable(p.sport, p.stat_type);
+}
 function eligible(p: PlayerEdgePrediction): boolean {
-  return meetsEdgeFloor(p) && meetsProbabilityFloor(p) && meetsRoleFloor(p) && passesVarianceRule(p);
+  return meetsDkSupport(p)
+      && meetsEdgeFloor(p)
+      && meetsProbabilityFloor(p)
+      && meetsRoleFloor(p)
+      && passesVarianceRule(p);
 }
 
-function formatHeadline(p: PlayerEdgePrediction): string {
+/** "Over 24.5 Points" using the DK label so the UI matches the sportsbook. */
+function dkHeadline(p: PlayerEdgePrediction): string {
   const dir = p.prediction_direction === "MORE" ? "Over" : "Under";
-  const stat = p.stat_type.replace(/_/g, " ");
+  const label = dkLabelFor(p.sport, p.stat_type);
   if (p.stat_type === "fight_winner") return `${p.player_name} to Win`;
-  return `${dir} ${p.line_value} ${stat}`;
+  if (p.stat_type === "anytime_td")   return `${p.player_name} ${label}`;
+  return `${dir} ${p.line_value} ${label}`;
+}
+function edgePct(p: PlayerEdgePrediction): string {
+  return `${Math.round((p.edge / maxEdgeFor(p.sport)) * 1000) / 10}%`;
+}
+function formatOdds(odds?: number): string {
+  if (odds == null || !Number.isFinite(odds)) return "—";
+  return odds > 0 ? `+${Math.round(odds)}` : `${Math.round(odds)}`;
+}
+/** Why the engine picked this DK bet type for this player. */
+function dkReason(p: PlayerEdgePrediction): string {
+  const m = getDkMapping(p.sport, p.stat_type);
+  const mkt = m?.dkLabel ?? p.stat_type;
+  const dir = p.prediction_direction === "MORE" ? "Over" : "Under";
+  const conf = p.confidence_score_0_100
+    ?? (p.confidence === "HIGH" ? 72 : p.confidence === "MED" ? 58 : 44);
+  return `DK ${mkt} (${dir}) — model ${Math.round((p.projected_value ?? 0) * 10) / 10} vs line ${p.line_value} · edge ${edgePct(p)} · confidence ${conf}/100`;
 }
 
-function edgePct(p: PlayerEdgePrediction): string {
-  const maxEdge =
-    p.sport === "NBA" ? 8 :
-    p.sport === "NFL" ? 30 :
-    p.sport === "MLB" ? 3 :
-    15;
-  return `${Math.round((p.edge / maxEdge) * 1000) / 10}%`;
+/** DK priority breaks score ties so highest-priority DK markets bubble up. */
+function dkAwareSort(a: PlayerEdgePrediction, b: PlayerEdgePrediction): number {
+  const sa = computePlayerEdgeScore(a);
+  const sb = computePlayerEdgeScore(b);
+  if (Math.abs(sa - sb) > 0.5) return sb - sa;
+  return dkPriorityFor(a.sport, a.stat_type) - dkPriorityFor(b.sport, b.stat_type);
 }
 
 export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTodayProps) {
   const ranked = useMemo(() => {
     const filtered = predictions.filter(eligible);
-    return sortPlayerEdgePredictions(filtered).slice(0, 6);
+    // Sort with DK-priority tie-break, then keep top 6
+    return [...sortPlayerEdgePredictions(filtered)].sort(dkAwareSort).slice(0, 6);
   }, [predictions]);
 
   if (isPending) {
@@ -112,6 +139,7 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
   const top = ranked[0];
   const alternatives = ranked.slice(1);
   const action = pickActionForPrediction(top);
+  const dkMap = getDkMapping(top.sport, top.stat_type);
 
   return (
     <section>
@@ -119,6 +147,9 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-primary" />
           <h3 className="font-display font-bold text-lg text-foreground">Best Player Prop Today</h3>
+          <span className="hidden sm:inline-flex items-center text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+            DraftKings
+          </span>
         </div>
         <Link
           to="/?view=player_props"
@@ -135,17 +166,22 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
       >
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-bold tracking-wider text-muted-foreground uppercase mb-1">
+            <div className="flex items-center gap-2 text-[10px] font-bold tracking-wider text-muted-foreground uppercase mb-1 flex-wrap">
               <span className="px-1.5 py-0.5 rounded bg-primary/20 text-primary">#1 Pick</span>
               <span>{top.sport}</span>
               <span>·</span>
               <span>{top.team} vs {top.opponent}</span>
+              {dkMap ? (
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  DK · {dkMap.shortLabel}
+                </span>
+              ) : null}
             </div>
             <p className="font-display font-bold text-lg text-foreground truncate">
               {top.player_name}
             </p>
             <p className="text-base font-semibold text-foreground/90 mt-0.5">
-              {formatHeadline(top)}
+              {dkHeadline(top)}
             </p>
           </div>
           <span className={cn(
@@ -156,10 +192,14 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-3">
+        <div className="grid grid-cols-4 gap-3 mb-3">
           <div>
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Edge</p>
             <p className="text-base font-bold text-confidence-high">{edgePct(top)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">DK Line</p>
+            <p className="text-base font-bold text-foreground">{top.line_value}</p>
           </div>
           <div>
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Projected</p>
@@ -168,16 +208,12 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
             </p>
           </div>
           <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Score</p>
-            <p className="text-base font-bold text-primary">
-              {Math.round(computePlayerEdgeScore(top))}
-            </p>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Odds</p>
+            <p className="text-base font-bold text-foreground">{formatOdds(top.american_odds)}</p>
           </div>
         </div>
 
-        {top.reason_1 ? (
-          <p className="text-xs text-muted-foreground leading-relaxed">{top.reason_1}</p>
-        ) : null}
+        <p className="text-xs text-muted-foreground leading-relaxed">{dkReason(top)}</p>
       </Link>
 
       {/* Alternatives */}
@@ -186,24 +222,35 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
           <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">
             Top Alternatives
           </p>
-          {alternatives.map((p, i) => (
-            <Link
-              key={p.id}
-              to="/?view=player_props"
-              className="flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2 hover:bg-card/70 transition-colors"
-            >
-              <span className="text-xs font-bold text-muted-foreground w-4 shrink-0">#{i + 2}</span>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-foreground truncate">
-                  {p.player_name} <span className="text-muted-foreground">·</span> {formatHeadline(p)}
-                </p>
-                <p className="text-[10px] text-muted-foreground">
-                  {p.sport} · Edge {edgePct(p)}
-                </p>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            </Link>
-          ))}
+          {alternatives.map((p, i) => {
+            const altAction = pickActionForPrediction(p);
+            return (
+              <Link
+                key={p.id}
+                to="/?view=player_props"
+                className="flex items-center gap-3 rounded-lg border border-border bg-card/40 px-3 py-2 hover:bg-card/70 transition-colors"
+              >
+                <span className="text-xs font-bold text-muted-foreground w-4 shrink-0">#{i + 2}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground truncate">
+                    {p.player_name}
+                    <span className="text-muted-foreground"> · </span>
+                    {dkHeadline(p)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {p.sport} · DK {dkShortLabelFor(p.sport, p.stat_type)} · Edge {edgePct(p)} · {formatOdds(p.american_odds)}
+                  </p>
+                </div>
+                <span className={cn(
+                  "shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide",
+                  pickActionClass(altAction),
+                )}>
+                  {pickActionLabel(altAction)}
+                </span>
+                <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              </Link>
+            );
+          })}
         </div>
       ) : null}
     </section>
