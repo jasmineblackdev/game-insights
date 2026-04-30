@@ -168,10 +168,10 @@ const MLB_STAT_MAP: Record<string, StatMapEntry> = {
   },
   hits: {
     statType: "hits", unit: "hits",
-    matches: [
-      "hits", "hitsleader", "h",
-      "battingaverage", "battingavg", "avg",
-    ],
+    // Deliberately excludes battingAverage / avg — those return a
+    // decimal rate (0.296), not a season hit total, and would be
+    // incompatible with the per-game conversion logic below.
+    matches: ["hits", "hitsleader", "h"],
   },
   rbis: {
     statType: "rbis", unit: "RBI",
@@ -206,8 +206,9 @@ const MLB_STAT_MAP: Record<string, StatMapEntry> = {
 /**
  * MLB stats that DraftKings posts as a binary 0.5 O/U line (the real
  * sportsbook shape) — "did the player get any RBI / run / HR / SB /
- * BB this game?". The "Sal Stewart Over 29.5 RBIs" bug came from
- * treating ESPN's leader-endpoint *season total* as a per-game line.
+ * BB / 2B / 3B this game?". The "Sal Stewart Over 29.5 RBIs" bug came
+ * from treating ESPN's leader-endpoint *season total* as a per-game
+ * line.
  *
  * For these stats the prop ships with lineValue=0.5 and projected_value
  * is the per-game rate (season_total / games_played_estimate). Bigger
@@ -216,6 +217,21 @@ const MLB_STAT_MAP: Record<string, StatMapEntry> = {
  */
 const MLB_BINARY_OU_STATS = new Set([
   "rbis", "runs", "home_runs", "stolen_bases", "walks",
+  "doubles", "triples",
+]);
+
+/**
+ * MLB stats DraftKings posts as a *continuous* O/U line (1.5 / 2.5 hits,
+ * 1.5 / 2.5 / 3.5 total bases, 4.5 / 5.5 / 6.5 strikeouts for SP,
+ * 0.5 / 1.5 batter Ks). ESPN's leader endpoint still returns season
+ * totals here, so projection AND line both have to be converted to
+ * per-game scale before snapping to .5.
+ *
+ * Without this, a hits leader sitting on 50 H mid-April reads as
+ * "Over 49.5 hits" — same shape of bug that produced the RBI mess.
+ */
+const MLB_CONTINUOUS_NEEDS_PER_GAME = new Set([
+  "hits", "total_bases", "strikeouts",
 ]);
 
 /**
@@ -523,14 +539,18 @@ function buildReasons(
 
   const trend = direction === "MORE" ? "above" : "below";
 
-  // For MLB binary-O/U counting stats (RBI / runs / HR / SB / walks),
+  // For MLB stats where ESPN gives season totals (binary O/U like
+  // RBI/runs/HR/SB/BB/2B/3B AND continuous O/U like hits/TB/K),
   // `seasonAvg` is actually the season TOTAL and `projected` is the
-  // per-game rate. Frame the reason so it's honest about both numbers
-  // and the 0.5 sportsbook line — not a misleading "Season avg 29 RBI".
+  // per-game rate. Frame the reason honestly about both numbers — not
+  // a misleading "Season avg 29 RBI" or "Season avg 50 hits".
   const isMlbBinary = sport === "MLB" && MLB_BINARY_OU_STATS.has(statType);
+  const isMlbContinuousSeason = sport === "MLB" && MLB_CONTINUOUS_NEEDS_PER_GAME.has(statType);
   const reason_1 = isMlbBinary
     ? `${seasonAvg} ${unit} on season → ~${projected.toFixed(2)} ${unit}/game projected. ${direction === "MORE" ? "Over" : "Under"} 0.5 vs ${oppAbbr}'s ${oppQ} defense.`
-    : `Season avg ${seasonAvg} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
+    : isMlbContinuousSeason
+      ? `${seasonAvg} ${unit} on season → ~${projected.toFixed(1)} ${unit}/game projected vs ${oppAbbr}'s ${oppQ} defense.`
+      : `Season avg ${seasonAvg} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
 
   let reason_2 = `${oppAbbr} win rate ${Math.round(opponentWinPct * 100)}% — ${
     oppQ === "weak"   ? "lighter opposition inflates opportunity" :
@@ -827,19 +847,26 @@ async function fetchSportPlayerEdge(
             ? nflOpponentMultiplier(mapping.statType, opposingNflDefCtx)
             : 1.0;
           const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult * nflDefMult;
-          // For MLB binary-O/U counting stats (RBI / runs / HR / SB /
-          // BB) the sportsbook line is fixed at 0.5 and the projection
-          // is the per-game rate. ESPN's leader endpoint returns the
-          // season total, so we divide by an estimated games-played
-          // count. For everything else the existing snapToHalfPoint
-          // logic produces a continuous .5 line from the per-game-ish
-          // input.
+          // ESPN's leader endpoint returns season totals, but books post
+          // per-game lines. Two MLB cases that need conversion:
+          //   1. Binary O/U stats (RBI / runs / HR / SB / BB / 2B / 3B):
+          //      sportsbook line is fixed at 0.5; projection = per-game rate.
+          //   2. Continuous O/U stats (hits / total_bases / strikeouts):
+          //      both the line AND projection convert to per-game rate.
+          // Other sports (NBA / WNBA / NFL) come back as per-game-ish
+          // averages already, so the existing snapToHalfPoint logic stands.
           const isMlbBinary = sport === "MLB" && MLB_BINARY_OU_STATS.has(mapping.statType);
-          const perGameProjection = isMlbBinary
-            ? Math.round((projectedRaw / estimateMlbGamesPlayed()) * 100) / 100
+          const isMlbContinuousSeason = sport === "MLB" && MLB_CONTINUOUS_NEEDS_PER_GAME.has(mapping.statType);
+          const mlbGamesPlayed = (isMlbBinary || isMlbContinuousSeason) ? estimateMlbGamesPlayed() : 1;
+          const perGameProjection = (isMlbBinary || isMlbContinuousSeason)
+            ? Math.round((projectedRaw / mlbGamesPlayed) * 100) / 100
             : Math.round(projectedRaw * 10) / 10;
           const projected = perGameProjection;
-          const lineValue = isMlbBinary ? 0.5 : snapToHalfPoint(value);
+          const lineValue = isMlbBinary
+            ? 0.5
+            : isMlbContinuousSeason
+              ? snapToHalfPoint(value / mlbGamesPlayed)
+              : snapToHalfPoint(value);
           const edge      = projected - lineValue;
           const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
           const edgeMag      = Math.abs(edge);
