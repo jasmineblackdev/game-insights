@@ -33,6 +33,7 @@ import {
   nflOpponentMultiplier,
   type NflOppContext,
 } from "@/lib/ml/opponentContext/nflOpponentContext";
+import { getAthleteRecentForm } from "@/lib/ml/recentForm";
 
 // ── ESPN scoreboard endpoints ─────────────────────────────────────────────────
 
@@ -808,7 +809,32 @@ async function fetchSportPlayerEdge(
         // Top 5 leaders per category for broader coverage
         const leaders = (category.leaders ?? []).slice(0, 5);
 
-        for (const leader of leaders) {
+        // Pre-fetch recent form for all leaders in this category in
+        // parallel — avoids serializing N HTTP calls inside the loop.
+        // For MLB stats where ESPN returns season totals, divide by
+        // games played first so the per-game baseline matches the
+        // gamelog scale.
+        const isMlbSeasonTotalStat = sport === "MLB" && (
+          MLB_BINARY_OU_STATS.has(mapping.statType) ||
+          MLB_CONTINUOUS_NEEDS_PER_GAME.has(mapping.statType)
+        );
+        const recentForms = await Promise.all(
+          leaders.map(async (leader) => {
+            const v = leader.value ?? Number.parseFloat(leader.displayValue);
+            if (!Number.isFinite(v) || v <= 0 || !leader.athlete?.id) return null;
+            const seasonPerGame = isMlbSeasonTotalStat
+              ? v / estimateMlbGamesPlayed()
+              : v;
+            return getAthleteRecentForm({
+              sport,
+              athleteId: String(leader.athlete.id),
+              statType: mapping.statType,
+              seasonPerGame,
+            });
+          })
+        );
+
+        for (const [leaderIdx, leader] of leaders.entries()) {
           const name = leader.athlete?.displayName ?? leader.athlete?.fullName;
           if (!name) continue;
 
@@ -846,7 +872,12 @@ async function fetchSportPlayerEdge(
           const nflDefMult = sport === "NFL" && opposingNflDefCtx
             ? nflOpponentMultiplier(mapping.statType, opposingNflDefCtx)
             : 1.0;
-          const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult * nflDefMult;
+          // Recent-form multiplier: blended last-5-game vs season
+          // baseline, clamped to [0.6, 1.4]. Neutral (1.0) when the
+          // athlete has <2 recent games or season baseline is missing.
+          const recentForm = recentForms[leaderIdx];
+          const recentFormMult = recentForm?.multiplier ?? 1.0;
+          const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult * nflDefMult * recentFormMult;
           // ESPN's leader endpoint returns season totals, but books post
           // per-game lines. Two MLB cases that need conversion:
           //   1. Binary O/U stats (RBI / runs / HR / SB / BB / 2B / 3B):
@@ -890,7 +921,8 @@ async function fetchSportPlayerEdge(
                 : sport === "NFL" && opposingNflDefCtx?.hasData
                   ? ` ${opposingNflDefCtx.matchupNote}`
                   : "";
-          const reason_2 = matchupSuffix ? `${built.reason_2}${matchupSuffix}` : built.reason_2;
+          const formSuffix = recentForm?.note ? ` ${recentForm.note}` : "";
+          const reason_2 = `${built.reason_2}${matchupSuffix}${formSuffix}`;
 
           predictions.push({
             id,
