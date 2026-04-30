@@ -94,9 +94,9 @@ function syntheticAmericanFromModel(p: number): number {
 
 /**
  * Returns true when the MLB game's probable pitchers aren't confirmed yet.
- * All MLB candidates for such a game are tagged preConfirmationFlag=true
- * and have their confidence capped at "low" — they're meant to be re-
- * emitted once confirmation lands, not bet before the lineup is set.
+ * All MLB candidates for such a game are tagged preConfirmationFlag=true,
+ * with the *severity* of the downgrade graduated by certainty (see
+ * applyPreConfirmationDowngrade). Used as a flag, not a hard gate.
  */
 function isMlbPreConfirmation(game: GamePrediction): boolean {
   if (game.league !== "mlb") return false;
@@ -104,11 +104,35 @@ function isMlbPreConfirmation(game: GamePrediction): boolean {
   return game.mlb.pitcherCertainty !== "confirmed";
 }
 
+/**
+ * Graduated MLB pitcher-certainty downgrade. Pre-game, "probable" is the
+ * normal state — both starters are publicly announced and lineups
+ * project off them. Treating probable identically to "unknown" used to
+ * filter every pre-game MLB candidate out unless edge was extreme,
+ * which left the system with nothing to recommend hours before first
+ * pitch.
+ *
+ * New severity ladder:
+ *   "confirmed"           → no downgrade
+ *   "probable"            → cap confidence at "medium", stay recommendable
+ *   "partial" / "unknown" → cap at "low", flip isRecommended=false
+ *                           (existing harsh behavior — one or both SP TBD)
+ */
 function applyPreConfirmationDowngrade(
   candidate: ValueBetCandidate,
   game: GamePrediction,
 ): ValueBetCandidate {
   if (!isMlbPreConfirmation(game)) return candidate;
+  const certainty = game.mlb?.pitcherCertainty;
+  if (certainty === "probable") {
+    return {
+      ...candidate,
+      preConfirmationFlag: true,
+      // Don't promote a "low" pick to "medium" — only cap.
+      confidence: candidate.confidence === "high" ? "medium" : candidate.confidence,
+    };
+  }
+  // "partial" or "unknown" — one or both SP unknown, keep harsh gate.
   return {
     ...candidate,
     preConfirmationFlag: true,
@@ -509,12 +533,21 @@ function propCandidate(game: GamePrediction, row: ReturnType<typeof buildPlayerP
 
   const flags = computePickFlags(game, getFavoredSide(game));
   const eliteValue = valueScore >= 0.82 || edge >= 0.08;
+  // MLB pitcher-certainty gate: "probable" (both starters announced) is
+  // safe to recommend at normal edge thresholds; "partial"/"unknown"
+  // still requires elite value to justify recommending without the
+  // matchup confirmed.
+  const mlbCertainty = game.league === "mlb" ? game.mlb?.pitcherCertainty : undefined;
+  const mlbBlocksRecommend = mlbCertainty != null
+    && mlbCertainty !== "confirmed"
+    && mlbCertainty !== "probable"
+    && !eliteValue;
   const recommended =
     edge >= 0.04 &&
     edge > 0 &&
     row.confidence !== "low" &&
     !flags.injuryUncertainty &&
-    !(game.league === "mlb" && game.mlb && game.mlb.pitcherCertainty !== "confirmed" && !eliteValue) &&
+    !mlbBlocksRecommend &&
     volB < 66 &&
     blowout < 72 &&
     (american > -400 || eliteValue);
