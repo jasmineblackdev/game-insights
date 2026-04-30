@@ -542,8 +542,6 @@ async function enrichOne(
     const fromSum = injuriesFromSummaryBlocks(summary.injuries, hid, aid);
     homeInj = mergeInjuryLists(homeInj, fromSum.home);
     awayInj = mergeInjuryLists(awayInj, fromSum.away);
-    homeInj = applyPositionWeighting(homeInj, league);
-    awayInj = applyPositionWeighting(awayInj, league);
 
     if (league === "nba") {
       const h2h = seasonSeriesNote(summary);
@@ -552,6 +550,15 @@ async function enrichOne(
     const pc = pickcenterNote(summary);
     if (pc) notes.push(pc);
   }
+
+  // Position weighting applies whether or not the summary fetch landed —
+  // raw league-injury-map impactScore is status-only (OUT=8, GTD=5),
+  // which makes a 5th-string OL identical to the QB. Apply per-position
+  // multipliers (QB 2.5x, RB 1.2x, OL 1.0x for NFL) so downstream
+  // injuryRiskScore / generalInjuryImpact / nflTeamInjuryAdj all see
+  // QB-out as the dominant signal instead of equal weight.
+  homeInj = applyPositionWeighting(homeInj, league);
+  awayInj = applyPositionWeighting(awayInj, league);
 
   const hp = teamPatches.get(hid);
   const ap = teamPatches.get(aid);
