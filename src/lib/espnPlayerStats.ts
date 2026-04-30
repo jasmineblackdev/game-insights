@@ -204,6 +204,38 @@ const MLB_STAT_MAP: Record<string, StatMapEntry> = {
 };
 
 /**
+ * MLB stats that DraftKings posts as a binary 0.5 O/U line (the real
+ * sportsbook shape) — "did the player get any RBI / run / HR / SB /
+ * BB this game?". The "Sal Stewart Over 29.5 RBIs" bug came from
+ * treating ESPN's leader-endpoint *season total* as a per-game line.
+ *
+ * For these stats the prop ships with lineValue=0.5 and projected_value
+ * is the per-game rate (season_total / games_played_estimate). Bigger
+ * targets like 2+/3+/4+ RBI live in DraftKings's Same-Game Parlay
+ * (SGP) menu — a separate market we don't ingest from ESPN.
+ */
+const MLB_BINARY_OU_STATS = new Set([
+  "rbis", "runs", "home_runs", "stolen_bases", "walks",
+]);
+
+/**
+ * Rough estimate of MLB games played per team as of `today`. The
+ * regular season runs ~Mar 27 → Sep 28 (~186 days, 162 games). We
+ * approximate with a ratio: gamesPlayed ≈ daysSinceStart × 162/186,
+ * clamped to [1, 162]. Used to convert ESPN season totals into
+ * per-game rates for binary-O/U props.
+ */
+function estimateMlbGamesPlayed(today: Date = new Date()): number {
+  const year = today.getUTCFullYear();
+  // Season start — approximate; ESPN doesn't expose a per-season start
+  // date conveniently, so this is good enough for the projection scale.
+  const start = new Date(Date.UTC(year, 2, 27)); // Mar 27
+  const daysSinceStart = Math.max(1, Math.floor((today.getTime() - start.getTime()) / 86_400_000));
+  const games = Math.round(daysSinceStart * 162 / 186);
+  return Math.max(1, Math.min(162, games));
+}
+
+/**
  * Combined MLB picks. We don't get singles directly from ESPN, but we can
  * derive an "extra_base_hits" approximation from doubles + triples + HR
  * when those are present. Other combos sum existing per-game averages.
@@ -491,7 +523,14 @@ function buildReasons(
 
   const trend = direction === "MORE" ? "above" : "below";
 
-  const reason_1 = `Season avg ${seasonAvg} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
+  // For MLB binary-O/U counting stats (RBI / runs / HR / SB / walks),
+  // `seasonAvg` is actually the season TOTAL and `projected` is the
+  // per-game rate. Frame the reason so it's honest about both numbers
+  // and the 0.5 sportsbook line — not a misleading "Season avg 29 RBI".
+  const isMlbBinary = sport === "MLB" && MLB_BINARY_OU_STATS.has(statType);
+  const reason_1 = isMlbBinary
+    ? `${seasonAvg} ${unit} on season → ~${projected.toFixed(2)} ${unit}/game projected. ${direction === "MORE" ? "Over" : "Under"} 0.5 vs ${oppAbbr}'s ${oppQ} defense.`
+    : `Season avg ${seasonAvg} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
 
   let reason_2 = `${oppAbbr} win rate ${Math.round(opponentWinPct * 100)}% — ${
     oppQ === "weak"   ? "lighter opposition inflates opportunity" :
@@ -788,9 +827,20 @@ async function fetchSportPlayerEdge(
             ? nflOpponentMultiplier(mapping.statType, opposingNflDefCtx)
             : 1.0;
           const projectedRaw = baseProjection * pitcherMult * nbaDefMult * wnbaDefMult * nflDefMult;
-          const projected    = Math.round(projectedRaw * 10) / 10;          // 1-decimal display
-          const lineValue    = snapToHalfPoint(value);                       // sportsbook .5 line
-          const edge         = projected - lineValue;
+          // For MLB binary-O/U counting stats (RBI / runs / HR / SB /
+          // BB) the sportsbook line is fixed at 0.5 and the projection
+          // is the per-game rate. ESPN's leader endpoint returns the
+          // season total, so we divide by an estimated games-played
+          // count. For everything else the existing snapToHalfPoint
+          // logic produces a continuous .5 line from the per-game-ish
+          // input.
+          const isMlbBinary = sport === "MLB" && MLB_BINARY_OU_STATS.has(mapping.statType);
+          const perGameProjection = isMlbBinary
+            ? Math.round((projectedRaw / estimateMlbGamesPlayed()) * 100) / 100
+            : Math.round(projectedRaw * 10) / 10;
+          const projected = perGameProjection;
+          const lineValue = isMlbBinary ? 0.5 : snapToHalfPoint(value);
+          const edge      = projected - lineValue;
           const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
           const edgeMag      = Math.abs(edge);
           const confidence   = edgeToConfidence(edgeMag, sport);
@@ -1001,20 +1051,27 @@ async function fetchSportPlayerEdge(
   // ── Emit MLB combined picks (H+R+RBI, H+R, R+RBI, H+SB, H+BB+SB, XBH).
   //    Combined-stat lines are noisier than singles, so confidence
   //    threshold is widened (t.high is 1.5 hits; combined needs ~2x).
+  //    Like single counting stats, ESPN gives season totals — we
+  //    convert to per-game rates so the line lands in the real
+  //    DraftKings band (H+R+RBI ~O/U 1.5–2.5, R+RBI ~O/U 0.5–1.5).
   if (sport === "MLB") {
+    const mlbGamesPlayed = estimateMlbGamesPlayed();
     for (const acc of athleteStatMap.values()) {
       for (const combo of MLB_COMBINED_PICKS) {
         if (!combo.parts.every((p) => acc.stats[p] != null)) continue;
         const sumVal = combo.parts.reduce((s, p) => s + acc.stats[p]!, 0);
         if (!Number.isFinite(sumVal) || sumVal <= 0) continue;
 
-        const baseProjection = projectValue(sumVal, acc.oppWinPct, acc.isHome, "MLB", "");
+        // Convert season-sum → per-game-sum so the line sits at the
+        // sportsbook scale.
+        const sumPerGame = sumVal / mlbGamesPlayed;
+        const baseProjection = projectValue(sumPerGame, acc.oppWinPct, acc.isHome, "MLB", "");
         const pitcherMult = acc.mlbOpposingSp
           ? pitcherMultiplier(combo.statType, acc.mlbOpposingSp)
           : 1.0;
         const projectedRaw = baseProjection * pitcherMult;
         const projected    = Math.round(projectedRaw * 10) / 10;
-        const lineValue    = snapToHalfPoint(sumVal);
+        const lineValue    = snapToHalfPoint(sumPerGame);
         const edge         = projected - lineValue;
         const direction: "MORE" | "LESS" = edge >= 0 ? "MORE" : "LESS";
         const edgeMag      = Math.abs(edge);
