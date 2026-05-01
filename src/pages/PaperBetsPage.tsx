@@ -10,8 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -106,12 +105,7 @@ export default function PaperBetsPage() {
   return (
     <div className="container max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Link to="/" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back
-          </Link>
-          <h1 className="font-display font-bold text-xl text-foreground">Paper Bets</h1>
-        </div>
+        <h1 className="font-display font-bold text-xl text-foreground">Paper Bets</h1>
         <Button size="sm" variant="outline" onClick={() => { refresh(); sweep(); }} disabled={sweeping} className="gap-1">
           <RefreshCw className={cn("w-3.5 h-3.5", sweeping ? "animate-spin" : "")} />
           Refresh

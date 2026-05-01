@@ -1,6 +1,5 @@
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchPlayerEdgeProjectionById, isPlayerEdgeLiveConfigured } from "@/lib/playerEdgeApi";
 import { cn } from "@/lib/utils";
@@ -28,11 +27,6 @@ export default function PlayerEdgeDetailPage() {
   if (isPending) {
     return (
       <div className="min-h-screen bg-background">
-        <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
-          <div className="container max-w-2xl mx-auto py-3 sm:py-4">
-            <div className="h-4 w-24 bg-muted animate-pulse rounded" />
-          </div>
-        </header>
         <main className="container max-w-2xl mx-auto py-6 sm:py-8">
           <div className="h-64 rounded-lg border border-border bg-muted/30 animate-pulse" />
         </main>
@@ -61,17 +55,6 @@ export default function PlayerEdgeDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
-        <div className="container max-w-2xl mx-auto py-3 sm:py-4">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation -ml-1 px-1 rounded-md"
-          >
-            <ArrowLeft className="w-4 h-4 shrink-0" />
-            Home
-          </Link>
-        </div>
-      </header>
       <main className="container max-w-2xl mx-auto py-6 sm:py-8 space-y-6">
         <div className="rounded-lg border border-border bg-card p-4 sm:p-6 space-y-4">
           <div className="flex flex-wrap gap-2">

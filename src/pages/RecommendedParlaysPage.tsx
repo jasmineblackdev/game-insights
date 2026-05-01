@@ -10,9 +10,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, AlertTriangle, ClipboardList, ListChecks, Plus, RefreshCw, Trophy } from "lucide-react";
+import { AlertTriangle, ClipboardList, ListChecks, Plus, RefreshCw, Trophy } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
@@ -408,9 +407,6 @@ export default function RecommendedParlaysPage() {
   return (
     <div className="container mx-auto max-w-5xl px-4 py-6 space-y-5">
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/"><ArrowLeft className="w-4 h-4" /></Link>
-        </Button>
         <ClipboardList className="w-5 h-5 text-primary" />
         <h1 className="font-display font-bold text-2xl text-foreground">Recommended Parlays</h1>
         <Button

@@ -8,9 +8,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
-  ArrowLeft,
   BarChart3,
   Brain,
   History,
@@ -59,23 +57,13 @@ function EdgeCardPageInner() {
     <div className="min-h-screen bg-background pb-12">
       <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
         <div className="container max-w-6xl mx-auto py-3 sm:py-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-3 min-w-0">
-            <Link
-              to="/"
-              className="flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation shrink-0"
-            >
-              <ArrowLeft className="w-4 h-4 shrink-0" />
-              Home
-            </Link>
-            <div className="h-4 w-px bg-border hidden sm:block" />
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-5 h-5 text-primary" />
-              <div>
-                <h1 className="font-display font-bold text-base text-foreground">Analytics</h1>
-                <p className="text-[11px] text-muted-foreground">
-                  ML model performance · parlay history · saved Edge Cards
-                </p>
-              </div>
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-primary" />
+            <div>
+              <h1 className="font-display font-bold text-base text-foreground">Analytics</h1>
+              <p className="text-[11px] text-muted-foreground">
+                ML model performance · parlay history · saved Edge Cards
+              </p>
             </div>
           </div>
         </div>

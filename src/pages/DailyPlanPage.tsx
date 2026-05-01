@@ -14,10 +14,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
   RefreshCw,
   Lock,
   Unlock,
@@ -562,23 +560,13 @@ export default function DailyPlanPage() {
     <div className="min-h-screen bg-background pb-24">
       <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
         <div className="container max-w-6xl mx-auto py-3 sm:py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              to="/"
-              className="flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation shrink-0"
-            >
-              <ArrowLeft className="w-4 h-4 shrink-0" />
-              Home
-            </Link>
-            <div className="h-4 w-px bg-border hidden sm:block" />
-            <div className="flex items-center gap-2">
-              <Layers className="w-5 h-5 text-primary" />
-              <div>
-                <h1 className="font-display font-bold text-base text-foreground">Daily Plan</h1>
-                <p className="text-[11px] text-muted-foreground">
-                  Primary · Balanced · Upside — sized to your bankroll
-                </p>
-              </div>
+          <div className="flex items-center gap-2">
+            <Layers className="w-5 h-5 text-primary" />
+            <div>
+              <h1 className="font-display font-bold text-base text-foreground">Daily Plan</h1>
+              <p className="text-[11px] text-muted-foreground">
+                Primary · Balanced · Upside — sized to your bankroll
+              </p>
             </div>
           </div>
           <Button size="sm" variant="outline" onClick={regenerateAll}>

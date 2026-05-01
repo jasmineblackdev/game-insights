@@ -29,9 +29,7 @@
 
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import {
-  ArrowLeft,
   BarChart3,
   Brain,
   RefreshCw,
@@ -285,9 +283,6 @@ export function MLPerformanceContent({ embedded = false }: { embedded?: boolean 
     <div className={embedded ? "space-y-5" : "container mx-auto max-w-5xl px-4 py-6 space-y-5"}>
       {!embedded ? (
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" asChild>
-            <Link to="/"><ArrowLeft className="w-4 h-4" /></Link>
-          </Button>
           <Brain className="w-5 h-5 text-primary" />
           <h1 className="font-display font-bold text-2xl text-foreground">Model Intelligence</h1>
           <Button size="sm" variant="outline" onClick={refreshAll} disabled={isFetching} className="ml-auto gap-1">

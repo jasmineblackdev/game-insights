@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, XCircle, Minus, Clock, TrendingUp } from "lucide-react";
+import { CheckCircle2, XCircle, Minus, Clock, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SharpModeSettings } from "@/components/SharpModeSettings";
 import { cn } from "@/lib/utils";
@@ -250,14 +250,7 @@ export default function PicksPage() {
     <div className="min-h-screen bg-background">
       {/* ── Header ──────────────────────────────────── */}
       <header className="border-b border-border surface-glass sticky top-0 z-40 pt-[env(safe-area-inset-top)]">
-        <div className="container max-w-4xl mx-auto py-3 sm:py-4 flex items-center justify-between">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 min-h-10 text-sm text-muted-foreground hover:text-foreground transition-colors touch-manipulation -ml-1 px-1 rounded-md"
-          >
-            <ArrowLeft className="w-4 h-4 shrink-0" />
-            Back
-          </Link>
+        <div className="container max-w-4xl mx-auto py-3 sm:py-4 flex items-center justify-end">
           <button
             type="button"
             onClick={() => autoResolveMutation.mutate()}
