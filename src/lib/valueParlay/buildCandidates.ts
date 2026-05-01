@@ -311,6 +311,24 @@ function totalCandidate(
   const o1 = game.homeTeam.offensiveRating;
   const o2 = game.awayTeam.offensiveRating;
   let proj = (o1 + o2) * (game.league === "nba" ? 1.02 : game.league === "nfl" ? 0.92 : 0.88);
+
+  // NBA pace-pair adjustment: ORtg encodes points-per-100-possessions,
+  // so a pair of fast teams with mid-tier ORtg still cooks a high
+  // total via possession volume. League-average pace ≈ 99 POSS/48.
+  // Each pace-pair-point above average adds ~0.4 expected combined
+  // points; capped to ±6pts (avoids dominating the projection when
+  // pace data is stale or missing).
+  if (game.league === "nba" || game.league === "wnba") {
+    const homePace = game.homeTeam.pace ?? 99;
+    const awayPace = game.awayTeam.pace ?? 99;
+    if (homePace > 0 && awayPace > 0) {
+      const pairAvg = (homePace + awayPace) / 2;
+      const leagueAvg = 99;
+      const paceShift = Math.max(-6, Math.min(6, (pairAvg - leagueAvg) * 0.4));
+      proj += paceShift;
+    }
+  }
+
   proj = Math.max(38, Math.min(280, proj));
   const z = (proj - line) / (game.league === "nba" ? 9 : 7);
   const pOver = sigmoid(z);

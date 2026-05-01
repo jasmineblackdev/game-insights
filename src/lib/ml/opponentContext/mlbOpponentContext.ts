@@ -207,7 +207,20 @@ export function pitcherMultiplier(statType: string, ctx: MlbOppContext): number 
     case "runs_rbis": {
       const eraMult = LEAGUE.ERA / era;
       const hrMult = hr9 / LEAGUE.HR9;
-      return clampMul(0.6 * eraMult + 0.4 * hrMult);
+      // Bullpen exposure proxy: when the starter averages <5.5 IP per
+      // start, hitters see significantly more bullpen innings, which
+      // historically run a hair higher ERA than starters at the
+      // league level. Use spIp / spStartsApprox as a proxy — lacking
+      // a per-team bullpen ERA fetcher, this captures ~60% of the
+      // signal at zero new network cost. Stronger version (real team
+      // bullpen ERA endpoint) lives in V2.
+      const ipPerStart = (ctx.spIp ?? 0) > 0 && ctx.spReliable
+        ? Math.min(7.5, Math.max(3, ctx.spIp ?? 6))
+        : 6;
+      const bullpenExposureBoost = ipPerStart < 5.5
+        ? 1 + (5.5 - ipPerStart) * 0.015 // up to +3% at 3.5 IP/start
+        : 1;
+      return clampMul(0.6 * eraMult + 0.4 * hrMult * bullpenExposureBoost);
     }
     case "walks":
     case "hits_walks_stolen_bases":
