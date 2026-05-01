@@ -8,6 +8,27 @@
 
 export type PaperBetType = "single" | "parlay" | "sgp";
 
+/** Pregame = entered before tipoff/first pitch; live = entered in-game. */
+export type PaperBetTiming = "pregame" | "live";
+
+/**
+ * Game state captured at the moment a live bet was placed.
+ * Stored verbatim on `paper_bets.live_state` (JSONB). Pregame bets
+ * leave this null. Used by the live-vs-pregame analytics breakdown.
+ */
+export interface PaperLiveState {
+  scoreHome?: number | null;
+  scoreAway?: number | null;
+  /** "Q3", "5th inning", "1st half", etc. — verbatim sport label. */
+  period?: string | null;
+  /** "8:42" — verbatim DK clock value. */
+  gameClock?: string | null;
+  /** Optional: stat already accumulated by the player at entry time. */
+  playerStatAtEntry?: number | null;
+  /** Model probability captured at entry, when the user is testing an in-app live signal. */
+  modelProbAtEntry?: number | null;
+}
+
 export type PaperLegStatus =
   | "open"
   | "won"
@@ -81,6 +102,10 @@ export interface PaperBet {
   notes?: string | null;
   placedAt: string;
   resolvedAt?: string | null;
+  /** "pregame" (default) or "live". Pregame bets leave liveState null. */
+  betTiming: PaperBetTiming;
+  /** Game state at the moment of a live bet; null for pregame. */
+  liveState?: PaperLiveState | null;
 }
 
 export interface PaperBankroll {

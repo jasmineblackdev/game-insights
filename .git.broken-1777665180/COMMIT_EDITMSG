@@ -1,0 +1,19 @@
+feat(clv): closing-odds-poller now captures player-prop closes too
+
+Extends the existing edge function (which only handled team
+moneyline closes) to also snapshot player-prop closing lines for
+the CLV pipeline.
+
+Key changes:
+- New PROP_MARKET_KEYS table maps internal stat_type → Odds API
+  market key per sport.
+- Per-sport request now sends a comma-separated markets= list
+  scoped to legs we're actually scanning (cost-aware).
+- New leg field closing_line_value (jsonb, no migration) so CLV
+  math can detect line moves vs same-line comparisons.
+- Bug fix: previous moneyline branch checked "team_moneyline" but
+  schema emits "moneyline" — both forms now accepted.
+
+No recommendation logic changes. No schema changes. Per #127 plan.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

@@ -256,9 +256,167 @@ function PerformanceTab({ bets }: { bets: import("@/lib/paperBets/types").PaperB
         <PerfStat label="Avg combined odds" value={Number.isFinite(avgOdds) ? `${avgOdds > 0 ? "+" : ""}${Math.round(avgOdds)}` : "—"} />
         <PerfStat label="Parlay hit rate" value={`${parlayHit.toFixed(1)}%`} />
       </div>
+
+      <LiveVsPregameBreakdown bets={bets} />
+
       <p className="text-[11px] text-muted-foreground italic">
         Paper results inform the calibration loop in V2 — they don't immediately overwrite model weights.
+        Live and pregame results are tracked separately so live-bet patterns don't leak into pregame calibration.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Live vs Pregame breakdown — segments by sport, market, period
+ * entered, and odds band so the user can see whether live entries
+ * are profitable distinct from pregame entries.
+ */
+function LiveVsPregameBreakdown({
+  bets,
+}: {
+  bets: import("@/lib/paperBets/types").PaperBet[];
+}) {
+  const live = bets.filter((b) => b.betTiming === "live");
+  const pregame = bets.filter((b) => b.betTiming !== "live");
+
+  if (bets.length === 0) return null;
+
+  const summarize = (set: import("@/lib/paperBets/types").PaperBet[]) => {
+    const w = set.filter((b) => b.status === "won").length;
+    const l = set.filter((b) => b.status === "lost").length;
+    const p = set.filter((b) => b.status === "push").length;
+    const pnl = set.reduce((s, b) => s + (b.pnl ?? 0), 0);
+    const stake = set.reduce((s, b) => s + b.stake, 0);
+    return {
+      n: set.length,
+      hitRate: (w / Math.max(1, w + l)) * 100,
+      pnl,
+      roi: stake > 0 ? (pnl / stake) * 100 : 0,
+      record: `${w}-${l}-${p}`,
+    };
+  };
+
+  const liveAgg = summarize(live);
+  const preAgg = summarize(pregame);
+
+  // Aggregator keyed by an arbitrary string, returns same hit/ROI shape.
+  function bucket<K extends string>(
+    set: import("@/lib/paperBets/types").PaperBet[],
+    keyFn: (b: import("@/lib/paperBets/types").PaperBet) => K | null,
+  ): { key: K; n: number; hitRate: number; roi: number }[] {
+    const map = new Map<K, import("@/lib/paperBets/types").PaperBet[]>();
+    for (const b of set) {
+      const k = keyFn(b);
+      if (k == null) continue;
+      const arr = map.get(k) ?? [];
+      arr.push(b);
+      map.set(k, arr);
+    }
+    return [...map.entries()]
+      .map(([key, arr]) => {
+        const s = summarize(arr);
+        return { key, n: s.n, hitRate: s.hitRate, roi: s.roi };
+      })
+      .sort((a, b) => b.n - a.n);
+  }
+
+  const oddsBand = (american: number): string => {
+    if (!Number.isFinite(american)) return "—";
+    if (american <= -200) return "≤-200";
+    if (american <= -110) return "-200..-110";
+    if (american <= 100)  return "-110..+100";
+    if (american <= 200)  return "+100..+200";
+    return "+200+";
+  };
+
+  // Live-bet segmentation: by sport, market, period, odds band.
+  const bySport  = bucket(live, (b) => (b.legs[0]?.sport ?? null));
+  const byMarket = bucket(live, (b) => (b.legs[0]?.marketType ?? null));
+  const byPeriod = bucket(live, (b) => b.liveState?.period ?? null);
+  const byOdds   = bucket(live, (b) => oddsBand(b.combinedOddsAmerican));
+
+  return (
+    <div className="rounded-lg border border-blue-500/30 bg-blue-500/[0.04] p-3 space-y-3">
+      <p className="text-sm font-bold text-foreground">Live vs Pregame</p>
+      <div className="grid grid-cols-2 gap-2">
+        <PerfBlock title="Pregame" agg={preAgg} />
+        <PerfBlock title="Live"    agg={liveAgg} highlight />
+      </div>
+
+      {live.length > 0 ? (
+        <details className="rounded-md border border-border/40 bg-background/40 p-2 text-xs">
+          <summary className="font-semibold text-foreground cursor-pointer select-none">
+            Live segmentation ({live.length} live bets)
+          </summary>
+          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+            <SegmentBlock title="By sport"  rows={bySport} />
+            <SegmentBlock title="By market" rows={byMarket} />
+            <SegmentBlock title="By period entered" rows={byPeriod} />
+            <SegmentBlock title="By odds band"      rows={byOdds} />
+          </div>
+        </details>
+      ) : (
+        <p className="text-[11px] text-muted-foreground italic">
+          No live bets yet — toggle "Track Live Bet" in the slip builder to start.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PerfBlock({
+  title, agg, highlight,
+}: {
+  title: string;
+  agg: { n: number; hitRate: number; pnl: number; roi: number; record: string };
+  highlight?: boolean;
+}) {
+  return (
+    <div className={cn(
+      "rounded-md border px-3 py-2",
+      highlight ? "border-blue-500/40 bg-blue-500/[0.06]" : "border-border/40 bg-background/40",
+    )}>
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{title}</p>
+      <p className="text-lg font-bold tabular-nums text-foreground">
+        {agg.n} {agg.n === 1 ? "bet" : "bets"}
+      </p>
+      <div className="text-[11px] text-muted-foreground tabular-nums">
+        {agg.record} · Hit {agg.hitRate.toFixed(0)}% · ROI {agg.roi >= 0 ? "+" : "−"}{Math.abs(agg.roi).toFixed(1)}%
+      </div>
+      <div className={cn(
+        "text-[11px] tabular-nums font-semibold",
+        agg.pnl > 0 ? "text-emerald-600 dark:text-emerald-400"
+        : agg.pnl < 0 ? "text-red-600 dark:text-red-400"
+        : "text-muted-foreground",
+      )}>
+        P/L {agg.pnl >= 0 ? "+" : "−"}${Math.abs(agg.pnl).toFixed(2)}
+      </div>
+    </div>
+  );
+}
+
+function SegmentBlock({
+  title, rows,
+}: {
+  title: string;
+  rows: { key: string; n: number; hitRate: number; roi: number }[];
+}) {
+  return (
+    <div className="rounded-md border border-border/30 bg-muted/20 p-2">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">{title}</p>
+      <ul className="mt-1 space-y-0.5">
+        {rows.length === 0 ? (
+          <li className="text-muted-foreground italic">No data yet.</li>
+        ) : rows.map((r) => (
+          <li key={r.key} className="flex items-center justify-between gap-2">
+            <span className="uppercase font-semibold text-foreground truncate">{r.key}</span>
+            <span className="tabular-nums text-muted-foreground">
+              {r.n}b · {r.hitRate.toFixed(0)}% · {r.roi >= 0 ? "+" : "−"}{Math.abs(r.roi).toFixed(1)}%
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

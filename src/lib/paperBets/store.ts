@@ -22,7 +22,9 @@ import type {
   PaperBankroll,
   PaperBet,
   PaperBetStatus,
+  PaperBetTiming,
   PaperLeg,
+  PaperLiveState,
 } from "./types";
 
 /**
@@ -73,6 +75,9 @@ interface PaperBetRow {
   notes: string | null;
   placed_at: string;
   resolved_at: string | null;
+  /** New columns from 20260510000000_paper_bets_live_timing migration. */
+  bet_timing?: string | null;
+  live_state?: Record<string, unknown> | null;
 }
 
 interface PaperBankrollRow {
@@ -88,6 +93,19 @@ interface PaperBankrollRow {
 }
 
 function rowToBet(r: PaperBetRow): PaperBet {
+  // Live state JSONB → typed object. snake_case → camelCase, keeping
+  // all fields nullable since pre-migration rows lack the column.
+  const ls = r.live_state ?? null;
+  const liveState: PaperLiveState | null = ls
+    ? {
+        scoreHome:         (ls.score_home as number | null | undefined) ?? null,
+        scoreAway:         (ls.score_away as number | null | undefined) ?? null,
+        period:            (ls.period as string | null | undefined) ?? null,
+        gameClock:         (ls.game_clock as string | null | undefined) ?? null,
+        playerStatAtEntry: (ls.player_stat_at_entry as number | null | undefined) ?? null,
+        modelProbAtEntry:  (ls.model_prob_at_entry as number | null | undefined) ?? null,
+      }
+    : null;
   return {
     id: r.id,
     source: r.source as PaperBet["source"],
@@ -105,6 +123,8 @@ function rowToBet(r: PaperBetRow): PaperBet {
     notes: r.notes,
     placedAt: r.placed_at,
     resolvedAt: r.resolved_at,
+    betTiming: (r.bet_timing as PaperBetTiming) ?? "pregame",
+    liveState,
   };
 }
 
@@ -234,6 +254,10 @@ export async function placePaperBet(args: {
   appEdge?: number;
   appConfidence?: "high" | "medium" | "low";
   notes?: string;
+  /** "pregame" (default) or "live". When "live", liveState should be populated. */
+  betTiming?: PaperBetTiming;
+  /** Game state captured at the moment of a live bet. */
+  liveState?: PaperLiveState | null;
 }): Promise<PaperBet> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("Supabase not configured.");
@@ -247,6 +271,20 @@ export async function placePaperBet(args: {
     1,
   );
   const potentialPayout = Math.round(args.stake * decimalMult * 100) / 100;
+
+  // Serialize live state into snake_case for the JSONB column. Nulls
+  // are intentionally preserved so the DB row reflects "user did not
+  // record this field" rather than "missing column".
+  const liveStateRow = args.liveState
+    ? {
+        score_home:            args.liveState.scoreHome ?? null,
+        score_away:            args.liveState.scoreAway ?? null,
+        period:                args.liveState.period ?? null,
+        game_clock:            args.liveState.gameClock ?? null,
+        player_stat_at_entry:  args.liveState.playerStatAtEntry ?? null,
+        model_prob_at_entry:   args.liveState.modelProbAtEntry ?? null,
+      }
+    : null;
 
   const { data: created, error: insErr } = await supabase
     .from("paper_bets")
@@ -263,6 +301,8 @@ export async function placePaperBet(args: {
       app_edge: args.appEdge ?? null,
       app_confidence: args.appConfidence ?? null,
       notes: args.notes ?? null,
+      bet_timing: args.betTiming ?? "pregame",
+      live_state: liveStateRow,
     })
     .select("*")
     .single();

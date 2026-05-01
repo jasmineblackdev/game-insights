@@ -13,7 +13,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { normalizeDraftKingsLabel, americanToPayoutMultiplier, combineAmericanOdds } from "@/lib/paperBets/normalizer";
 import { placePaperBet } from "@/lib/paperBets/store";
-import type { PaperLeg } from "@/lib/paperBets/types";
+import type { PaperLeg, PaperLiveState } from "@/lib/paperBets/types";
 
 const SPORTS = ["MLB", "NBA", "WNBA", "NFL", "BOXING", "MMA"] as const;
 type Sport = (typeof SPORTS)[number];
@@ -67,6 +67,17 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
   const [stake, setStake] = useState<string>("10");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Live bet tracking — flips bet_timing="live" + captures game-state
+  // snapshot at entry. Stored separately from pregame results so live
+  // calibration stays a separate analytics surface.
+  const [trackLive, setTrackLive] = useState(false);
+  const [liveScoreHome, setLiveScoreHome] = useState("");
+  const [liveScoreAway, setLiveScoreAway] = useState("");
+  const [livePeriod, setLivePeriod] = useState("");
+  const [liveGameClock, setLiveGameClock] = useState("");
+  const [livePlayerStat, setLivePlayerStat] = useState("");
+  const [liveModelProb, setLiveModelProb] = useState("");
 
   const norm = draft.dkLabel.trim() ? normalizeDraftKingsLabel(draft.dkLabel) : null;
   const effectiveMarket = draft.marketTypeOverride !== "auto" ? draft.marketTypeOverride : norm?.marketType;
@@ -131,22 +142,44 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
         legs.length === 1 ? "single"
         : sameGameIds.size === 1 && legs.length >= 2 ? "sgp"
         : "parlay";
+      // Build live-state payload only when the toggle is on. Empty
+      // strings stay null so the row reflects "not recorded" cleanly.
+      const num = (s: string): number | null =>
+        s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s);
+      const liveState: PaperLiveState | null = trackLive
+        ? {
+            scoreHome:         num(liveScoreHome),
+            scoreAway:         num(liveScoreAway),
+            period:            livePeriod.trim() || null,
+            gameClock:         liveGameClock.trim() || null,
+            playerStatAtEntry: num(livePlayerStat),
+            modelProbAtEntry:  num(liveModelProb),
+          }
+        : null;
+
       try {
         await placePaperBet({
           betType,
           legs,
           stake: stakeNum,
           notes: notes.trim() || undefined,
+          betTiming: trackLive ? "live" : "pregame",
+          liveState,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown error";
-        // Migration-missing case: surface the actionable message + the
-        // banner on the page already tells them to apply the migration.
         toast.error(msg, { duration: 8000 });
         return;
       }
-      toast.success(`Paper ${betType} placed — $${stakeNum} risk.`);
+      toast.success(`Paper ${trackLive ? "LIVE " : ""}${betType} placed — $${stakeNum} risk.`);
       setLegs([]);
+      setTrackLive(false);
+      setLiveScoreHome("");
+      setLiveScoreAway("");
+      setLivePeriod("");
+      setLiveGameClock("");
+      setLivePlayerStat("");
+      setLiveModelProb("");
       setStake("10");
       setNotes("");
       onPlaced?.();
@@ -350,6 +383,96 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
           </ul>
         </div>
       ) : null}
+
+      {/* Live bet tracking toggle + state inputs. Live bets resolve
+          through the same pipeline as pregame; the toggle just routes
+          analytics into the separate "Live vs Pregame" breakdown. */}
+      <div className={cn(
+        "rounded-lg border p-3 space-y-2",
+        trackLive ? "border-blue-500/40 bg-blue-500/[0.05]" : "border-border/40 bg-background/40",
+      )}>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={trackLive}
+            onChange={(e) => setTrackLive(e.target.checked)}
+            className="h-4 w-4 accent-blue-500"
+          />
+          <Radio className={cn("w-3.5 h-3.5", trackLive ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground")} />
+          <span className="text-sm font-bold text-foreground">Track Live Bet</span>
+          <span className="text-[11px] text-muted-foreground">
+            — entered after game has started
+          </span>
+        </label>
+        {trackLive ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Score (home)</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                placeholder="62"
+                value={liveScoreHome}
+                onChange={(e) => setLiveScoreHome(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Score (away)</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                placeholder="58"
+                value={liveScoreAway}
+                onChange={(e) => setLiveScoreAway(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Period</Label>
+              <Input
+                type="text"
+                placeholder="Q3 / 5th / 1st half"
+                value={livePeriod}
+                onChange={(e) => setLivePeriod(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Game clock</Label>
+              <Input
+                type="text"
+                placeholder="8:42"
+                value={liveGameClock}
+                onChange={(e) => setLiveGameClock(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Player stat at entry</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="14 pts"
+                value={livePlayerStat}
+                onChange={(e) => setLivePlayerStat(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Model prob (optional)</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                placeholder="0.62"
+                value={liveModelProb}
+                onChange={(e) => setLiveModelProb(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+          </div>
+        ) : null}
+      </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <div>
