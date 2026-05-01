@@ -323,29 +323,37 @@ export default function RecommendedParlaysPage() {
    * landing directly on /parlays still settles backlog. Idempotent —
    * safe to call repeatedly.
    */
-  const sweepPending = useCallback(async (opts?: { silent?: boolean }) => {
+  const sweepPending = useCallback(async (opts?: {
+    silent?: boolean;
+    /** When set, force-voids leftover pending rows dated < this YYYY-MM-DD. */
+    voidStaleBeforeDate?: string;
+  }) => {
     if (resolving) return;
     setResolving(true);
     setResolveProgress({ done: 0, total: 0 });
     try {
       const r = await aggressivelyResolvePendingParlays({
         onProgress: (done, total) => setResolveProgress({ done, total }),
+        voidStaleBeforeDate: opts?.voidStaleBeforeDate,
       });
       if (r.errors.length && !opts?.silent) {
         toast.error(`Resolver hit ${r.errors.length} error${r.errors.length === 1 ? "" : "s"} (see console).`);
         // eslint-disable-next-line no-console
         console.warn("[parlay-resolver] errors:", r.errors);
       }
-      if (r.legsSettled === 0 && r.scanned === 0 && !opts?.silent) {
-        toast.message("No pending parlays to settle.");
-      } else if (r.resolved > 0 || r.legsSettled > 0) {
-        if (!opts?.silent) {
-          toast.success(
-            `Resolved ${r.resolved} parlay${r.resolved === 1 ? "" : "s"} · ${r.legsSettled} leg${r.legsSettled === 1 ? "" : "s"} settled.`,
-          );
-        }
+      const settledMsg = r.resolved > 0 || r.legsSettled > 0
+        ? `Resolved ${r.resolved} parlay${r.resolved === 1 ? "" : "s"} · ${r.legsSettled} leg${r.legsSettled === 1 ? "" : "s"} settled`
+        : null;
+      const voidedMsg = r.staleVoided > 0
+        ? `${r.staleVoided} stale row${r.staleVoided === 1 ? "" : "s"} cleared to push`
+        : null;
+      const summary = [settledMsg, voidedMsg].filter(Boolean).join(" · ");
+      if (summary) {
+        if (!opts?.silent) toast.success(summary);
         await refetch();
         qc.invalidateQueries({ queryKey: ["recommended-parlays"] });
+      } else if (r.legsSettled === 0 && r.scanned === 0 && !opts?.silent) {
+        toast.message("No pending parlays to settle.");
       } else if (r.scanned > 0 && !opts?.silent) {
         toast.message(`Scanned ${r.scanned} pending — no games final yet.`);
       }
@@ -407,6 +415,32 @@ export default function RecommendedParlaysPage() {
           {resolving && resolveProgress
             ? `Resolving ${resolveProgress.done}/${resolveProgress.total}`
             : "Refresh & resolve"}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={async () => {
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, "0");
+            const dd = String(today.getDate()).padStart(2, "0");
+            const cutoff = `${yyyy}-${mm}-${dd}`;
+            const ok = window.confirm(
+              `Clear stale pending parlays dated before ${cutoff}?\n\n` +
+              `This first runs the auto-resolver. Anything still pending after that ` +
+              `(games whose data we can't auto-match) will be marked as PUSH with a ` +
+              `transparent "Auto-voided" note. ML learning loop is unaffected — voided ` +
+              `rows are not bridged into prediction_history.\n\n` +
+              `Idempotent — safe to run multiple times.`
+            );
+            if (!ok) return;
+            await sweepPending({ voidStaleBeforeDate: cutoff });
+          }}
+          disabled={isFetching || resolving}
+          className="gap-1 text-xs text-muted-foreground hover:text-foreground"
+          title="Move pending parlays from yesterday or earlier into terminal categories"
+        >
+          Clear stale pending
         </Button>
         <Button size="sm" variant="default" onClick={() => setShowManualForm(true)} className="gap-1">
           <Plus className="w-3.5 h-3.5" />

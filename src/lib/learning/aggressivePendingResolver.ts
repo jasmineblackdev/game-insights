@@ -68,6 +68,8 @@ export interface AggressiveResolverResult {
   resolved: number;          // parlays that flipped from pending → terminal
   legsSettled: number;       // individual legs that flipped
   bridgeInserted: number;
+  /** Parlays force-voided via voidStaleBeforeDate. Always 0 unless the option is set. */
+  staleVoided: number;
   errors: string[];
 }
 
@@ -230,6 +232,17 @@ interface ResolveOptions {
   maxParlays?: number;
   /** Optional progress callback for UI surfaces. */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * When set (YYYY-MM-DD), any parlay still "pending" after the
+   * resolution attempt AND whose `date` is strictly earlier than
+   * this cutoff gets force-voided: outcome flipped to "push"
+   * (the closest no-decision state the schema's CHECK constraint
+   * allows) with a transparent user_notes flag explaining the action.
+   *
+   * Pure cleanup mechanism — only call from an explicit user action,
+   * never from a silent sweep. Idempotent.
+   */
+  voidStaleBeforeDate?: string;
 }
 
 export async function aggressivelyResolvePendingParlays(
@@ -240,6 +253,7 @@ export async function aggressivelyResolvePendingParlays(
     resolved: 0,
     legsSettled: 0,
     bridgeInserted: 0,
+    staleVoided: 0,
     errors: [],
   };
   if (!supabase) {
@@ -357,25 +371,52 @@ export async function aggressivelyResolvePendingParlays(
       }
     }
 
-    if (!touchedAnyLeg) continue;
+    const rolled = rollupParlayOutcome(updatedLegs);
+    let newOutcome: "pending" | "won" | "lost" | "push" = rolled;
+    let stalenessVoided = false;
 
-    const newOutcome = rollupParlayOutcome(updatedLegs);
+    // Stale-void path — explicit cleanup. Only fires when caller opted
+    // in via voidStaleBeforeDate AND the parlay is still pending after
+    // leg resolution AND parlay.date is strictly earlier than the
+    // cutoff. Never fires from silent sweeps.
+    if (
+      options.voidStaleBeforeDate
+      && newOutcome === "pending"
+      && parlay.date
+      && parlay.date < options.voidStaleBeforeDate
+    ) {
+      newOutcome = "push";
+      stalenessVoided = true;
+    }
+
+    if (!touchedAnyLeg && !stalenessVoided) continue;
+
     const fullySettled = newOutcome !== "pending";
 
     try {
+      const updates: Record<string, unknown> = {
+        legs: updatedLegs,
+        outcome: newOutcome,
+        resolved_at: fullySettled ? new Date().toISOString() : null,
+      };
+      if (stalenessVoided) {
+        updates.user_notes = `Auto-voided ${new Date().toISOString().slice(0, 10)}: data unavailable for resolution after cutoff.`;
+      }
       const { error: upErr } = await supabase
         .from("recommended_parlays")
-        .update({
-          legs: updatedLegs,
-          outcome: newOutcome,
-          resolved_at: fullySettled ? new Date().toISOString() : null,
-        })
+        .update(updates)
         .eq("id", parlay.id);
       if (upErr) {
         result.errors.push(`${parlay.id}: ${upErr.message}`);
         continue;
       }
-      if (fullySettled) result.resolved++;
+      if (fullySettled && !stalenessVoided) result.resolved++;
+      if (stalenessVoided) result.staleVoided++;
+
+      // Skip the prediction_history bridge for stale-voided rows —
+      // no real outcomes were observed, so writing them in would
+      // pollute ML training as artificial pushes.
+      if (stalenessVoided) continue;
 
       // Bridge into prediction_history for ML loop. Idempotent.
       const bridge = await bridgeParlayLegs({
