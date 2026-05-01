@@ -257,6 +257,11 @@ function buildPayload(parlay: ParlayRowInput, leg: ParlayLegInput, idx: number):
         game_label: leg.game_label ?? null,
         final_score: leg.final_score ?? null,
         actual_value: leg.actual_value ?? null,
+        // Closing line value captured by closing-odds-poller (commit
+        // f458691). Bridge surfaces it here so the CLV analytics view
+        // can filter to apples-to-apples (closing line == entry line)
+        // rows distinct from drifted-line rows.
+        closing_line_value: (leg as { closing_line_value?: number | null }).closing_line_value ?? null,
       },
       // Phase-A context features
       is_home:      homeAway.is_home,

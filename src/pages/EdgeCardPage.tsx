@@ -21,6 +21,7 @@ import { useEdgeCard } from "@/context/EdgeCardContext";
 import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashboard";
 import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
 import { TrainingDataHealthPanel } from "@/components/ml/TrainingDataHealthPanel";
+import { ClvDashboard } from "@/components/insights/ClvDashboard";
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { MLPerformanceContent } from "@/pages/MLPerformancePage";
 import { Button } from "@/components/ui/button";
@@ -116,6 +117,10 @@ function EdgeCardPageInner() {
           <>
 
         <section className="space-y-3">
+          <ClvDashboard />
+        </section>
+
+        <section className="space-y-3 border-t border-border pt-8">
           <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-confidence-high" />
             Model performance
