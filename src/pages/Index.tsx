@@ -31,10 +31,7 @@ import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { BestPlayerPropToday } from "@/components/home/BestPlayerPropToday";
-import { DailyParlayCheckBanner } from "@/components/home/DailyParlayCheckBanner";
-import { SharpModeBanner } from "@/components/SharpModeBanner";
-import { BankrollDisciplineBanner } from "@/components/BankrollDisciplineBanner";
-import { ProModeBanner } from "@/components/ProModeBanner";
+import { StatusStrip } from "@/components/StatusStrip";
 import { ProBetCard } from "@/components/ProBetCard";
 import { useProMode } from "@/context/ProModeContext";
 import { useSharpMode } from "@/context/SharpModeContext";
@@ -855,19 +852,16 @@ const Index = () => {
                 </div>
               ) : null}
 
-              {/* Daily nudge + Sharp Mode banner. Sharp banner is
-                  always visible when Sharp is on; the parlay-check
-                  banner only fires when today's app_recommended rows
-                  are missing. */}
+              {/* Compact status strip — replaces the previous stack of
+                  Bankroll/Pro/Sharp/DailyParlay banners. ProBetCard
+                  stays separate (it's a pick card, not a status). */}
               {viewMode === "home" && homeDateMode === "today" ? (
                 <div className="mb-4 space-y-2">
-                  <BankrollDisciplineBanner />
-                  <ProModeBanner pipelineSummary={proPipelineSummary} />
-                  <SharpModeBanner />
-                  <ProBetCard />
-                  <DailyParlayCheckBanner
-                    onGenerate={() => handleViewModeChange("parlay_builder")}
+                  <StatusStrip
+                    proPipelineSummary={proPipelineSummary}
+                    onGenerateParlay={() => handleViewModeChange("parlay_builder")}
                   />
+                  <ProBetCard />
                 </div>
               ) : null}
 
@@ -901,15 +895,21 @@ const Index = () => {
                   }
                 />
               ) : viewMode === "parlay_builder" ? (
-                <ParlayBuilderSection
-                  games={allGamesWithIntel}
-                  oddsMap={oddsMapAll}
-                  gamesLoading={allGamesWithIntel.length === 0 && (
-                    nbaFastQuery.isPending ||
-                    mlbFastQuery.isPending
-                  )}
-                  bookOddsLoading={false}
-                />
+                <div className="space-y-4">
+                  <StatusStrip
+                    proPipelineSummary={proPipelineSummary}
+                    onGenerateParlay={() => handleViewModeChange("parlay_builder")}
+                  />
+                  <ParlayBuilderSection
+                    games={allGamesWithIntel}
+                    oddsMap={oddsMapAll}
+                    gamesLoading={allGamesWithIntel.length === 0 && (
+                      nbaFastQuery.isPending ||
+                      mlbFastQuery.isPending
+                    )}
+                    bookOddsLoading={false}
+                  />
+                </div>
               ) : viewMode === "college_futures" ? (
                 <CollegeFuturesSection />
               ) : viewMode === "player_props" ? (
