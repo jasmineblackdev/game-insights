@@ -23,11 +23,10 @@ import { rehydrateUserLearningFromSupabase } from "@/lib/predictionLearningStora
 import { StaleLinesBanner } from "@/components/StaleLinesBanner";
 import { AppNav } from "@/components/AppNav";
 import Index from "./pages/Index.tsx";
+import BuilderPage from "./pages/BuilderPage.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
-import DailyPlanPage from "./pages/DailyPlanPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
 import PicksPage from "./pages/PicksPage.tsx";
-import RecommendedParlaysPage from "./pages/RecommendedParlaysPage.tsx";
 import PaperBetsPage from "./pages/PaperBetsPage.tsx";
 import MLPerformancePage from "./pages/MLPerformancePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -112,16 +111,15 @@ const App = () => (
                   <Routes>
                     {/* ── Canonical 5-tab routes (Phase A) ─────────────── */}
                     <Route path="/"          element={<Index />} />
-                    <Route path="/builder"   element={<Index defaultView="parlay_builder" />} />
+                    <Route path="/builder"   element={<BuilderPage />} />
                     <Route path="/insights"  element={<EdgeCardPage />} />
                     <Route path="/paper"     element={<PaperBetsPage />} />
                     <Route path="/settings"  element={<PicksPage />} />
 
                     {/* ── Phase A redirects: old URLs keep working ─────── */}
-                    {/* /daily → /builder?mode=daily (Daily Plan mode lands in Phase B) */}
-                    <Route path="/daily"          element={<Navigate to="/builder?mode=daily" replace />} />
-                    {/* /parlays → /builder?history=open (history panel lands in Phase B) */}
-                    <Route path="/parlays"        element={<Navigate to="/builder?history=open" replace />} />
+                    {/* /daily → Builder Plan tab; /parlays → Builder Recommended tab. */}
+                    <Route path="/daily"          element={<Navigate to="/builder?tab=plan" replace />} />
+                    <Route path="/parlays"        element={<Navigate to="/builder?tab=recommended" replace />} />
                     {/* /edge already mapped to /insights above; old direct hits redirect for parity */}
                     <Route path="/edge"           element={<Navigate to="/insights" replace />} />
                     <Route path="/ml-performance" element={<Navigate to="/insights" replace />} />
