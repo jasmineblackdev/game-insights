@@ -92,6 +92,12 @@ export async function fetchPlayerLastGames(
   limit = 5,
 ): Promise<PlayerGameStat[]> {
   if (!athleteId) return [];
+  // ESPN's gamelog endpoint expects a bare numeric athlete id. When a
+  // composite id (e.g. "espn-mlb-401815-12345-rbis") is passed by
+  // mistake, the endpoint returns 400. Reject early — silently — to
+  // avoid flooding the network tab with avoidable failures during a
+  // typical pageload (audit observed 82 such 400s in a single render).
+  if (!/^\d+$/.test(athleteId)) return [];
   const s = sport.toUpperCase() as GameLogSport;
   if (!ATHLETE_GAMELOG[s]) return [];
 
