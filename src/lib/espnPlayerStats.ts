@@ -407,24 +407,51 @@ function mergePropOpenings(entries: { id: string; line: number }[]): Record<stri
   return map;
 }
 
-// ── MLB weather cache (Open-Meteo, no API key, 15 min TTL) ───────────────────
+// ── Weather cache (Open-Meteo, no API key, 15 min TTL) ──────────────────────
+// Shared between MLB park weather and NFL outdoor-stadium weather. Cache key
+// is sport-prefixed to avoid collisions on shared abbreviations (e.g. KC).
 
 type WeatherData = { tempF: number | null; windMph: number | null };
 const _weatherCache = new Map<string, { data: WeatherData; ts: number }>();
 const WEATHER_TTL_MS = 15 * 60 * 1000;
 
-async function fetchMlbWeather(homeAbbr: string): Promise<WeatherData> {
-  const cached = _weatherCache.get(homeAbbr);
-  if (cached && Date.now() - cached.ts < WEATHER_TTL_MS) return cached.data;
+/**
+ * Outdoor NFL stadiums where weather meaningfully shifts passing /
+ * receiving expectations. Domes and retractable roofs (closed by
+ * default in cold-weather cities) are excluded — weather is irrelevant
+ * inside. Coordinates are stadium centroids; precision is fine since
+ * Open-Meteo grids are ~10 km.
+ */
+const NFL_OUTDOOR_STADIUMS: Record<string, { lat: number; lon: number; name: string }> = {
+  BAL: { lat: 39.2780, lon: -76.6227, name: "M&T Bank Stadium" },
+  BUF: { lat: 42.7738, lon: -78.7870, name: "Highmark Stadium" },
+  CAR: { lat: 35.2258, lon: -80.8528, name: "Bank of America Stadium" },
+  CHI: { lat: 41.8623, lon: -87.6167, name: "Soldier Field" },
+  CIN: { lat: 39.0954, lon: -84.5160, name: "Paycor Stadium" },
+  CLE: { lat: 41.5061, lon: -81.6995, name: "Cleveland Browns Stadium" },
+  DEN: { lat: 39.7439, lon: -105.0201, name: "Empower Field" },
+  GB:  { lat: 44.5013, lon: -88.0622, name: "Lambeau Field" },
+  JAX: { lat: 30.3239, lon: -81.6373, name: "EverBank Stadium" },
+  KC:  { lat: 39.0490, lon: -94.4839, name: "Arrowhead Stadium" },
+  MIA: { lat: 25.9580, lon: -80.2389, name: "Hard Rock Stadium" },
+  NE:  { lat: 42.0909, lon: -71.2643, name: "Gillette Stadium" },
+  NYG: { lat: 40.8136, lon: -74.0744, name: "MetLife Stadium" },
+  NYJ: { lat: 40.8136, lon: -74.0744, name: "MetLife Stadium" },
+  PHI: { lat: 39.9008, lon: -75.1675, name: "Lincoln Financial Field" },
+  PIT: { lat: 40.4468, lon: -80.0158, name: "Acrisure Stadium" },
+  SEA: { lat: 47.5952, lon: -122.3316, name: "Lumen Field" },
+  SF:  { lat: 37.4030, lon: -121.9697, name: "Levi's Stadium" },
+  TB:  { lat: 27.9759, lon: -82.5033, name: "Raymond James Stadium" },
+  TEN: { lat: 36.1665, lon: -86.7713, name: "Nissan Stadium" },
+  WAS: { lat: 38.9078, lon: -76.8645, name: "Northwest Stadium" },
+};
 
-  const park = MLB_OUTDOOR_PARKS[homeAbbr.toUpperCase()];
-  if (!park) return { tempF: null, windMph: null };
-
+async function fetchOpenMeteoWeather(lat: number, lon: number): Promise<WeatherData> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
     const res = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${park.lat}&longitude=${park.lon}` +
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
       `&current=temperature_2m,wind_speed_10m&wind_speed_unit=mph&temperature_unit=fahrenheit`,
       { signal: controller.signal }
     );
@@ -433,15 +460,39 @@ async function fetchMlbWeather(homeAbbr: string): Promise<WeatherData> {
     const j = (await res.json()) as {
       current?: { temperature_2m?: number; wind_speed_10m?: number };
     };
-    const data: WeatherData = {
+    return {
       tempF:   j.current?.temperature_2m  ?? null,
       windMph: j.current?.wind_speed_10m  ?? null,
     };
-    _weatherCache.set(homeAbbr, { data, ts: Date.now() });
-    return data;
   } catch {
     return { tempF: null, windMph: null };
   }
+}
+
+async function fetchMlbWeather(homeAbbr: string): Promise<WeatherData> {
+  const key = `MLB:${homeAbbr}`;
+  const cached = _weatherCache.get(key);
+  if (cached && Date.now() - cached.ts < WEATHER_TTL_MS) return cached.data;
+
+  const park = MLB_OUTDOOR_PARKS[homeAbbr.toUpperCase()];
+  if (!park) return { tempF: null, windMph: null };
+
+  const data = await fetchOpenMeteoWeather(park.lat, park.lon);
+  _weatherCache.set(key, { data, ts: Date.now() });
+  return data;
+}
+
+async function fetchNflWeather(homeAbbr: string): Promise<WeatherData> {
+  const key = `NFL:${homeAbbr}`;
+  const cached = _weatherCache.get(key);
+  if (cached && Date.now() - cached.ts < WEATHER_TTL_MS) return cached.data;
+
+  const stadium = NFL_OUTDOOR_STADIUMS[homeAbbr.toUpperCase()];
+  if (!stadium) return { tempF: null, windMph: null };
+
+  const data = await fetchOpenMeteoWeather(stadium.lat, stadium.lon);
+  _weatherCache.set(key, { data, ts: Date.now() });
+  return data;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -470,7 +521,8 @@ function projectValue(
   isHome: boolean,
   sport: string,
   homeAbbr: string,
-  weather?: WeatherData
+  weather?: WeatherData,
+  statType?: string,
 ): number {
   // Opponent quality multiplier
   let m: number;
@@ -488,6 +540,26 @@ function projectValue(
     if (park) m *= 1 + (park.factor - 1) * 0.5;
     if (weather?.windMph != null && weather.windMph >= 15) m *= 1.04;
     if (weather?.tempF   != null && weather.tempF   <  45) m *= 0.96;
+  }
+
+  // NFL: wind > 15 mph and cold (<35°F) suppress passing-game volume.
+  // Empirically passing yards drop ~6-9% in 15-20 mph wind and ~10-12%
+  // in 20+ mph. Rushing is largely unaffected (slight bump from a more
+  // run-heavy gameplan offsets weather drag), so we only adjust the
+  // pass-game stat types.
+  if (sport === "NFL" && statType && weather) {
+    const isPassGame = statType === "passing_yards"
+      || statType === "passing_tds"
+      || statType === "completions"
+      || statType === "receiving_yards"
+      || statType === "receptions";
+    if (isPassGame) {
+      if (weather.windMph != null) {
+        if (weather.windMph >= 20) m *= 0.90;
+        else if (weather.windMph >= 15) m *= 0.94;
+      }
+      if (weather.tempF != null && weather.tempF < 35) m *= 0.97;
+    }
   }
 
   return Math.round(seasonAvg * m * 10) / 10;
@@ -571,6 +643,17 @@ function buildReasons(
     }
     if (weather?.tempF != null && weather.tempF < 45) {
       reason_2 += ` Cold (${Math.round(weather.tempF)}°F) — suppresses offense.`;
+    }
+  }
+
+  if (sport === "NFL") {
+    const isPassGame = statType === "passing_yards" || statType === "passing_tds"
+      || statType === "completions" || statType === "receiving_yards" || statType === "receptions";
+    if (isPassGame && weather?.windMph != null && weather.windMph >= 15) {
+      reason_2 += ` Wind ${Math.round(weather.windMph)} mph at outdoor stadium — passing game suppressed.`;
+    }
+    if (isPassGame && weather?.tempF != null && weather.tempF < 35) {
+      reason_2 += ` Cold (${Math.round(weather.tempF)}°F) — drops, glove issues.`;
     }
   }
 
@@ -673,9 +756,12 @@ async function fetchSportPlayerEdge(
     const gameTime = formatGameTime(comp.date ?? "");
     const eventId  = event.id ?? `${sport}-${Date.now()}`;
 
-    // MLB weather fetch (cached per team, per session)
-    const weather = sport === "MLB"
-      ? await fetchMlbWeather(homeAbbr).catch(() => ({ tempF: null, windMph: null }))
+    // Weather fetch (cached per team, per session). MLB uses outdoor
+    // park coords; NFL uses outdoor stadium coords. Domes/closed roofs
+    // return { tempF: null, windMph: null } and projectValue no-ops.
+    const weather =
+      sport === "MLB" ? await fetchMlbWeather(homeAbbr).catch(() => ({ tempF: null, windMph: null }))
+      : sport === "NFL" ? await fetchNflWeather(homeAbbr).catch(() => ({ tempF: null, windMph: null }))
       : undefined;
 
     // MLB pitcher context — parse probable starters from the competition,
@@ -859,7 +945,7 @@ async function fetchSportPlayerEdge(
             athleteStatMap.set(accKey, acc);
           }
 
-          const baseProjection = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather);
+          const baseProjection = projectValue(value, oppWinPct, isHome, sport, homeAbbr, weather, mapping.statType);
           const pitcherMult = sport === "MLB" && opposingSpCtx
             ? pitcherMultiplier(mapping.statType, opposingSpCtx)
             : 1.0;
