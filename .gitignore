@@ -34,3 +34,4 @@ supabase/.temp/
 *.njsproj
 *.sln
 *.sw?
+.git.broken-*/
