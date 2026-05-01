@@ -9,7 +9,7 @@
  *   app_recommended_and_placed  — promoted via "mark as placed"
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, AlertTriangle, ClipboardList, ListChecks, Plus, RefreshCw, Trophy } from "lucide-react";
@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ManualParlayEntryForm } from "@/components/parlayTracking/ManualParlayEntryForm";
 import { probeRecommendedParlaysTable, setLegOutcome } from "@/lib/parlayTracking/recommendedParlayLogger";
+import { aggressivelyResolvePendingParlays } from "@/lib/learning/aggressivePendingResolver";
 
 type ParlayOutcome = "won" | "lost" | "push" | "pending" | "partial";
 type ParlaySource =
@@ -312,6 +313,57 @@ export default function RecommendedParlaysPage() {
     staleTime: 60_000,
   });
 
+  const [resolving, setResolving] = useState(false);
+  const [resolveProgress, setResolveProgress] = useState<{ done: number; total: number } | null>(null);
+
+  /**
+   * Walk every pending row, fetch the relevant ESPN summaries on the
+   * fly, settle each leg, roll up to parlay outcome, and write back.
+   * Decoupled from the games-array resolver in Index/DailyPlanPage so
+   * landing directly on /parlays still settles backlog. Idempotent —
+   * safe to call repeatedly.
+   */
+  const sweepPending = useCallback(async (opts?: { silent?: boolean }) => {
+    if (resolving) return;
+    setResolving(true);
+    setResolveProgress({ done: 0, total: 0 });
+    try {
+      const r = await aggressivelyResolvePendingParlays({
+        onProgress: (done, total) => setResolveProgress({ done, total }),
+      });
+      if (r.errors.length && !opts?.silent) {
+        toast.error(`Resolver hit ${r.errors.length} error${r.errors.length === 1 ? "" : "s"} (see console).`);
+        // eslint-disable-next-line no-console
+        console.warn("[parlay-resolver] errors:", r.errors);
+      }
+      if (r.legsSettled === 0 && r.scanned === 0 && !opts?.silent) {
+        toast.message("No pending parlays to settle.");
+      } else if (r.resolved > 0 || r.legsSettled > 0) {
+        if (!opts?.silent) {
+          toast.success(
+            `Resolved ${r.resolved} parlay${r.resolved === 1 ? "" : "s"} · ${r.legsSettled} leg${r.legsSettled === 1 ? "" : "s"} settled.`,
+          );
+        }
+        await refetch();
+        qc.invalidateQueries({ queryKey: ["recommended-parlays"] });
+      } else if (r.scanned > 0 && !opts?.silent) {
+        toast.message(`Scanned ${r.scanned} pending — no games final yet.`);
+      }
+    } finally {
+      setResolving(false);
+      setResolveProgress(null);
+    }
+  }, [resolving, refetch, qc]);
+
+  // Auto-sweep once on mount (silent — only toasts when something
+  // resolved, otherwise stays quiet).
+  useEffect(() => {
+    if (tableExists === false) return; // skip when migration missing
+    void sweepPending({ silent: true });
+    // intentionally fire-once; user can hit Refresh for re-sweep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableExists]);
+
   const filtered = useMemo(() => {
     switch (tab) {
       case "pending":  return rows.filter((r) => r.outcome === "pending");
@@ -343,9 +395,18 @@ export default function RecommendedParlaysPage() {
         </Button>
         <ClipboardList className="w-5 h-5 text-primary" />
         <h1 className="font-display font-bold text-2xl text-foreground">Recommended Parlays</h1>
-        <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching} className="ml-auto gap-1">
-          <RefreshCw className={cn("w-3.5 h-3.5", isFetching && "animate-spin")} />
-          Refresh
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={async () => { await sweepPending(); await refetch(); }}
+          disabled={isFetching || resolving}
+          className="ml-auto gap-1"
+          title="Settle pending parlays from ESPN final scores + box scores"
+        >
+          <RefreshCw className={cn("w-3.5 h-3.5", (isFetching || resolving) && "animate-spin")} />
+          {resolving && resolveProgress
+            ? `Resolving ${resolveProgress.done}/${resolveProgress.total}`
+            : "Refresh & resolve"}
         </Button>
         <Button size="sm" variant="default" onClick={() => setShowManualForm(true)} className="gap-1">
           <Plus className="w-3.5 h-3.5" />
