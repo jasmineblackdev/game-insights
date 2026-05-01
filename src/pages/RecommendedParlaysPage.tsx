@@ -345,9 +345,12 @@ export default function RecommendedParlaysPage() {
         ? `Resolved ${r.resolved} parlay${r.resolved === 1 ? "" : "s"} · ${r.legsSettled} leg${r.legsSettled === 1 ? "" : "s"} settled`
         : null;
       const voidedMsg = r.staleVoided > 0
-        ? `${r.staleVoided} stale row${r.staleVoided === 1 ? "" : "s"} cleared to push`
+        ? `${r.staleVoided} stale row${r.staleVoided === 1 ? "" : "s"} cleared`
         : null;
-      const summary = [settledMsg, voidedMsg].filter(Boolean).join(" · ");
+      const reviewMsg = r.needsReviewMarked > 0
+        ? `${r.needsReviewMarked} flagged needs-review (legacy IDs)`
+        : null;
+      const summary = [settledMsg, voidedMsg, reviewMsg].filter(Boolean).join(" · ");
       if (summary) {
         if (!opts?.silent) toast.success(summary);
         await refetch();
@@ -355,7 +358,14 @@ export default function RecommendedParlaysPage() {
       } else if (r.legsSettled === 0 && r.scanned === 0 && !opts?.silent) {
         toast.message("No pending parlays to settle.");
       } else if (r.scanned > 0 && !opts?.silent) {
-        toast.message(`Scanned ${r.scanned} pending — no games final yet.`);
+        // Surface the dominant diagnosis so the user knows why nothing
+        // moved (most common: games not final yet, or legacy unparseable IDs).
+        const topDiagnosis = Object.entries(r.diagnosisCounts ?? {})
+          .sort((a, b) => b[1] - a[1])[0];
+        const diagnosisHint = topDiagnosis
+          ? ` · top reason: ${topDiagnosis[0]} (${topDiagnosis[1]})`
+          : "";
+        toast.message(`Scanned ${r.scanned} pending — nothing flipped${diagnosisHint}.`);
       }
     } finally {
       setResolving(false);

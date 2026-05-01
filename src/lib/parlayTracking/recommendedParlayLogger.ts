@@ -64,6 +64,15 @@ function dedupKey(
 }
 
 function legPayload(l: ValueBetCandidate, modelStatus: string | null): Record<string, unknown> {
+  // Derive direction from the selection label so the resolver can
+  // settle player props / totals later. Was previously omitted, which
+  // meant every prop leg failed the `leg.direction != null` gate in
+  // aggressivePendingResolver and stayed pending forever.
+  const lc = (l.selectionLabel ?? "").toUpperCase();
+  let direction: "MORE" | "LESS" | null = null;
+  if (lc.includes("OVER") || lc.includes("O/U") && lc.includes(" O ")) direction = "MORE";
+  else if (lc.includes("UNDER")) direction = "LESS";
+
   return {
     id:                l.id,
     selection:         l.selectionLabel,
@@ -72,6 +81,7 @@ function legPayload(l: ValueBetCandidate, modelStatus: string | null): Record<st
     pick_type:         l.pickType,
     stat_type:         l.statType ?? null,
     line_value:        l.lineValue ?? null,
+    direction,
     american_odds:     l.americanOdds,
     implied_prob:      l.impliedProbability,
     model_prob:        l.modelProbability,
