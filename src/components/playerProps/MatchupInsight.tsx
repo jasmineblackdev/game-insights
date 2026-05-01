@@ -17,9 +17,12 @@ interface Props {
 export function MatchupInsight({ candidate }: Props) {
   const note = candidate.matchupNote;
   if (!note) return null;
+  // Tone matches the opponent-context classifier vocabulary plus the
+  // hit-rate-derived fallback wording. "Soft" matchup means the
+  // defense allows above-average production = good for the bettor.
   const tone =
-    /tough|risk|degraded/i.test(note) ? "text-red-700 dark:text-red-400"
-    : /favourable|boost|elevates/i.test(note) ? "text-emerald-700 dark:text-emerald-400"
+    /tough|risk|degraded|opponent has been tough|suppresses/i.test(note) ? "text-red-700 dark:text-red-400"
+    : /soft|favourable|boost|elevates|inflates|fast pace/i.test(note) ? "text-emerald-700 dark:text-emerald-400"
     : "text-muted-foreground";
   return (
     <p className={`text-[11px] inline-flex items-center gap-1.5 ${tone}`}>

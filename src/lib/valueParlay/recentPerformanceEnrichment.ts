@@ -163,17 +163,23 @@ export async function enrichCandidatesWithRecentPerformance(
         : last3Rate <= last10Rate - 0.10 ? "down"
         : "flat";
 
-      // Matchup insight — Outlier-style "Opponent allows X" line.
-      // Derived from vs-opponent hit rate when sample is meaningful;
-      // falls back to NFL injury opportunity adjustment when relevant.
-      // Future: pipe in nba/mlb/nfl opponentMultiplier when those are
-      // surfaced on the candidate.
-      const matchupNote = deriveMatchupNote({
-        vsOpponentRate: vsOpponent?.rate ?? null,
-        vsOpponentSamples: vsOpponent?.samples ?? 0,
-        opponentAbbr: opp,
-        injuryImpactAdj: c.injuryImpactAdj,
-      });
+      // Matchup insight — three-tier priority chain:
+      //   1. Upstream opponent context note (richest signal — comes
+      //      from NBA/WNBA position-allowed defense, MLB SP weakness
+      //      by stat, NFL defense allowed by position; already crafted
+      //      by the classifier in src/lib/ml/opponentContext/).
+      //   2. NFL injury opportunity adjustment.
+      //   3. vs-opponent historical hit rate (sample ≥3).
+      // The candidate's existing matchupNote (set in buildEnrichedPropCandidates
+      // from pred.matchup_note) is the upstream source for tier 1.
+      const matchupNote = c.matchupNote && c.matchupNote.length > 0
+        ? c.matchupNote
+        : deriveMatchupNote({
+            vsOpponentRate: vsOpponent?.rate ?? null,
+            vsOpponentSamples: vsOpponent?.samples ?? 0,
+            opponentAbbr: opp,
+            injuryImpactAdj: c.injuryImpactAdj,
+          });
 
       const enriched: ValueBetCandidate = {
         ...c,

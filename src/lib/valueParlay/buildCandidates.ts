@@ -870,6 +870,12 @@ export function buildEnrichedPropCandidates(
       isRecommended,
       exclusionReason,
       matchupLabel:        `${pred.team} vs ${pred.opponent}`,
+      // Pipe the opponent-context matchup note through so MatchupInsight
+      // can surface it. NBA/WNBA = position-allowed defense, MLB = SP
+      // weakness by stat, NFL = defense allowed by position. The
+      // upstream classifier already crafted the line; we just preserve
+      // the trip from PlayerEdgePrediction → ValueBetCandidate.
+      matchupNote:         pred.matchup_note ?? undefined,
       lineMovementDeltaPp: pred.line_delta ?? null,
       gameTimeLabel:       pred.game_time,
     });
