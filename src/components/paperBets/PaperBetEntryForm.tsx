@@ -73,12 +73,15 @@ interface Props {
   onDraftSaved?: () => void;
 }
 
+type EntryCategory = "popular" | "player_prop" | "game" | "team" | "sgp" | "custom";
+
 export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props) {
   const [draft, setDraft] = useState<DraftLeg>(EMPTY_DRAFT);
   const [legs, setLegs] = useState<PaperLeg[]>([]);
   const [stake, setStake] = useState<string>("10");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [entryCategory, setEntryCategory] = useState<EntryCategory>("popular");
 
   // Live bet tracking — flips bet_timing="live" + captures game-state
   // snapshot at entry. Stored separately from pregame results so live
@@ -264,7 +267,51 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
 
       {/* Single-leg draft form */}
       <div className="space-y-3 rounded-lg border border-border/40 bg-background/40 p-3">
-        <p className="text-sm font-bold text-foreground">Add a leg</p>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <p className="text-sm font-bold text-foreground">Add a leg</p>
+          <div className="flex items-center gap-1 flex-wrap">
+            {([
+              { id: "popular",     label: "Popular",     market: "auto" },
+              { id: "player_prop", label: "Player Prop", market: "player_prop" },
+              { id: "game",        label: "Game",        market: "total" },
+              { id: "team",        label: "Team",        market: "moneyline" },
+              { id: "sgp",         label: "SGP",         market: "auto" },
+              { id: "custom",      label: "Custom",      market: "auto" },
+            ] as const).map(({ id, label, market }) => {
+              const active = entryCategory === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setEntryCategory(id);
+                    setDraft((d) => ({ ...d, marketTypeOverride: market }));
+                  }}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors border",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background/40 text-muted-foreground border-border/40 hover:text-foreground hover:border-border",
+                  )}
+                  title={
+                    id === "sgp" ? "Same-game parlay — add 2+ legs sharing the same game id."
+                    : id === "popular" ? "No preset — let the normalizer figure it out."
+                    : id === "custom" ? "Show every override field for full control."
+                    : `Preset market type to ${market}.`
+                  }
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        {entryCategory === "sgp" ? (
+          <p className="text-[11px] text-amber-700 dark:text-amber-400 -mt-1">
+            SGP detected at submit time when 2+ legs share the same ESPN game id — fill the Game field
+            for each leg.
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <div className="col-span-1">
             <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Sport</Label>
@@ -362,8 +409,9 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
           </div>
         ) : null}
 
-        {/* Manual overrides */}
-        {draft.dkLabel.trim() && norm && !norm.confident ? (
+        {/* Manual overrides — auto-shown when the normalizer is unsure,
+            or always shown when the user picks the "Custom" chip. */}
+        {entryCategory === "custom" || (draft.dkLabel.trim() && norm && !norm.confident) ? (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
               <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Market</Label>
