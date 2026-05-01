@@ -19,6 +19,7 @@
  */
 
 import type { ValueBetCandidate } from "./types";
+import { deriveMarketSignals, rawSignalsFromCandidate } from "./marketSignals";
 
 export function whyThisPick(c: ValueBetCandidate): string {
   const m = Math.round((c.modelProbability ?? 0) * 100);
@@ -30,6 +31,23 @@ export function whyThisPick(c: ValueBetCandidate): string {
 }
 
 function pickStrongestFactor(c: ValueBetCandidate): string {
+  // 0. Market signals — reverse line move / sharp signal beats every
+  //    other factor when present. These signals only fire when an
+  //    external sentiment feed is plumbed; otherwise hasSignal=false
+  //    and we fall through to the hit-rate / form chain below.
+  const marketDir =
+    c.marketType === "total" || c.marketType === "player_prop"
+      ? ((c.selectionLabel ?? "").toUpperCase().includes("UNDER") ? "under" : "over") as const
+      : "this_side" as const;
+  const market = deriveMarketSignals({
+    raw: rawSignalsFromCandidate(c),
+    marketType: c.marketType,
+    direction: marketDir,
+  });
+  if (market.hasSignal && (market.dominantBadge === "reverse_line_move" || market.dominantBadge === "sharp_signal")) {
+    return market.signalNote;
+  }
+
   // 1. Hit rate first when sample is strong — it's the most concrete
   //    factor for player props ("Hit 7 of last 10").
   const hr = c.hitRates;
@@ -79,6 +97,10 @@ function pickStrongestFactor(c: ValueBetCandidate): string {
     return `High-confidence + sizeable mispricing`;
   }
 
-  // 8. Honest fallback — never invent context.
+  // 8. Weaker market signals (steam / public_heavy) only surface here
+  //    if nothing else fired — they're context, not a primary thesis.
+  if (market.hasSignal) return market.signalNote;
+
+  // 9. Honest fallback — never invent context.
   return `Pure de-vig edge`;
 }

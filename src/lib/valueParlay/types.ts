@@ -189,6 +189,22 @@ export interface ValueBetCandidate {
    * never overrides the optimizer's recommendation logic.
    */
   decision?: { verdict: "PLACE" | "MODIFY" | "AVOID"; reason: string };
+
+  /**
+   * Action Network-style market intelligence — public/money split,
+   * open vs current line, last move timestamp. Populated when an
+   * external sentiment feed is plumbed (Action Network / BetIQ /
+   * OddsTrader); fields stay null otherwise. Line movement piece can
+   * also be reconstructed from `lineMovementDeltaPp` via
+   * rawSignalsFromCandidate() in marketSignals.ts when no feed.
+   */
+  marketSignals?: {
+    percentBets: number | null;
+    percentMoney: number | null;
+    openLine: number | null;
+    currentLine: number | null;
+    lastMovedAt?: string | null;
+  };
 }
 
 export interface PlayerPropModelRow {

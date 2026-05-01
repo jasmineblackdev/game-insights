@@ -41,6 +41,7 @@ import { DecisionPill } from "@/components/playerProps/DecisionPill";
 import { TrustRow } from "@/components/playerProps/TrustRow";
 import { HitRateBars } from "@/components/playerProps/HitRateBars";
 import { WhyThisPick } from "@/components/playerProps/WhyThisPick";
+import { MarketSignals } from "@/components/playerProps/MarketSignals";
 
 interface Props {
   candidates: ValueBetCandidate[];
@@ -249,6 +250,7 @@ function CandidateRow({
             <>
               <TrustRow candidate={c} />
               {isProp && c.hitRates ? <HitRateBars rates={c.hitRates} compact /> : null}
+              <MarketSignals candidate={c} compact />
               <WhyThisPick candidate={c} />
             </>
           ) : c.exclusionReason ? (

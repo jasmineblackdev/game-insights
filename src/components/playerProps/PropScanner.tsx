@@ -28,6 +28,7 @@ import { DecisionPill } from "./DecisionPill";
 import { TrustRow } from "./TrustRow";
 import { HitRateBars } from "./HitRateBars";
 import { WhyThisPick } from "./WhyThisPick";
+import { MarketSignals } from "./MarketSignals";
 
 interface Props {
   /** Pool to scan — typically the recommended candidate pool. */
@@ -138,6 +139,7 @@ function ScannerRow({ candidate }: { candidate: ValueBetCandidate }) {
           {candidate.hitRates ? (
             <HitRateBars rates={candidate.hitRates} compact />
           ) : null}
+          <MarketSignals candidate={candidate} compact />
           <WhyThisPick candidate={candidate} />
           <div className="flex items-center justify-end pt-1">
             <Button
