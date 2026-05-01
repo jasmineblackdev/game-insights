@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -21,6 +21,7 @@ import { pullMlbStarterConfirmationsFromSupabase } from "@/lib/mlbStarterConfirm
 import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
 import { rehydrateUserLearningFromSupabase } from "@/lib/predictionLearningStorage";
 import { StaleLinesBanner } from "@/components/StaleLinesBanner";
+import { AppNav } from "@/components/AppNav";
 import Index from "./pages/Index.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
 import DailyPlanPage from "./pages/DailyPlanPage.tsx";
@@ -104,18 +105,31 @@ const App = () => (
             <BrowserRouter>
               <ScrollToTop />
               <StaleLinesBanner />
+              <AppNav />
               <LiveEdgeNotificationProvider>
                 <LiveEdgeNotificationRunner />
                 <ErrorBoundary>
                   <Routes>
-                    <Route path="/" element={<Index />} />
-                    <Route path="/edge" element={<EdgeCardPage />} />
-                    <Route path="/daily" element={<DailyPlanPage />} />
+                    {/* ── Canonical 5-tab routes (Phase A) ─────────────── */}
+                    <Route path="/"          element={<Index />} />
+                    <Route path="/builder"   element={<Index defaultView="parlay_builder" />} />
+                    <Route path="/insights"  element={<EdgeCardPage />} />
+                    <Route path="/paper"     element={<PaperBetsPage />} />
+                    <Route path="/settings"  element={<PicksPage />} />
+
+                    {/* ── Phase A redirects: old URLs keep working ─────── */}
+                    {/* /daily → /builder?mode=daily (Daily Plan mode lands in Phase B) */}
+                    <Route path="/daily"          element={<Navigate to="/builder?mode=daily" replace />} />
+                    {/* /parlays → /builder?history=open (history panel lands in Phase B) */}
+                    <Route path="/parlays"        element={<Navigate to="/builder?history=open" replace />} />
+                    {/* /edge already mapped to /insights above; old direct hits redirect for parity */}
+                    <Route path="/edge"           element={<Navigate to="/insights" replace />} />
+                    <Route path="/ml-performance" element={<Navigate to="/insights" replace />} />
+                    <Route path="/picks"          element={<Navigate to="/settings" replace />} />
+
+                    {/* ── Deep links retained ─────────────────────────── */}
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
-                    <Route path="/picks" element={<PicksPage />} />
-                    <Route path="/parlays" element={<RecommendedParlaysPage />} />
-                    <Route path="/paper" element={<PaperBetsPage />} />
-                    <Route path="/ml-performance" element={<MLPerformancePage />} />
+
                     {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                     <Route path="*" element={<NotFound />} />
                   </Routes>

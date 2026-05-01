@@ -161,7 +161,18 @@ function topPicksForToday(games: GamePrediction[]): GamePrediction[] {
 // src/components/home/* — see imports above.
 
 
-const Index = () => {
+interface IndexProps {
+  /**
+   * Phase A nav restructure: when this Index is mounted at a
+   * top-level route like `/builder`, this prop lets the route file
+   * specify which internal viewMode the page should land on without
+   * requiring a `?view=` query string. Search-param `view` still
+   * wins when both are present so existing deep links keep working.
+   */
+  defaultView?: ViewMode;
+}
+
+const Index = ({ defaultView }: IndexProps = {}) => {
   const [selectedGame, setSelectedGame] = useState<GamePrediction | null>(null);
   const [league, setLeague] = useState<League>("nba");
   const [dateFilter, setDateFilter] = useState<GameDate>("today");
@@ -171,15 +182,18 @@ const Index = () => {
   // Home view renders TomorrowTab content inline.
   const [homeDateMode, setHomeDateMode] = useState<"today" | "tomorrow">("today");
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    // Allow deep links like /?view=parlay_builder so the slip drawer's
-    // "Open builder" button (and any future external links) land on the
-    // correct tab instead of falling back to "home".
+    // Resolution chain (highest precedence first):
+    //   1. ?view= query string (deep links from slip drawer etc.)
+    //   2. defaultView prop (Phase A: route-driven, e.g. /builder)
+    //   3. "home" fallback
     const v = searchParams.get("view");
     const valid: ViewMode[] = [
       "home", "best_picks", "player_props", "parlay_builder",
       "live", "draft", "college_futures", "tomorrow",
     ];
-    return (v && (valid as string[]).includes(v)) ? (v as ViewMode) : "home";
+    if (v && (valid as string[]).includes(v)) return v as ViewMode;
+    if (defaultView && (valid as string[]).includes(defaultView)) return defaultView;
+    return "home";
   });
   const [mlbConfirmTick, setMlbConfirmTick] = useState(0);
   const { setParlayMode } = useValueParlay();
