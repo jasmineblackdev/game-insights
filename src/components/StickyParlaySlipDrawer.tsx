@@ -78,16 +78,17 @@ export function StickyParlaySlipDrawer() {
         : "low";
   const stakeRec = suggestStake(slipRisk);
 
-  // Hide on routes where the inline builder is the primary surface.
-  // Home (/) in parlay_builder view passes ?view=parlay_builder via the
-  // tab toggle; we read it here so the drawer doesn't duplicate the
-  // visible builder.
-  const isAnalytics = pathname === "/edge";
-  const isParlaysPage = pathname === "/parlays";
-  const isHomeBuilderTab =
-    pathname === "/" && new URLSearchParams(search).get("view") === "parlay_builder";
+  // The floating slip drawer is meaningful only on Home (/) where the
+  // user is browsing candidates. Every other top-level surface either
+  // hosts its own slip UI (Builder, Paper) or has nothing to do with
+  // slip-building (Insights, Settings). Phase A/B moved the analytics
+  // and parlays routes — the old /edge + /parlays hide rules below
+  // are kept for safety in case a deep link sneaks past the redirect.
+  const showOnHome =
+    pathname === "/"
+    && new URLSearchParams(search).get("view") !== "parlay_builder";
 
-  if (isAnalytics || isParlaysPage || isHomeBuilderTab) return null;
+  if (!showOnHome) return null;
 
   const count = builderLegs.length;
 
