@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { PaperBetEntryForm } from "@/components/paperBets/PaperBetEntryForm";
 import { PaperBetCard } from "@/components/paperBets/PaperBetCard";
 import { PaperHeaderTiles } from "@/components/paperBets/PaperHeaderTiles";
+import { MySlipsTable } from "@/components/paperBets/MySlipsTable";
 import {
   getPaperBankroll,
   listPaperBets,
@@ -26,10 +27,12 @@ import {
 } from "@/lib/paperBets/store";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
 
-type Tab = "build" | "open" | "settled" | "perf";
+type Tab = "build" | "open" | "settled" | "perf" | "myslips";
 
 export default function PaperBetsPage() {
   const [tab, setTab] = useState<Tab>("build");
+  /** When set, the slip builder hydrates from this draft id on mount. */
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const bankrollQuery = useQuery({
@@ -143,10 +146,18 @@ export default function PaperBetsPage() {
           Settled ({settled.length})
         </TabButton>
         <TabButton active={tab === "perf"} onClick={() => setTab("perf")}>Performance</TabButton>
+        <TabButton active={tab === "myslips"} onClick={() => setTab("myslips")}>My Slips</TabButton>
       </div>
 
       {tab === "build" ? (
-        <PaperBetEntryForm onPlaced={refresh} />
+        <PaperBetEntryForm
+          onPlaced={() => {
+            setEditingDraftId(null);
+            refresh();
+          }}
+          loadDraftId={editingDraftId}
+          onDraftSaved={refresh}
+        />
       ) : null}
 
       {tab === "open" ? (
@@ -175,6 +186,21 @@ export default function PaperBetsPage() {
 
       {tab === "perf" ? (
         <PerformanceTab bets={settled} />
+      ) : null}
+
+      {tab === "myslips" ? (
+        <MySlipsTable
+          bets={bets}
+          onEditDraft={(id) => {
+            setEditingDraftId(id);
+            setTab("build");
+          }}
+          onNewSlip={() => {
+            setEditingDraftId(null);
+            setTab("build");
+          }}
+          onChange={refresh}
+        />
       ) : null}
     </div>
   );

@@ -11,9 +11,9 @@
  * SGP = 2+ legs sharing the same gameId (the form auto-detects).
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Radio } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Radio, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { normalizeDraftKingsLabel, americanToPayoutMultiplier, combineAmericanOdds } from "@/lib/paperBets/normalizer";
 import { placePaperBet } from "@/lib/paperBets/store";
+import {
+  CURRENT_DRAFT_ID,
+  clearCurrentDraft,
+  getDraft,
+  saveDraft,
+  snapshotCurrentDraft,
+} from "@/lib/paperBets/drafts";
 import { SlipSummaryCard } from "@/components/paperBets/SlipSummaryCard";
 import type { PaperLeg, PaperLiveState } from "@/lib/paperBets/types";
 
@@ -60,9 +67,13 @@ const EMPTY_DRAFT: DraftLeg = {
 
 interface Props {
   onPlaced?: () => void;
+  /** When set, hydrate the form from this draft id on mount. */
+  loadDraftId?: string | null;
+  /** Called after a draft is snapshotted (so My Slips can refresh). */
+  onDraftSaved?: () => void;
 }
 
-export function PaperBetEntryForm({ onPlaced }: Props) {
+export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props) {
   const [draft, setDraft] = useState<DraftLeg>(EMPTY_DRAFT);
   const [legs, setLegs] = useState<PaperLeg[]>([]);
   const [stake, setStake] = useState<string>("10");
@@ -79,6 +90,54 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
   const [liveGameClock, setLiveGameClock] = useState("");
   const [livePlayerStat, setLivePlayerStat] = useState("");
   const [liveModelProb, setLiveModelProb] = useState("");
+
+  // Draft restore. Prefer an explicit loadDraftId (My Slips → Edit
+  // draft) over the auto-saved "current" slip. Runs once on mount.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    const id = loadDraftId ?? CURRENT_DRAFT_ID;
+    const d = getDraft(id);
+    if (!d || d.legs.length === 0) return;
+    setLegs(d.legs);
+    setStake(d.stake || "10");
+    setNotes(d.notes || "");
+    setTrackLive(d.trackLive);
+    setLiveScoreHome(d.liveScoreHome || "");
+    setLiveScoreAway(d.liveScoreAway || "");
+    setLivePeriod(d.livePeriod || "");
+    setLiveGameClock(d.liveGameClock || "");
+    setLivePlayerStat(d.livePlayerStat || "");
+    setLiveModelProb(d.liveModelProb || "");
+  }, [loadDraftId]);
+
+  // Auto-save the in-progress slip whenever legs / stake / notes /
+  // live state change. Empty slip clears the draft so refresh on a
+  // blank form doesn't leave a phantom draft behind.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (legs.length === 0 && !notes && stake === "10" && !trackLive) {
+      clearCurrentDraft();
+      return;
+    }
+    saveDraft({
+      id: CURRENT_DRAFT_ID,
+      legs,
+      stake,
+      notes,
+      trackLive,
+      liveScoreHome,
+      liveScoreAway,
+      livePeriod,
+      liveGameClock,
+      livePlayerStat,
+      liveModelProb,
+    });
+  }, [
+    legs, stake, notes, trackLive,
+    liveScoreHome, liveScoreAway, livePeriod, liveGameClock, livePlayerStat, liveModelProb,
+  ]);
 
   const norm = draft.dkLabel.trim() ? normalizeDraftKingsLabel(draft.dkLabel) : null;
   const effectiveMarket = draft.marketTypeOverride !== "auto" ? draft.marketTypeOverride : norm?.marketType;
@@ -505,13 +564,33 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
         />
       </div>
 
-      <Button
-        onClick={submit}
-        disabled={submitting || !legs.length}
-        className="w-full"
-      >
-        {submitting ? "Submitting…" : "Submit paper bet"}
-      </Button>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button
+          onClick={submit}
+          disabled={submitting || !legs.length}
+          className="flex-1"
+        >
+          {submitting ? "Submitting…" : "Submit paper bet"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={submitting || !legs.length}
+          onClick={() => {
+            const label = window.prompt("Name this draft:", "Untitled draft");
+            if (label === null) return;
+            const snap = snapshotCurrentDraft(label);
+            if (snap) {
+              toast.success("Saved to My Slips → Drafts");
+              onDraftSaved?.();
+            }
+          }}
+          className="sm:w-44 gap-1"
+        >
+          <Save className="w-3.5 h-3.5" />
+          Save as draft
+        </Button>
+      </div>
     </div>
   );
 }
