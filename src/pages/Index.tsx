@@ -841,14 +841,7 @@ const Index = () => {
                     predictions={homePropsQuery.data?.items ?? []}
                     isPending={homePropsQuery.isPending}
                   />
-                  <HomeAutoProfit
-                    candidates={homeAutoProfitCandidates}
-                    loading={
-                      nbaFastQuery.isPending ||
-                      mlbFastQuery.isPending ||
-                      homePropsQuery.isPending
-                    }
-                  />
+                  <HomeAutoProfit />
                 </div>
               ) : null}
 
