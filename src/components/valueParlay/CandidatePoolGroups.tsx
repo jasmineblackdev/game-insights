@@ -45,6 +45,7 @@ import { MarketSignals } from "@/components/playerProps/MarketSignals";
 import { Last10Chart } from "@/components/playerProps/Last10Chart";
 import { ConsistencyTrendStrip } from "@/components/playerProps/ConsistencyTrendStrip";
 import { MatchupInsight } from "@/components/playerProps/MatchupInsight";
+import { BetCard } from "@/components/playerProps/BetCard";
 
 interface Props {
   candidates: ValueBetCandidate[];
@@ -204,17 +205,31 @@ function CandidateGroup({
         </span>
       </button>
       {open ? (
-        <div className="divide-y divide-border/40">
-          {rows.map((c) => (
-            <CandidateRow
-              key={c.id}
-              c={c}
-              isAvoided={group.key === "avoided"}
-              added={isAdded(c.id)}
-              onAdd={() => onAdd(c)}
-            />
-          ))}
-        </div>
+        // Step 1 of canonical-card migration: only the "props" bucket
+        // renders BetCard. Every other bucket keeps the existing
+        // CandidateRow so we can verify the BetCard layout in
+        // isolation before broader migration. BetCard manages its
+        // own Add-to-slip + expand/collapse via context, so the
+        // outer onAdd / isAdded plumbing isn't needed for that path.
+        group.key === "props" ? (
+          <div className="p-2 space-y-2">
+            {rows.map((c) => (
+              <BetCard key={c.id} candidate={c} />
+            ))}
+          </div>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {rows.map((c) => (
+              <CandidateRow
+                key={c.id}
+                c={c}
+                isAvoided={group.key === "avoided"}
+                added={isAdded(c.id)}
+                onAdd={() => onAdd(c)}
+              />
+            ))}
+          </div>
+        )
       ) : null}
     </div>
   );
