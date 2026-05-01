@@ -1,44 +1,39 @@
 /**
- * closing-odds-poller — captures the second half of the CLV pipeline.
+ * closing-odds-poller — captures the second half of the CLV pipeline
+ * for BOTH team markets (moneyline) AND player-prop markets.
  *
  * The bridge already records:
  *   - odds_at_recommendation (when the optimizer surfaces a leg)
  *   - odds_at_placement      (when user clicks "Mark as placed")
  *
- * What's missing is the THIRD point — odds taken right before kickoff,
- * the canonical "closing line." That's what this poller captures.
+ * What was missing is the THIRD point — odds taken right before
+ * kickoff, the canonical "closing line." That's what this poller
+ * captures and writes to leg.closing_odds_american (+ for props,
+ * leg.closing_line_value so apples-to-apples CLV math is possible
+ * even when the line moved).
  *
  * Strategy:
  *   1. Pull pending recommended_parlays whose legs include an
  *      identifiable game starting in the next ~2 hours.
- *   2. Group by (sport, game_id) — refetch each unique game once.
- *   3. Hit the existing odds-api-proxy (server-side key) for fresh
- *      odds. Only the_odds_api path is supported here; other
- *      providers can be wired later.
- *   4. Update each matching leg's `closing_odds_american` field.
+ *   2. Group by sport. Per sport, build a UNION of:
+ *        - h2h (always — covers moneyline legs)
+ *        - prop markets we have pending legs for, mapped from each
+ *          leg's stat_type via PROP_MARKET_KEYS
+ *   3. ONE Odds API call per sport with comma-separated markets.
+ *      Cost-aware: prop markets only enter the request when we have
+ *      pending legs for them.
+ *   4. For each leg, match against the response and set
+ *      `closing_odds_american` (+ `closing_line_value` for props).
  *      Idempotent overwrite — the LATEST close before kickoff wins.
- *   5. Bridge (parlayLegBridge) already reads odds_at_placement +
- *      odds_at_recommendation; once closing_odds_american is set, it
- *      computes the full clv_pp at settle and writes to extra.clv_pp.
+ *   5. Bridge reads the closing fields at settle and computes clv_pp.
  *
- * Cron:
- *   Recommended schedule — every 15 min during NA sport hours.
- *   Set up via pg_cron from the Supabase SQL editor:
- *     SELECT cron.schedule(
- *       'closing-odds-poll',
- *       '*\/15 * * * *',
- *       $$ SELECT net.http_post(
- *            url := 'https://<project>.supabase.co/functions/v1/closing-odds-poller',
- *            headers := jsonb_build_object('Authorization', 'Bearer <service-role-jwt>')
- *          ); $$
- *     );
- *   Or trigger from any external scheduler (GitHub Actions cron,
- *   Vercel cron, etc.) by hitting the function URL.
+ * Recommendation logic is NOT changed — this is observability /
+ * learning data only. Per #127 ship plan.
  *
- * Auth:
- *   Requires SUPABASE_SERVICE_ROLE_KEY at the function (set via
- *   `supabase secrets set` if not already). The function uses it to
- *   bypass RLS when reading recommended_parlays and writing back.
+ * No schema migration needed: legs is JSONB; new closing_line_value
+ * field lives alongside the existing closing_odds_american.
+ *
+ * Cron + Auth: unchanged from the team-only version.
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -68,14 +63,71 @@ const SPORT_TO_KEY: Record<string, string> = {
   soccer: "soccer_usa_mls",
 };
 
+/**
+ * Maps our internal stat_type → Odds API market key per sport.
+ * Only the most common props the optimizer surfaces are covered.
+ * When a stat_type isn't here, the leg is skipped (not an error).
+ *
+ * Keys verified against Odds API docs:
+ *   https://the-odds-api.com/sports-odds-data/betting-markets.html#player-props
+ */
+const PROP_MARKET_KEYS: Record<string, Record<string, string>> = {
+  nba: {
+    points:      "player_points",
+    rebounds:    "player_rebounds",
+    assists:     "player_assists",
+    threes:      "player_threes",
+    steals:      "player_steals",
+    blocks:      "player_blocks",
+    pra:         "player_points_rebounds_assists",
+  },
+  wnba: {
+    points:      "player_points",
+    rebounds:    "player_rebounds",
+    assists:     "player_assists",
+    threes:      "player_threes",
+  },
+  nfl: {
+    passing_yards:   "player_pass_yds",
+    passing_tds:     "player_pass_tds",
+    completions:     "player_pass_completions",
+    rushing_yards:   "player_rush_yds",
+    receiving_yards: "player_reception_yds",
+    receptions:      "player_receptions",
+  },
+  mlb: {
+    hits:         "batter_hits",
+    total_bases:  "batter_total_bases",
+    home_runs:    "batter_home_runs",
+    rbis:         "batter_rbis",
+    runs:         "batter_runs_scored",
+    stolen_bases: "batter_stolen_bases",
+    walks:        "batter_walks",
+    // Pitcher Ks are far more common in the optimizer pool than batter Ks;
+    // Odds API exposes them at pitcher_strikeouts.
+    strikeouts:   "pitcher_strikeouts",
+  },
+};
+
 interface ParlayLeg {
   id?: string;
   sport?: string;
   market_type?: string;
+  stat_type?: string | null;
+  line_value?: number | null;
+  /** Direction stored as "MORE"/"LESS" by the logger. */
+  direction?: "MORE" | "LESS" | null;
   selection?: string;
   american_odds?: number | null;
   odds_at_placement?: number | null;
   closing_odds_american?: number | null;
+  /**
+   * Closing line value for player props — captured alongside
+   * closing_odds_american so CLV math can detect line moves and
+   * decide whether the comparison is apples-to-apples (same line)
+   * or ambiguous (line drifted). Null for team markets.
+   */
+  closing_line_value?: number | null;
   game_id?: string | null;
   game_label?: string | null;
   game_time?: string | null;
@@ -109,6 +161,78 @@ function teamTokenFromSelection(selection: string | undefined): string | null {
   return m?.[1] ?? null;
 }
 
+/**
+ * Pull the player name out of "Aaron Judge Over 1.5 Total Bases".
+ * Returns the part before the first Over/Under/numeric token.
+ */
+function playerNameFromSelection(selection: string | undefined | null): string | null {
+  if (!selection) return null;
+  const m = /^([^\d]+?)\s+(?:Over|Under|O\/U|\d)/i.exec(String(selection).trim());
+  return m ? m[1].trim() : null;
+}
+
+/** Loose name match — full-name on most providers; allow last-name fallback. */
+function nameMatches(odsName: string, target: string): boolean {
+  const a = odsName.toUpperCase().replace(/[^A-Z\s]/g, "").trim();
+  const b = target.toUpperCase().replace(/[^A-Z\s]/g, "").trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aLast = a.split(/\s+/).slice(-1)[0];
+  const bLast = b.split(/\s+/).slice(-1)[0];
+  return aLast.length >= 4 && aLast === bLast;
+}
+
+type OddsEvent = {
+  id: string;
+  home_team: string;
+  away_team: string;
+  bookmakers?: Array<{
+    markets?: Array<{
+      key: string;
+      outcomes?: Array<{
+        name: string;
+        /** Player-prop outcomes use `description` for the player name; team h2h uses `name`. */
+        description?: string;
+        price: number;
+        point?: number;
+      }>;
+    }>;
+  }>;
+};
+
+/**
+ * Match a player-prop outcome on the Odds API event. Returns the
+ * outcome with the smallest |line - target_line| AND matching
+ * direction. Null when no candidate is found.
+ */
+function findPropOutcome(
+  ev: OddsEvent,
+  marketKey: string,
+  playerName: string,
+  direction: "MORE" | "LESS",
+  targetLine: number,
+): { price: number; point: number } | null {
+  const wantedDirName = direction === "MORE" ? "OVER" : "UNDER";
+  let best: { price: number; point: number; diff: number } | null = null;
+  for (const bk of ev.bookmakers ?? []) {
+    const market = bk.markets?.find((m) => m.key === marketKey);
+    if (!market) continue;
+    for (const o of market.outcomes ?? []) {
+      if ((o.name?.toUpperCase() ?? "") !== wantedDirName) continue;
+      const desc = o.description ?? "";
+      if (!nameMatches(desc, playerName)) continue;
+      if (!Number.isFinite(o.price) || !Number.isFinite(o.point ?? NaN)) continue;
+      const diff = Math.abs((o.point ?? 0) - targetLine);
+      if (best == null || diff < best.diff) {
+        best = { price: o.price, point: o.point ?? 0, diff };
+      }
+    }
+    if (best) break; // first bookmaker with a hit is good enough for CLV consensus
+  }
+  if (!best) return null;
+  return { price: best.price, point: best.point };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -135,8 +259,11 @@ Deno.serve(async (req) => {
     .limit(500);
   if (error) return json({ error: "parlays_query_failed", detail: error.message }, 500);
 
-  // Build (sport → set of gameIds) map across legs whose game starts soon.
-  const sportGameMap = new Map<string, Set<string>>();
+  // Build (sport → set of gameIds) AND (sport → set of needed prop
+  // markets) maps across legs whose game starts soon.
+  const sportGameMap   = new Map<string, Set<string>>();
+  const sportMarketMap = new Map<string, Set<string>>(); // sportKey → set of market keys ("h2h" + props)
+
   for (const p of (parlays ?? []) as ParlayRow[]) {
     if (!Array.isArray(p.legs)) continue;
     for (const leg of p.legs) {
@@ -144,9 +271,6 @@ Deno.serve(async (req) => {
       const sportKey = SPORT_TO_KEY[sport];
       if (!sportKey) continue;
       const gameTime = leg.game_time ?? null;
-      // If we know the game time, gate on near-kickoff. Otherwise opt-in:
-      // poll the leg anyway — we don't want to silently miss closes when
-      // game_time wasn't recorded.
       if (gameTime) {
         const t = new Date(gameTime).toISOString();
         if (t < cutoffStart || t > cutoffEnd) continue;
@@ -156,6 +280,18 @@ Deno.serve(async (req) => {
       let s = sportGameMap.get(sportKey);
       if (!s) { s = new Set<string>(); sportGameMap.set(sportKey, s); }
       s.add(gameId);
+
+      // Track which markets this sport needs.
+      let mkts = sportMarketMap.get(sportKey);
+      if (!mkts) { mkts = new Set<string>(); sportMarketMap.set(sportKey, mkts); }
+
+      const mt = String(leg.market_type ?? "").toLowerCase();
+      if (mt === "moneyline" || mt === "team_moneyline") {
+        mkts.add("h2h");
+      } else if (mt === "player_prop") {
+        const propKey = PROP_MARKET_KEYS[sport]?.[String(leg.stat_type ?? "").toLowerCase()];
+        if (propKey) mkts.add(propKey);
+      }
     }
   }
 
@@ -163,31 +299,27 @@ Deno.serve(async (req) => {
     return json({ ok: true, parlays_scanned: parlays?.length ?? 0, games_polled: 0, legs_updated: 0 });
   }
 
-  // Per-sport batch: one upstream call per sport. The Odds API
-  // supports eventIds= filter so we can target the specific games.
+  // Per-sport batch: one upstream call per sport with comma-separated
+  // markets list. The Odds API charges per-market-per-game, so scoping
+  // markets to what we actually need keeps quota cost bounded.
   let legsUpdated = 0;
   let gamesPolled = 0;
   const errors: string[] = [];
-  const oddsByGame = new Map<string, { home_team: string; away_team: string; bookmakers?: Array<{ markets?: Array<{ key: string; outcomes?: Array<{ name: string; price: number }> }> }> }>();
+  const oddsByGame = new Map<string, OddsEvent>();
 
-  // Fetch every event for the sport then match by team name. The
-  // eventIds= filter expects The Odds API's own UUIDs, not ESPN
-  // gameIds — so we can't pre-filter. <50 games per sport per day
-  // makes the wider fetch cheap.
-  for (const [sportKey] of sportGameMap.entries()) {
-    const url = `${ODDS_UPSTREAM}/sports/${encodeURIComponent(sportKey)}/odds?regions=us&markets=h2h&oddsFormat=american&apiKey=${encodeURIComponent(ODDS_KEY)}`;
+  for (const [sportKey, mkts] of sportMarketMap.entries()) {
+    if (mkts.size === 0) continue;
+    const marketsParam = [...mkts].join(",");
+    const url = `${ODDS_UPSTREAM}/sports/${encodeURIComponent(sportKey)}/odds?regions=us&markets=${encodeURIComponent(marketsParam)}&oddsFormat=american&apiKey=${encodeURIComponent(ODDS_KEY)}`;
     try {
       const res = await fetch(url, { headers: { Accept: "application/json" } });
       if (!res.ok) {
         errors.push(`${sportKey}: HTTP ${res.status}`);
         continue;
       }
-      const data = await res.json() as Array<{ id: string; home_team: string; away_team: string; bookmakers?: Array<{ markets?: Array<{ key: string; outcomes?: Array<{ name: string; price: number }> }> }> }>;
+      const data = await res.json() as OddsEvent[];
       for (const ev of data) {
         oddsByGame.set(ev.id, ev);
-        // Also key by team-pair so we can match via parlay leg's
-        // selection ("LAL ML" / game_label "LAL @ HOU") when the
-        // gameId is ESPN-style instead of Odds-API-style.
         const homeUp = ev.home_team?.toUpperCase() ?? "";
         const awayUp = ev.away_team?.toUpperCase() ?? "";
         if (homeUp && awayUp) {
@@ -201,20 +333,15 @@ Deno.serve(async (req) => {
   }
 
   // For each parlay, walk legs and update closing_odds_american when
-  // we have fresh data for that game. Use the consensus h2h price
-  // from the first bookmaker — good enough for CLV.
+  // we have fresh data for that game/market. Idempotent on every call.
   for (const p of (parlays ?? []) as ParlayRow[]) {
     if (!Array.isArray(p.legs)) continue;
     let touched = false;
     const nextLegs = p.legs.map((leg) => {
       // Match by team-pair (preferred) or fall back to gameId lookup.
-      // Team pair gives us a reliable hit even when the parlay's
-      // gameId is ESPN-style and the Odds API's id is its own UUID.
-      let ev: typeof oddsByGame extends Map<string, infer V> ? V | undefined : undefined = undefined;
+      let ev: OddsEvent | undefined = undefined;
       const labelMatch = /^([A-Z][A-Z0-9]{1,4})\s*@\s*([A-Z][A-Z0-9]{1,4})$/.exec(String(leg.game_label ?? "").trim());
       if (labelMatch) {
-        // Try matching against any event whose home/away contains the
-        // tokens (Odds API uses full team names; we have abbrevs).
         const [, awayTok, homeTok] = labelMatch;
         for (const [, candidate] of oddsByGame.entries()) {
           const homeUp = candidate.home_team?.toUpperCase() ?? "";
@@ -232,12 +359,42 @@ Deno.serve(async (req) => {
       if (!ev) return leg;
 
       const teamToken = teamTokenFromSelection(leg.selection);
-      if (leg.market_type === "team_moneyline" && teamToken) {
+      const mt = String(leg.market_type ?? "").toLowerCase();
+
+      // Team moneyline. Schema uses "moneyline"; accept legacy
+      // "team_moneyline" too for back-compat with old rows.
+      if ((mt === "moneyline" || mt === "team_moneyline") && teamToken) {
         const market = ev.bookmakers?.[0]?.markets?.find((m) => m.key === "h2h");
         const outcome = market?.outcomes?.find((o) => o.name?.toUpperCase().includes(teamToken));
         if (outcome && Number.isFinite(outcome.price)) {
           touched = true;
           return { ...leg, closing_odds_american: Math.round(outcome.price) };
+        }
+      }
+
+      // Player prop. Match against the prop market for this stat type.
+      // Capture both the closing price AND the closing line value so
+      // downstream CLV math can decide whether the comparison is
+      // apples-to-apples (same line) or ambiguous (line drifted).
+      if (
+        mt === "player_prop"
+        && leg.stat_type
+        && leg.line_value != null
+        && (leg.direction === "MORE" || leg.direction === "LESS")
+      ) {
+        const sport = String(leg.sport ?? "").toLowerCase();
+        const marketKey = PROP_MARKET_KEYS[sport]?.[String(leg.stat_type).toLowerCase()];
+        const player = playerNameFromSelection(leg.selection);
+        if (marketKey && player) {
+          const hit = findPropOutcome(ev, marketKey, player, leg.direction, leg.line_value);
+          if (hit) {
+            touched = true;
+            return {
+              ...leg,
+              closing_odds_american: Math.round(hit.price),
+              closing_line_value: hit.point,
+            };
+          }
         }
       }
       return leg;
