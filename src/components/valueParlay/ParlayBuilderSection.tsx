@@ -27,6 +27,7 @@ import { syncPlattParamsFromSupabase } from "@/lib/ml/calibration";
 import { logRecommendedParlay, type SaveStatus } from "@/lib/parlayTracking/recommendedParlayLogger";
 import { AutoProfitBuilderHint } from "@/components/dailyPlan/AutoProfitBuilderHint";
 import { DkExecutionAssistant } from "@/components/valueParlay/DkExecutionAssistant";
+import { CandidatePoolGroups } from "@/components/valueParlay/CandidatePoolGroups";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -1030,6 +1031,8 @@ export function ParlayBuilderSection({
             setBuilderLegs={setBuilderLegs}
             disabled={actionsDisabled}
           />
+
+          <CandidatePoolGroups candidates={candidates} />
 
           <DkExecutionAssistant slipLegs={builderLegs} candidatePool={candidates} />
         </>
