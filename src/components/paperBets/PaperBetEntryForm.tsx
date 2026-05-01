@@ -131,14 +131,18 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
         legs.length === 1 ? "single"
         : sameGameIds.size === 1 && legs.length >= 2 ? "sgp"
         : "parlay";
-      const placed = await placePaperBet({
-        betType,
-        legs,
-        stake: stakeNum,
-        notes: notes.trim() || undefined,
-      });
-      if (!placed) {
-        toast.error("Couldn't save paper bet. Check Supabase config.");
+      try {
+        await placePaperBet({
+          betType,
+          legs,
+          stake: stakeNum,
+          notes: notes.trim() || undefined,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        // Migration-missing case: surface the actionable message + the
+        // banner on the page already tells them to apply the migration.
+        toast.error(msg, { duration: 8000 });
         return;
       }
       toast.success(`Paper ${betType} placed — $${stakeNum} risk.`);

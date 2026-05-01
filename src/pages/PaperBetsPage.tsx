@@ -11,14 +11,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PaperBetEntryForm } from "@/components/paperBets/PaperBetEntryForm";
 import { PaperBetCard } from "@/components/paperBets/PaperBetCard";
 import { PaperBankrollSummary } from "@/components/paperBets/PaperBankrollSummary";
-import { getPaperBankroll, listPaperBets, settlePaperBet } from "@/lib/paperBets/store";
+import {
+  getPaperBankroll,
+  listPaperBets,
+  settlePaperBet,
+  PaperBetsMigrationMissingError,
+} from "@/lib/paperBets/store";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
 
 type Tab = "build" | "open" | "settled" | "perf";
@@ -31,12 +36,20 @@ export default function PaperBetsPage() {
     queryKey: ["paper-bankroll"],
     queryFn: getPaperBankroll,
     staleTime: 30_000,
+    retry: false,
   });
   const betsQuery = useQuery({
     queryKey: ["paper-bets"],
     queryFn: () => listPaperBets({ status: "all", limit: 200 }),
     staleTime: 15_000,
+    retry: false,
   });
+
+  // Detect the most common deploy issue: migration not applied.
+  const migrationMissing =
+    bankrollQuery.error instanceof PaperBetsMigrationMissingError
+    || betsQuery.error instanceof PaperBetsMigrationMissingError;
+  const otherError = (bankrollQuery.error || betsQuery.error) as Error | undefined;
 
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["paper-bankroll"] });
@@ -105,10 +118,47 @@ export default function PaperBetsPage() {
         </Button>
       </div>
 
+      {migrationMissing ? (
+        <div className="rounded-lg border border-red-500/50 bg-red-500/[0.06] p-4 text-sm space-y-2">
+          <div className="flex items-start gap-2 text-red-700 dark:text-red-400 font-bold">
+            <AlertTriangle className="w-4 h-4 mt-0.5" />
+            <span>Paper Bets tables not deployed to Supabase.</span>
+          </div>
+          <p className="text-foreground">
+            The page can't read or write paper bets because <code className="px-1 rounded bg-muted">paper_bets</code> /{" "}
+            <code className="px-1 rounded bg-muted">paper_bankroll</code> don't exist in the project this deployment is pointing at.
+          </p>
+          <p className="text-muted-foreground">
+            Apply the migration:
+          </p>
+          <pre className="text-[11px] bg-muted/40 rounded px-2 py-1.5 overflow-x-auto">
+supabase/migrations/20260509000000_paper_bets.sql
+          </pre>
+          <p className="text-muted-foreground">
+            Either via the Supabase CLI (<code className="text-foreground">supabase db push</code>) or by pasting the SQL into the
+            Supabase dashboard → SQL editor → Run. Then refresh this page.
+          </p>
+          {otherError ? (
+            <p className="text-[11px] text-muted-foreground">
+              Raw error: <span className="text-foreground">{otherError.message}</span>
+            </p>
+          ) : null}
+        </div>
+      ) : otherError ? (
+        <div className="rounded-lg border border-amber-500/50 bg-amber-500/[0.06] p-4 text-sm space-y-2">
+          <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400 font-bold">
+            <AlertTriangle className="w-4 h-4 mt-0.5" />
+            <span>Couldn't load paper bets.</span>
+          </div>
+          <p className="text-foreground">{otherError.message}</p>
+        </div>
+      ) : null}
+
       <PaperBankrollSummary
         bankroll={bankrollQuery.data ?? null}
         bets={bets}
         onChanged={refresh}
+        loading={bankrollQuery.isPending && !migrationMissing && !otherError}
       />
 
       <div className="flex flex-wrap gap-1 border-b border-border/60">

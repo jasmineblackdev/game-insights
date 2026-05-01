@@ -7,6 +7,13 @@
  *
  * Mutations are intentionally narrow: place, settle, void. Anything
  * more elaborate (mass-delete, manual override) goes through SQL.
+ *
+ * Error handling: all functions throw on Postgres error so callers
+ * can surface the actual reason (table missing, RLS deny, network)
+ * to the user instead of a generic "couldn't save" toast. The
+ * migration not being applied is the most common failure mode and
+ * needs to be visible — the table-missing error string is the
+ * fastest signal that the migration needs deploying.
  */
 
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -17,6 +24,35 @@ import type {
   PaperBetStatus,
   PaperLeg,
 } from "./types";
+
+/**
+ * Raised when the user's Supabase project doesn't have the paper_bets
+ * migration deployed. Detected by Postgres "relation … does not exist"
+ * errors. The page-level handler shows a CTA explaining how to apply
+ * the migration.
+ */
+export class PaperBetsMigrationMissingError extends Error {
+  constructor(detail: string) {
+    super(`Paper Bets tables not found in Supabase. Apply migration 20260509000000_paper_bets.sql. (${detail})`);
+    this.name = "PaperBetsMigrationMissingError";
+  }
+}
+
+function classifyError(error: { message?: string; code?: string; details?: string } | null | undefined, fallback: string): Error {
+  const msg = error?.message ?? "";
+  const detail = error?.details ?? "";
+  // Postgres "relation does not exist" → migration missing.
+  // Code 42P01 is the canonical SQLSTATE; PostgREST also surfaces it
+  // in the message text.
+  if (
+    error?.code === "42P01" ||
+    /relation .* does not exist/i.test(msg) ||
+    /relation .* does not exist/i.test(detail)
+  ) {
+    return new PaperBetsMigrationMissingError(msg || detail || "table not found");
+  }
+  return new Error(msg || fallback);
+}
 
 // ── Row shape from Postgres ──────────────────────────────────────────
 
@@ -93,18 +129,19 @@ const DEFAULT_STARTING = 500;
 /**
  * Read the current paper bankroll row. Creates the singleton row on
  * first read so the UI never has to handle a "not initialized" state.
+ *
+ * Throws if Supabase isn't configured or the migration isn't deployed.
  */
-export async function getPaperBankroll(): Promise<PaperBankroll | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+export async function getPaperBankroll(): Promise<PaperBankroll> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY missing).");
+  }
   const { data, error } = await supabase
     .from("paper_bankroll")
     .select("*")
     .is("user_id", null)
     .maybeSingle();
-  if (error) {
-    console.error("paper_bankroll read failed:", error);
-    return null;
-  }
+  if (error) throw classifyError(error, "Failed to read paper_bankroll.");
   if (data) return rowToBankroll(data as PaperBankrollRow);
 
   // Initialise the singleton anon row on first call.
@@ -118,10 +155,7 @@ export async function getPaperBankroll(): Promise<PaperBankroll | null> {
     })
     .select("*")
     .single();
-  if (insErr || !created) {
-    console.error("paper_bankroll init failed:", insErr);
-    return null;
-  }
+  if (insErr || !created) throw classifyError(insErr, "Failed to initialize paper_bankroll.");
   return rowToBankroll(created as PaperBankrollRow);
 }
 
@@ -129,9 +163,16 @@ export async function getPaperBankroll(): Promise<PaperBankroll | null> {
  * Reset the paper bankroll. Useful for first-visit onboarding (set
  * starting balance) and explicit user-driven resets in settings.
  */
-export async function setPaperBankrollStart(amount: number): Promise<PaperBankroll | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+export async function setPaperBankrollStart(amount: number): Promise<PaperBankroll> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("Starting balance must be positive.");
+  }
+  // Ensure a row exists (no-op if one already exists) so the UPDATE
+  // below has a target.
+  await getPaperBankroll();
   const { data, error } = await supabase
     .from("paper_bankroll")
     .update({
@@ -148,10 +189,7 @@ export async function setPaperBankrollStart(amount: number): Promise<PaperBankro
     .is("user_id", null)
     .select("*")
     .maybeSingle();
-  if (error || !data) {
-    console.error("paper_bankroll reset failed:", error);
-    return null;
-  }
+  if (error || !data) throw classifyError(error, "Failed to reset paper_bankroll.");
   return rowToBankroll(data as PaperBankrollRow);
 }
 
@@ -161,7 +199,9 @@ export async function listPaperBets(args: {
   status?: "open" | "settled" | "all";
   limit?: number;
 } = {}): Promise<PaperBet[]> {
-  if (!isSupabaseConfigured || !supabase) return [];
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
   const { status = "all", limit = 200 } = args;
   let q = supabase
     .from("paper_bets")
@@ -174,10 +214,7 @@ export async function listPaperBets(args: {
     q = q.in("status", ["won", "lost", "push", "voided"]);
   }
   const { data, error } = await q;
-  if (error) {
-    console.error("listPaperBets failed:", error);
-    return [];
-  }
+  if (error) throw classifyError(error, "Failed to read paper_bets.");
   return (data as PaperBetRow[]).map(rowToBet);
 }
 
@@ -197,9 +234,12 @@ export async function placePaperBet(args: {
   appEdge?: number;
   appConfidence?: "high" | "medium" | "low";
   notes?: string;
-}): Promise<PaperBet | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
-  if (!args.legs.length || !Number.isFinite(args.stake) || args.stake <= 0) return null;
+}): Promise<PaperBet> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
+  if (!args.legs.length) throw new Error("At least one leg required.");
+  if (!Number.isFinite(args.stake) || args.stake <= 0) throw new Error("Stake must be positive.");
 
   const combined = combineAmericanOdds(args.legs.map((l) => l.americanOdds));
   const decimalMult = args.legs.reduce(
@@ -226,16 +266,14 @@ export async function placePaperBet(args: {
     })
     .select("*")
     .single();
-  if (insErr || !created) {
-    console.error("placePaperBet failed:", insErr);
-    return null;
-  }
+  if (insErr || !created) throw classifyError(insErr, "Failed to insert paper bet.");
 
   // Update bankroll atomically via RPC would be cleaner, but for the
   // single-user MVP a read-modify-write is acceptable — collisions
   // require two simultaneous tabs, and we're optimistic about that.
-  const br = await getPaperBankroll();
-  if (br) {
+  // Bankroll fetch failure is non-fatal — the bet is already saved.
+  try {
+    const br = await getPaperBankroll();
     await supabase
       .from("paper_bankroll")
       .update({
@@ -244,6 +282,8 @@ export async function placePaperBet(args: {
         updated_at: new Date().toISOString(),
       })
       .is("user_id", null);
+  } catch (e) {
+    console.warn("Bankroll update failed (bet still saved):", e);
   }
 
   return rowToBet(created as PaperBetRow);
@@ -261,16 +301,19 @@ export async function settlePaperBet(args: {
   pnl: number;
   legs: PaperLeg[];
   resolvedAt?: string;
-}): Promise<PaperBet | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+}): Promise<PaperBet> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
 
   // Read current row so we can release the right open_risk amount.
-  const { data: existing } = await supabase
+  const { data: existing, error: readErr } = await supabase
     .from("paper_bets")
     .select("stake, status")
     .eq("id", args.betId)
     .maybeSingle();
-  if (!existing) return null;
+  if (readErr) throw classifyError(readErr, "Failed to read paper bet.");
+  if (!existing) throw new Error(`Paper bet ${args.betId} not found.`);
   const wasOpen = ["open", "in_progress", "needs_review"].includes(existing.status as string);
 
   const { data: updated, error } = await supabase
@@ -284,30 +327,32 @@ export async function settlePaperBet(args: {
     .eq("id", args.betId)
     .select("*")
     .maybeSingle();
-  if (error || !updated) {
-    console.error("settlePaperBet failed:", error);
-    return null;
-  }
+  if (error || !updated) throw classifyError(error, "Failed to update paper bet.");
 
   // Release stake from open_risk + apply delta to current_bankroll.
-  const br = await getPaperBankroll();
-  if (br && wasOpen) {
-    const stake = Number(existing.stake);
-    const wonInc = args.status === "won" ? 1 : 0;
-    const lostInc = args.status === "lost" ? 1 : 0;
-    const pushInc = args.status === "push" ? 1 : 0;
-    await supabase
-      .from("paper_bankroll")
-      .update({
-        open_risk: Math.max(0, br.openRisk - stake),
-        current_bankroll: br.currentBankroll + args.pnl,
-        total_pnl: br.totalPnl + args.pnl,
-        bets_won: br.betsWon + wonInc,
-        bets_lost: br.betsLost + lostInc,
-        bets_push: br.betsPush + pushInc,
-        updated_at: new Date().toISOString(),
-      })
-      .is("user_id", null);
+  // Non-fatal if it fails — the bet is already settled.
+  try {
+    const br = await getPaperBankroll();
+    if (wasOpen) {
+      const stake = Number(existing.stake);
+      const wonInc = args.status === "won" ? 1 : 0;
+      const lostInc = args.status === "lost" ? 1 : 0;
+      const pushInc = args.status === "push" ? 1 : 0;
+      await supabase
+        .from("paper_bankroll")
+        .update({
+          open_risk: Math.max(0, br.openRisk - stake),
+          current_bankroll: br.currentBankroll + args.pnl,
+          total_pnl: br.totalPnl + args.pnl,
+          bets_won: br.betsWon + wonInc,
+          bets_lost: br.betsLost + lostInc,
+          bets_push: br.betsPush + pushInc,
+          updated_at: new Date().toISOString(),
+        })
+        .is("user_id", null);
+    }
+  } catch (e) {
+    console.warn("Bankroll update on settle failed (bet still settled):", e);
   }
 
   return rowToBet(updated as PaperBetRow);
@@ -321,8 +366,10 @@ export async function settlePaperBet(args: {
 export async function markPaperBetNeedsReview(
   betId: string,
   legs: PaperLeg[],
-): Promise<PaperBet | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
+): Promise<PaperBet> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
   const { data, error } = await supabase
     .from("paper_bets")
     .update({
@@ -332,10 +379,7 @@ export async function markPaperBetNeedsReview(
     .eq("id", betId)
     .select("*")
     .maybeSingle();
-  if (error || !data) {
-    console.error("markPaperBetNeedsReview failed:", error);
-    return null;
-  }
+  if (error || !data) throw classifyError(error, "Failed to mark needs_review.");
   return rowToBet(data as PaperBetRow);
 }
 
@@ -343,14 +387,17 @@ export async function markPaperBetNeedsReview(
  * Void a paper bet — releases stake without applying any P/L. For
  * cancelled games / postponed events. Preserves legs as-is.
  */
-export async function voidPaperBet(betId: string): Promise<PaperBet | null> {
-  if (!isSupabaseConfigured || !supabase) return null;
-  const { data: existing } = await supabase
+export async function voidPaperBet(betId: string): Promise<PaperBet> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
+  const { data: existing, error } = await supabase
     .from("paper_bets")
     .select("stake, status, legs")
     .eq("id", betId)
     .maybeSingle();
-  if (!existing) return null;
+  if (error) throw classifyError(error, "Failed to read paper bet.");
+  if (!existing) throw new Error(`Paper bet ${betId} not found.`);
   return settlePaperBet({
     betId,
     status: "voided",

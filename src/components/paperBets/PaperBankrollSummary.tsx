@@ -18,17 +18,29 @@ interface Props {
   bankroll: PaperBankroll | null;
   bets: PaperBet[];
   onChanged?: () => void;
+  /** True only when the underlying query is still in flight. False
+   *  when the query errored (page-level banner shows the reason). */
+  loading?: boolean;
 }
 
-export function PaperBankrollSummary({ bankroll, bets, onChanged }: Props) {
+export function PaperBankrollSummary({ bankroll, bets, onChanged, loading }: Props) {
   const [editing, setEditing] = useState(false);
   const [newStart, setNewStart] = useState("500");
   const [saving, setSaving] = useState(false);
 
   if (!bankroll) {
+    if (loading) {
+      return (
+        <div className="rounded-xl border border-border/60 bg-card/40 p-4 text-sm text-muted-foreground">
+          Paper bankroll loading…
+        </div>
+      );
+    }
+    // Errored — the page-level banner already explains why; render
+    // a neutral placeholder so the page doesn't look broken.
     return (
       <div className="rounded-xl border border-border/60 bg-card/40 p-4 text-sm text-muted-foreground">
-        Paper bankroll initializing…
+        Paper bankroll unavailable. See banner above.
       </div>
     );
   }
@@ -51,14 +63,12 @@ export function PaperBankrollSummary({ bankroll, bets, onChanged }: Props) {
     }
     setSaving(true);
     try {
-      const r = await setPaperBankrollStart(n);
-      if (r) {
-        toast.success(`Paper bankroll reset to $${n}.`);
-        setEditing(false);
-        onChanged?.();
-      } else {
-        toast.error("Reset failed.");
-      }
+      await setPaperBankrollStart(n);
+      toast.success(`Paper bankroll reset to $${n}.`);
+      setEditing(false);
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Reset failed.");
     } finally {
       setSaving(false);
     }

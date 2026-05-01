@@ -30,15 +30,17 @@ export function PaperBetCard({ bet, onChanged }: Props) {
     setBusy(true);
     try {
       const r = await resolvePaperBet(bet);
-      const settled = await settlePaperBet({
-        betId: bet.id,
-        status: r.status,
-        pnl: r.pnl ?? 0,
-        legs: r.legs,
-      });
-      if (settled) {
+      try {
+        await settlePaperBet({
+          betId: bet.id,
+          status: r.status,
+          pnl: r.pnl ?? 0,
+          legs: r.legs,
+        });
         toast.success(`Bet ${r.status.replace("_", " ")} — ${r.pnl != null ? formatPnl(r.pnl) : "still pending"}.`);
         onChanged?.();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Settle failed.");
       }
     } finally {
       setBusy(false);
@@ -77,15 +79,17 @@ export function PaperBetCard({ bet, onChanged }: Props) {
       } else if (updatedLegs.some((l) => l.status === "needs_review")) {
         parlayStatus = "needs_review";
       }
-      const settled = await settlePaperBet({
-        betId: bet.id,
-        status: parlayStatus,
-        pnl,
-        legs: updatedLegs,
-      });
-      if (settled) {
+      try {
+        await settlePaperBet({
+          betId: bet.id,
+          status: parlayStatus,
+          pnl,
+          legs: updatedLegs,
+        });
         toast.success("Leg updated.");
         onChanged?.();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Update failed.");
       }
     } finally {
       setBusy(false);
@@ -96,11 +100,11 @@ export function PaperBetCard({ bet, onChanged }: Props) {
     if (busy) return;
     setBusy(true);
     try {
-      const r = await voidPaperBet(bet.id);
-      if (r) {
-        toast.success("Paper bet voided.");
-        onChanged?.();
-      }
+      await voidPaperBet(bet.id);
+      toast.success("Paper bet voided.");
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Void failed.");
     } finally {
       setBusy(false);
     }
