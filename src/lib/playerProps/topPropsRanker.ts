@@ -107,17 +107,26 @@ function targetDateYmd(date: "today" | "tomorrow", now: Date): string {
 
 /**
  * Date-match the prediction's game_time against the target slate.
- * Compares LOCAL YMD on both sides — handles ESPN's UTC ISO strings
- * correctly because new Date(iso) localizes automatically.
+ *
+ * `game_time` is normally a human-readable string ("7:30 PM ET") set by
+ * formatGameTime in espnPlayerStats — NOT an ISO timestamp. Real ISO
+ * is rare here, so the lenient default is: when we can't parse a date,
+ * accept the prop. The prop pool is built freshly per pageload from
+ * today's scoreboard, so every candidate is implicitly on today's
+ * slate. Only when game_time IS a real ISO date do we honor it as a
+ * tomorrow/today filter.
  */
 function gameMatchesDate(pred: PlayerEdgePrediction, targetYmd: string): boolean {
-  if (!pred.game_time) return false;
+  if (!pred.game_time) return true;
+  // Heuristic: ISO-ish strings start with YYYY-MM-DD. Anything else
+  // (e.g. "7:30 PM ET") is a display-only label — accept it.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(pred.game_time)) return true;
   try {
     const gameDate = new Date(pred.game_time);
-    if (Number.isNaN(gameDate.getTime())) return false;
+    if (Number.isNaN(gameDate.getTime())) return true;
     return toLocalYmd(gameDate) === targetYmd;
   } catch {
-    return false;
+    return true;
   }
 }
 

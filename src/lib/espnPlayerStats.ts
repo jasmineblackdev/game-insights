@@ -619,11 +619,17 @@ function buildReasons(
   // a misleading "Season avg 29 RBI" or "Season avg 50 hits".
   const isMlbBinary = sport === "MLB" && MLB_BINARY_OU_STATS.has(statType);
   const isMlbContinuousSeason = sport === "MLB" && MLB_CONTINUOUS_NEEDS_PER_GAME.has(statType);
+  // Round seasonAvg for display — ESPN sometimes returns un-rounded
+  // floats (e.g. 28.285714... PPG) which leak straight into the reason
+  // text and look unprofessional.
+  const seasonAvgDisplay = Number.isFinite(seasonAvg)
+    ? Math.round(seasonAvg * 10) / 10
+    : seasonAvg;
   const reason_1 = isMlbBinary
-    ? `${seasonAvg} ${unit} on season → ~${projected.toFixed(2)} ${unit}/game projected. ${direction === "MORE" ? "Over" : "Under"} 0.5 vs ${oppAbbr}'s ${oppQ} defense.`
+    ? `${seasonAvgDisplay} ${unit} on season → ~${projected.toFixed(2)} ${unit}/game projected. ${direction === "MORE" ? "Over" : "Under"} 0.5 vs ${oppAbbr}'s ${oppQ} defense.`
     : isMlbContinuousSeason
-      ? `${seasonAvg} ${unit} on season → ~${projected.toFixed(1)} ${unit}/game projected vs ${oppAbbr}'s ${oppQ} defense.`
-      : `Season avg ${seasonAvg} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
+      ? `${seasonAvgDisplay} ${unit} on season → ~${projected.toFixed(1)} ${unit}/game projected vs ${oppAbbr}'s ${oppQ} defense.`
+      : `Season avg ${seasonAvgDisplay} ${unit} — projected ${trend} average vs ${oppAbbr}'s ${oppQ} defense.`;
 
   let reason_2 = `${oppAbbr} win rate ${Math.round(opponentWinPct * 100)}% — ${
     oppQ === "weak"   ? "lighter opposition inflates opportunity" :

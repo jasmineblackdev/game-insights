@@ -501,8 +501,23 @@ function SportSection({
     return sortPlayerEdgePredictions(filtered);
   }, [all, sport]);
 
+  // Per-player dedupe for the collapsed view — keep only the
+  // highest-ranked prop per player so the top-3 surface always shows
+  // three distinct athletes. Expanded view still lists every prop.
+  const uniqueByPlayer = useMemo(() => {
+    const seen = new Set<string>();
+    const out: PlayerEdgePrediction[] = [];
+    for (const p of items) {
+      const key = String(p.player_id);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }, [items]);
+
   if (items.length === 0) return null;
-  const visible = expanded ? items : items.slice(0, 3);
+  const visible = expanded ? items : uniqueByPlayer.slice(0, 3);
 
   return (
     <div>
