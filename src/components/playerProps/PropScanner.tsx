@@ -17,21 +17,12 @@
  */
 
 import { useMemo, useState } from "react";
-import { ChevronRight, Plus } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { legAudit } from "@/lib/valueParlay/executionAssistant";
 import { DecisionPill } from "./DecisionPill";
-import { TrustRow } from "./TrustRow";
-import { HitRateBars } from "./HitRateBars";
-import { WhyThisPick } from "./WhyThisPick";
-import { MarketSignals } from "./MarketSignals";
-import { Last10Chart } from "./Last10Chart";
-import { ConsistencyTrendStrip } from "./ConsistencyTrendStrip";
-import { MatchupInsight } from "./MatchupInsight";
+import { BetCard } from "./BetCard";
 
 interface Props {
   /** Pool to scan — typically the recommended candidate pool. */
@@ -90,8 +81,6 @@ export function PropScanner({ candidates, limit = 20, title = "Top props today" 
 
 function ScannerRow({ candidate }: { candidate: ValueBetCandidate }) {
   const [expanded, setExpanded] = useState(false);
-  const { addValueLeg, isValueLegAdded } = useValueParlay();
-  const added = isValueLegAdded(candidate.id);
 
   const last10 = candidate.hitRates?.last10;
   const last10Samples = candidate.hitRates?.samples.last10 ?? 0;
@@ -101,12 +90,6 @@ function ScannerRow({ candidate }: { candidate: ValueBetCandidate }) {
     edge >= 6 ? "text-emerald-700 dark:text-emerald-400"
     : edge >= 3 ? "text-amber-700 dark:text-amber-400"
     : "text-muted-foreground";
-
-  const onAdd = () => {
-    const r = addValueLeg(candidate);
-    if (r.ok) toast.success(`Added ${candidate.selectionLabel}.`);
-    else toast.error(r.message ?? "Couldn't add leg.");
-  };
 
   return (
     <li>
@@ -137,29 +120,13 @@ function ScannerRow({ candidate }: { candidate: ValueBetCandidate }) {
         />
       </button>
       {expanded ? (
-        <div className="px-3 pb-3 pt-1 space-y-2 bg-background/40 border-t border-border/30">
-          <TrustRow candidate={candidate} />
-          {candidate.hitRates?.gameByGame?.length ? (
-            <Last10Chart candidate={candidate} compact />
-          ) : null}
-          <ConsistencyTrendStrip candidate={candidate} />
-          {candidate.hitRates ? (
-            <HitRateBars rates={candidate.hitRates} compact />
-          ) : null}
-          <MatchupInsight candidate={candidate} />
-          <MarketSignals candidate={candidate} compact />
-          <WhyThisPick candidate={candidate} />
-          <div className="flex items-center justify-end pt-1">
-            <Button
-              size="sm"
-              variant={added ? "secondary" : "outline"}
-              onClick={onAdd}
-              disabled={added}
-              className="h-7 px-2 text-[11px] gap-1"
-            >
-              {added ? "Added" : <><Plus className="w-3 h-3" /> Add to slip</>}
-            </Button>
-          </div>
+        // Step 2 of canonical-card migration: scanner expansion now
+        // renders the canonical BetCard (with its own Add-to-slip +
+        // expand/collapse + DraftKings instruction) instead of the
+        // hand-composed inline panel. Compact summary row above is
+        // unchanged — fast scanning still works the same way.
+        <div className="px-2 pb-2 pt-1 bg-background/40 border-t border-border/30">
+          <BetCard candidate={candidate} defaultExpanded />
         </div>
       ) : null}
     </li>
