@@ -17,6 +17,8 @@
 
 import { fetchPlayerLastGames, type PlayerGameStat } from "@/lib/playerGameLog";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import { whyThisPick } from "./explanation";
+import { legAudit } from "./executionAssistant";
 
 const CONCURRENCY = 6;
 
@@ -80,35 +82,93 @@ export async function enrichCandidatesWithRecentPerformance(
     if (!c.playerId || !c.statType || c.lineValue == null) continue;
     propIdxs.push(i);
   }
-  if (!propIdxs.length) return candidates;
+  // Backfill whyThisPick + decision on EVERY candidate (not just props)
+  // up front, then enrich props with hit rates which can refine the
+  // factor selection. Cheap pure derivation; no fetches.
+  const seeded = candidates.map((c) => ({
+    ...c,
+    decision: c.decision ?? legAudit(c),
+    whyThisPick: c.whyThisPick ?? whyThisPick(c),
+  }));
 
-  const out = [...candidates];
+  if (!propIdxs.length) return seeded;
+
+  const out = [...seeded];
 
   await mapLimit(propIdxs, CONCURRENCY, async (idx) => {
     const c = out[idx];
     try {
-      const games = await fetchPlayerLastGames(
+      // One fetch per athlete-stat — pull a full season slice (200 games is
+      // a hard upper bound; 162 for MLB / ~82 NBA / ~17 NFL fit easily).
+      const seasonGames = await fetchPlayerLastGames(
         c.sport,
         c.playerId,
         c.statType!,
-        5,
+        200,
       );
       // Derive direction from the selection label — OVER/UNDER is embedded.
       const dir = (c.selectionLabel ?? "").toUpperCase().includes("UNDER")
         ? "LESS"
         : "MORE";
-      const hit = computeRecentHitRate(games, c.lineValue!, dir);
-      if (hit) {
-        out[idx] = {
-          ...c,
-          recentHitRate:        Math.round(hit.rate * 10000) / 10000,
-          recentHitRateSamples: hit.samples,
-        };
-      }
+
+      // Slice the same gamelog into 4 windows. Cheaper than 4 fetches
+      // and keeps last5 / last10 perfectly aligned with season.
+      const last5  = computeRecentHitRate(seasonGames.slice(0, 5),  c.lineValue!, dir);
+      const last10 = computeRecentHitRate(seasonGames.slice(0, 10), c.lineValue!, dir);
+      const season = computeRecentHitRate(seasonGames,              c.lineValue!, dir);
+
+      // vs-opponent slice — match the candidate's opponent abbr against
+      // the gamelog's opponent column. Token-light comparison.
+      const opp = extractOpponentAbbr(c.matchupLabel, c.sport);
+      const vsRows = opp
+        ? seasonGames.filter((g) => g.opponent.toUpperCase() === opp.toUpperCase())
+        : [];
+      const vsOpponent = vsRows.length
+        ? computeRecentHitRate(vsRows, c.lineValue!, dir)
+        : null;
+
+      const round = (n: number | undefined) =>
+        n == null ? null : Math.round(n * 10000) / 10000;
+
+      const enriched: ValueBetCandidate = {
+        ...c,
+        // Legacy alias — kept for computeLegScore + legPassesParlayBuildFilters.
+        recentHitRate:        last5 ? round(last5.rate)! : c.recentHitRate,
+        recentHitRateSamples: last5 ? last5.samples : c.recentHitRateSamples,
+        // Props.Cash-style quartet for UI consumption.
+        hitRates: {
+          last5:  last5  && last5.samples  >= 3 ? round(last5.rate)  : null,
+          last10: last10 && last10.samples >= 5 ? round(last10.rate) : null,
+          season: season && season.samples >= 5 ? round(season.rate) : null,
+          vsOpponent: vsOpponent && vsOpponent.samples >= 1 ? round(vsOpponent.rate) : null,
+          samples: {
+            last5:  last5?.samples  ?? 0,
+            last10: last10?.samples ?? 0,
+            season: season?.samples ?? 0,
+            vsOpponent: vsOpponent?.samples ?? 0,
+          },
+        },
+      };
+      // Re-derive after hitRates land — explanation.ts prefers L10 sample
+      // signal when available, so refresh.
+      enriched.whyThisPick = whyThisPick(enriched);
+      enriched.decision    = legAudit(enriched);
+      out[idx] = enriched;
     } catch {
       // silent — candidate stays unenriched
     }
   });
 
   return out;
+}
+
+/**
+ * Pull the opponent abbr out of "BOS vs LAL" / "BOS @ LAL" style strings.
+ * The candidate's `matchupLabel` is built in propCandidate as
+ * `${team} vs ${opponent}` for player props.
+ */
+function extractOpponentAbbr(matchupLabel: string | undefined, _sport: string): string | null {
+  if (!matchupLabel) return null;
+  const m = matchupLabel.match(/(?:vs|@)\s*([A-Z]{2,4})/i);
+  return m ? m[1].toUpperCase() : null;
 }

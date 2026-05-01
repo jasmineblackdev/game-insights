@@ -155,6 +155,40 @@ export interface ValueBetCandidate {
   eligibleAsSingle?: boolean;
   /** Short reason this leg is NOT single-bet eligible. Undefined when eligible. */
   singleBetReason?: string;
+
+  /**
+   * Props.Cash-style hit-rate quartet — the % of historical games where
+   * the player's stat cleared the prop's line in the picked direction.
+   * Computed in recentPerformanceEnrichment from the same gamelog
+   * fetch that powers `recentHitRate` (the last-5 number stays as a
+   * legacy alias for `hitRates.last5` so existing scoring keeps working).
+   *
+   * Each rate is null when the sample is too thin to be meaningful
+   * (< 3 games for last5, < 5 for last10/season, < 1 for vsOpponent).
+   * Pushes (stat == line) are excluded from the denominator.
+   */
+  hitRates?: {
+    last5: number | null;
+    last10: number | null;
+    season: number | null;
+    vsOpponent: number | null;
+    samples: { last5: number; last10: number; season: number; vsOpponent: number };
+  };
+
+  /**
+   * Single-line "why this pick" explanation. Deterministic — generated
+   * from existing fields (modelProbability, impliedProbability, edge,
+   * matchup notes, recent form, line movement). Format:
+   * "Model: 64% · Book: 56% · +8.0% edge · 36 min projection"
+   */
+  whyThisPick?: string;
+
+  /**
+   * Per-leg decision label surfaced on cards. Pure derivation from
+   * existing scoring + flags via legAudit() in executionAssistant.ts;
+   * never overrides the optimizer's recommendation logic.
+   */
+  decision?: { verdict: "PLACE" | "MODIFY" | "AVOID"; reason: string };
 }
 
 export interface PlayerPropModelRow {

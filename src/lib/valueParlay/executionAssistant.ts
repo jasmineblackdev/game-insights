@@ -502,6 +502,46 @@ export function compareSlipVsPool(args: {
   };
 }
 
+// ── Per-leg audit ─────────────────────────────────────────────────────
+// Single leg → {verdict, reason}. Pure derivation from existing fields.
+// Used by DecisionPill on every prop / parlay-leg card so the same
+// thresholds the slip-level auditSlip uses apply to each leg in
+// isolation. NEVER overrides the optimizer's isRecommended logic —
+// this is a display layer, not a gate.
+
+export function legAudit(c: ValueBetCandidate): {
+  verdict: "PLACE" | "MODIFY" | "AVOID";
+  reason: string;
+} {
+  // Hard blockers first — these never become PLACE / MODIFY no matter
+  // how good the other signals look.
+  if (c.staleLineFlag) return { verdict: "AVOID", reason: "Stale price" };
+  if (c.lateChangeInvalidated) return { verdict: "AVOID", reason: "Late lineup change" };
+  if (c.exclusionReason) return { verdict: "AVOID", reason: c.exclusionReason };
+  if ((c.edge ?? 0) < 0.03) return { verdict: "AVOID", reason: "Edge below floor (3%)" };
+  if (c.confidence === "low") return { verdict: "AVOID", reason: "Low confidence" };
+
+  // Modify zone — playable but flagged.
+  if (Number.isFinite(c.americanOdds) && c.americanOdds >= 250) {
+    return { verdict: "MODIFY", reason: "Longshot odds — pair with stable leg" };
+  }
+  if ((c.volatilityScore ?? 0) >= 70) {
+    return { verdict: "MODIFY", reason: "High variance — pair with stable leg" };
+  }
+  // Hit rate: only flag when the sample is large enough to mean something.
+  const hr = c.hitRates;
+  if (hr?.last10 != null && hr.samples.last10 >= 8 && hr.last10 < 0.40) {
+    const wins = Math.round(hr.last10 * hr.samples.last10);
+    return { verdict: "MODIFY", reason: `L10 only ${wins}/${hr.samples.last10}` };
+  }
+  if ((c.stabilityScore ?? 1) < 0.35) {
+    return { verdict: "MODIFY", reason: "Low-stability prop — manage exposure" };
+  }
+
+  // PLACE — green across the board.
+  return { verdict: "PLACE", reason: "Edge + form + stability all clear" };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────
 
 function americanToDecimal(american: number): number {

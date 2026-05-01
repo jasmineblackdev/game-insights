@@ -37,6 +37,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import { DecisionPill } from "@/components/playerProps/DecisionPill";
+import { TrustRow } from "@/components/playerProps/TrustRow";
+import { HitRateBars } from "@/components/playerProps/HitRateBars";
+import { WhyThisPick } from "@/components/playerProps/WhyThisPick";
 
 interface Props {
   candidates: ValueBetCandidate[];
@@ -223,43 +227,46 @@ function CandidateRow({
   added: boolean;
   onAdd: () => void;
 }) {
-  const edgePct = Number.isFinite(c.edge) ? `${(c.edge * 100).toFixed(1)}%` : "—";
+  const isProp = c.pickType === "player_prop";
   const confTone =
     c.confidence === "high" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
     : c.confidence === "medium" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
     : "bg-muted/40 text-muted-foreground";
   return (
-    <div className="flex items-center gap-2 px-3 py-2 text-xs">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground truncate">{c.selectionLabel}</p>
-        <p className="text-[11px] text-muted-foreground truncate">
-          <span className="uppercase">{c.sport}</span>
-          {" · "}
-          <span className="font-mono tabular-nums">{formatOdds(c.americanOdds)}</span>
-          {" · edge "}
-          <span className="tabular-nums">{edgePct}</span>
-          {isAvoided && c.exclusionReason ? (
+    <div className="px-3 py-2.5 space-y-1.5">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isAvoided ? <DecisionPill candidate={c} size="sm" showReason={false} /> : null}
+            <span className="text-[10px] uppercase font-bold text-muted-foreground">{c.sport}</span>
+            <span className="text-[10px] font-mono tabular-nums text-muted-foreground">{formatOdds(c.americanOdds)}</span>
+            <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase", confTone)}>
+              {c.confidence}
+            </span>
+          </div>
+          <p className="text-sm font-semibold text-foreground">{c.selectionLabel}</p>
+          {!isAvoided ? (
             <>
-              {" · "}
-              <span className="text-red-600 dark:text-red-400">{c.exclusionReason}</span>
+              <TrustRow candidate={c} />
+              {isProp && c.hitRates ? <HitRateBars rates={c.hitRates} compact /> : null}
+              <WhyThisPick candidate={c} />
             </>
+          ) : c.exclusionReason ? (
+            <p className="text-[11px] text-red-600 dark:text-red-400">{c.exclusionReason}</p>
           ) : null}
-        </p>
+        </div>
+        {isAvoided ? null : (
+          <Button
+            size="sm"
+            variant={added ? "secondary" : "outline"}
+            className="h-7 px-2 gap-1 shrink-0"
+            onClick={onAdd}
+            disabled={added}
+          >
+            {added ? "Added" : <><Plus className="w-3 h-3" /> Add</>}
+          </Button>
+        )}
       </div>
-      <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", confTone)}>
-        {c.confidence}
-      </span>
-      {isAvoided ? null : (
-        <Button
-          size="sm"
-          variant={added ? "secondary" : "outline"}
-          className="h-7 px-2 gap-1 shrink-0"
-          onClick={onAdd}
-          disabled={added}
-        >
-          {added ? "Added" : <><Plus className="w-3 h-3" /> Add</>}
-        </Button>
-      )}
     </div>
   );
 }

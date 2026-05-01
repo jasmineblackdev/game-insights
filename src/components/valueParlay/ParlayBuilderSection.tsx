@@ -28,6 +28,8 @@ import { logRecommendedParlay, type SaveStatus } from "@/lib/parlayTracking/reco
 import { AutoProfitBuilderHint } from "@/components/dailyPlan/AutoProfitBuilderHint";
 import { DkExecutionAssistant } from "@/components/valueParlay/DkExecutionAssistant";
 import { CandidatePoolGroups } from "@/components/valueParlay/CandidatePoolGroups";
+import { PropScanner } from "@/components/playerProps/PropScanner";
+import { legAudit } from "@/lib/valueParlay/executionAssistant";
 
 const MODE_LABEL: Record<ParlayBuildMode, string> = {
   safe: "Safe (2 legs · +120 to +320)",
@@ -169,6 +171,10 @@ function LegBreakdown({ result }: { result: SmartParlayResult }) {
   const weakIdx   = result.legs.findIndex((l) => l.id === result.weakestLegId);
   const strong = strongIdx >= 0 ? result.legs[strongIdx] : null;
   const weak   = weakIdx   >= 0 ? result.legs[weakIdx]   : null;
+  // Surface the WHY for the weakest leg — runs the same legAudit
+  // logic the per-card DecisionPill uses, so the reason language is
+  // consistent across the page.
+  const weakReason = weak ? legAudit(weak).reason : null;
   return (
     <div className="space-y-0.5 pt-1 border-t border-border/40">
       {strong && (
@@ -181,6 +187,9 @@ function LegBreakdown({ result }: { result: SmartParlayResult }) {
         <p className="text-[10px] text-amber-700 dark:text-amber-400">
           <span className="font-bold">Weakest:</span>{" "}
           <span className="text-foreground/80">{weak.selectionLabel}</span>
+          {weakReason ? (
+            <span className="text-muted-foreground"> — {weakReason}</span>
+          ) : null}
         </p>
       )}
     </div>
@@ -1031,6 +1040,8 @@ export function ParlayBuilderSection({
             setBuilderLegs={setBuilderLegs}
             disabled={actionsDisabled}
           />
+
+          <PropScanner candidates={candidates} />
 
           <CandidatePoolGroups candidates={candidates} />
 
