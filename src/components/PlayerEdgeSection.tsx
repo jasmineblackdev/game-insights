@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Star, Clock, Copy, ChevronDown, ChevronUp, TrendingUp, ClipboardList, Plus } from "lucide-react";
@@ -16,6 +16,8 @@ import { useBankroll } from "@/context/BankrollContext";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import { buildEnrichedPropCandidates } from "@/lib/valueParlay/buildCandidates";
 import { getDkMapping, isDraftKingsAvailable } from "@/lib/draftkings/dkMarketCatalog";
+import { rankTopProps, rememberTodaysTopPlayers } from "@/lib/playerProps/topPropsRanker";
+import { TopPropsScanDebug } from "@/components/playerProps/TopPropsScanDebug";
 import { PickContributionPanel } from "@/components/PickContributionPanel";
 import {
   pickActionForPrediction,
@@ -565,8 +567,26 @@ export function PlayerEdgeSection() {
     [allItems, sport, stat]
   );
 
-  // Section groupings
-  const topProps  = useMemo(() => allItems.slice(0, showAllTop ? 12 : 6), [allItems, showAllTop]);
+  // Top Props Today: daily-slate-aware ranker. Replaces the legacy
+  // `allItems.slice(0, N)` so the surface is no longer "first N
+  // predictions in the response" — it's "best N props after slate
+  // filtering, scoring, and diversity caps". Persists today's top
+  // player IDs so tomorrow's run can apply the repeat-exposure
+  // penalty.
+  const topPropsRanked = useMemo(() => {
+    const wanted = showAllTop ? 12 : 10;
+    return rankTopProps(allItems, { date: "today", topN: wanted });
+  }, [allItems, showAllTop]);
+  const topProps = useMemo(
+    () => topPropsRanked.ranked.map((r) => r.pred),
+    [topPropsRanked],
+  );
+  // Persist today's top player ids → next-day repeat-exposure penalty.
+  useEffect(() => {
+    if (topProps.length === 0) return;
+    const ymd = new Date().toISOString().slice(0, 10);
+    rememberTodaysTopPlayers(ymd, topProps.map((p) => String(p.player_id)));
+  }, [topProps]);
   const highConf  = useMemo(() => allItems.filter((p) => p.confidence === "HIGH"), [allItems]);
   const highUp    = useMemo(() => allItems.filter((p) => p.risk_tier === "high_upside" || p.risk_tier === "longshot"), [allItems]);
   const volatile  = useMemo(() => allItems.filter((p) => p.consistency_label === "volatile"), [allItems]);
@@ -752,6 +772,7 @@ export function PlayerEdgeSection() {
                 />
               ))}
             </div>
+            <TopPropsScanDebug stats={topPropsRanked.scanStats} />
           </div>
 
           {/* 2. Best by Sport */}
