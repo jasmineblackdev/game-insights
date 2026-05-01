@@ -1,33 +1,69 @@
+/**
+ * DraftKings Execution Assistant
+ *
+ * Hybrid design: quick actions and core analyses run on a deterministic
+ * local engine (executionAssistant.ts) that uses existing optimizer
+ * helpers. Freeform follow-up questions stream through the Lovable AI
+ * Gateway. The local engine means the assistant stays useful even if
+ * the gateway is down or the LOVABLE_API_KEY is missing — quick
+ * actions never silently fail.
+ *
+ * Manual second-device DraftKings workflow only — no sportsbook
+ * automation, no DraftKings API, no auto-place.
+ */
+
 import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { Loader2, MessageSquare, Send, Sparkles, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  Loader2,
+  MessageSquare,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
+import {
+  type AssistantResponse,
+  type AssistantWarning,
+  auditSlip,
+  buildSafeParlay,
+  buildCashoutParlay,
+  compareSlipVsPool,
+  findWeakestLeg,
+  improvePayout,
+  scanWarnings,
+} from "@/lib/valueParlay/executionAssistant";
 
-type Mode = "slip" | "pool" | "both";
-type Msg  = { role: "user" | "assistant"; content: string };
+type ContextMode = "slip" | "pool" | "both";
+
+type Turn =
+  | { kind: "user"; text: string }
+  | { kind: "assistant_md"; text: string } // streamed LLM response
+  | { kind: "assistant_struct"; response: AssistantResponse }; // deterministic engine
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/dk-execution-assistant`;
+const HAS_SUPABASE = Boolean(import.meta.env.VITE_SUPABASE_URL);
 
 function trimLeg(c: ValueBetCandidate) {
-  // Send only the fields the playbook needs — keep the payload small so the
-  // model has room for actual reasoning.
   return {
     selectionLabel:        c.selectionLabel,
     sport:                 c.sport,
     pickType:              c.pickType,
     statType:              c.statType,
-    matchupLabel:          c.matchupLabel,
-    gameTimeLabel:         c.gameTimeLabel,
     americanOdds:          c.americanOdds,
-    modelProbability:      Math.round((c.modelProbability ?? 0) * 1000) / 10, // %
+    modelProbability:      Math.round((c.modelProbability ?? 0) * 1000) / 10,
     impliedProbability:    Math.round((c.impliedProbability ?? 0) * 1000) / 10,
     edgePct:               Math.round((c.edge ?? 0) * 1000) / 10,
     confidence:            c.confidence,
     volatilityScore:       Math.round(c.volatilityScore ?? 0),
-    eligibleAsSingle:      c.eligibleAsSingle ?? null,
-    singleBetReason:       c.singleBetReason ?? null,
     recentHitRate:         c.recentHitRate ?? null,
     recentHitRateSamples:  c.recentHitRateSamples ?? null,
     staleLineFlag:         c.staleLineFlag ?? false,
@@ -43,54 +79,109 @@ interface Props {
 
 export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
   const [open, setOpen]         = useState(false);
-  const [mode, setMode]         = useState<Mode>("both");
+  const [mode, setMode]         = useState<ContextMode>("both");
   const [input, setInput]       = useState("");
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState<string | null>(null);
+  const [turns, setTurns]       = useState<Turn[]>([]);
+  const [llmLoading, setLoading] = useState(false);
+  const [llmError, setLlmError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Top recommended pool, capped — keeps payload reasonable.
+  const { setBuilderLegs, removeValueLeg } = useValueParlay();
+
+  // Recommended pool for engine context — same filter the LLM used.
   const recommendedPool = useMemo(
-    () =>
-      candidatePool
-        .filter((c) => c.isRecommended)
-        .slice(0, 12),
+    () => candidatePool.filter((c) => c.isRecommended).slice(0, 24),
     [candidatePool],
   );
 
-  const buildContext = () => ({
-    mode,
-    slipLegs: mode === "pool" ? [] : slipLegs.map(trimLeg),
-    candidatePool: mode === "slip" ? [] : recommendedPool.map(trimLeg),
-  });
+  // Always-on safety scan — surfaces warnings even before user acts.
+  const liveWarnings = useMemo<AssistantWarning[]>(() => {
+    return scanWarnings({ slipLegs, pool: recommendedPool, context: mode });
+  }, [slipLegs, recommendedPool, mode]);
 
-  const send = async (overrideInput?: string) => {
-    const text = (overrideInput ?? input).trim();
-    if (!text || loading) return;
-    setError(null);
+  const appendTurns = (...t: Turn[]) => setTurns((prev) => [...prev, ...t]);
+
+  // ── Deterministic quick actions ─────────────────────────────────────
+  const runQuickAction = (label: string, response: AssistantResponse) => {
+    appendTurns(
+      { kind: "user", text: label },
+      { kind: "assistant_struct", response },
+    );
+  };
+
+  const onAuditSlip = () => runQuickAction(
+    "Audit my slip — what should I remove?",
+    auditSlip({ slipLegs }),
+  );
+  const onFindWeakest = () => runQuickAction(
+    "Find weakest leg",
+    findWeakestLeg({ slipLegs }),
+  );
+  const onBuildSafe = () => runQuickAction(
+    "Build SAFE 2-leg",
+    buildSafeParlay({ pool: recommendedPool }),
+  );
+  const onBuildCashout = () => runQuickAction(
+    "Build CASH-OUT 3-leg",
+    buildCashoutParlay({ pool: recommendedPool }),
+  );
+  const onImprovePayout = () => runQuickAction(
+    "Improve payout without longshots",
+    improvePayout({ slipLegs, pool: recommendedPool }),
+  );
+  const onCompare = () => runQuickAction(
+    "Compare my slip vs the pool",
+    compareSlipVsPool({ slipLegs, pool: recommendedPool }),
+  );
+
+  // ── Apply structured response actions to the slip ──────────────────
+  const applyBuiltParlay = (legs: ValueBetCandidate[]) => {
+    setBuilderLegs(legs);
+    toast.success(`Applied ${legs.length}-leg parlay to slip.`);
+  };
+  const applyRemoveLeg = (legId: string, label: string) => {
+    removeValueLeg(legId);
+    toast.success(`Removed ${label}.`);
+  };
+
+  // ── Freeform LLM streaming (existing behavior, better errors) ─────
+  const sendFreeform = async () => {
+    const text = input.trim();
+    if (!text || llmLoading) return;
+    setLlmError(null);
     setInput("");
 
-    const userMsg: Msg = { role: "user", content: text };
-    setMessages((prev) => [...prev, userMsg]);
+    appendTurns({ kind: "user", text });
     setLoading(true);
+
+    if (!HAS_SUPABASE) {
+      setLlmError("Assistant unavailable: VITE_SUPABASE_URL is not configured.");
+      setLoading(false);
+      return;
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     let assistantSoFar = "";
-    const upsert = (chunk: string) => {
+    const upsertMd = (chunk: string) => {
       assistantSoFar += chunk;
-      setMessages((prev) => {
+      setTurns((prev) => {
         const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return prev.map((m, i) => (i === prev.length - 1 ? { ...m, content: assistantSoFar } : m));
+        if (last && last.kind === "assistant_md") {
+          return prev.map((t, i) => (i === prev.length - 1 ? { ...t, text: assistantSoFar } as Turn : t));
         }
-        return [...prev, { role: "assistant", content: assistantSoFar }];
+        return [...prev, { kind: "assistant_md", text: assistantSoFar } as Turn];
       });
     };
 
     try {
+      const llmContext = {
+        mode,
+        slipLegs: mode === "pool" ? [] : slipLegs.map(trimLeg),
+        candidatePool: mode === "slip" ? [] : recommendedPool.map(trimLeg),
+      };
+
       const resp = await fetch(CHAT_URL, {
         method: "POST",
         signal: controller.signal,
@@ -99,20 +190,36 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
           Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? ""}`,
         },
         body: JSON.stringify({
-          context: buildContext(),
-          messages: [...messages, userMsg],
+          context: llmContext,
+          messages: turns
+            .filter((t): t is Extract<Turn, { kind: "user" } | { kind: "assistant_md" }> =>
+              t.kind === "user" || t.kind === "assistant_md")
+            .map((t) => ({ role: t.kind === "user" ? "user" : "assistant", content: t.kind === "user" ? t.text : t.text }))
+            .concat([{ role: "user", content: text }]),
         }),
       });
 
       if (!resp.ok || !resp.body) {
-        let msg = "Assistant unavailable.";
+        // Be specific so the user knows what's wrong rather than a generic
+        // "Assistant unavailable.".
+        let detail = "";
         try {
           const j = await resp.json();
-          if (j?.error) msg = j.error;
+          if (j?.error) detail = ` ${j.error}`;
         } catch { /* ignore */ }
-        if (resp.status === 429) msg = "Rate limited — wait a moment and retry.";
-        if (resp.status === 402) msg = "AI credits exhausted. Add funds in Settings → Workspace → Usage.";
-        setError(msg);
+
+        const reason =
+          resp.status === 401 || resp.status === 403 ? "edge function rejected the auth header"
+          : resp.status === 402 ? "Lovable AI gateway credits exhausted"
+          : resp.status === 404 ? "edge function `dk-execution-assistant` not deployed"
+          : resp.status === 429 ? "rate limited — try again in a moment"
+          : resp.status === 500 ? "edge function error (likely missing LOVABLE_API_KEY secret)"
+          : `unexpected status ${resp.status}`;
+
+        setLlmError(
+          `Assistant chat unavailable: ${reason}.${detail} ` +
+          `Quick actions still work — they run locally.`,
+        );
         setLoading(false);
         return;
       }
@@ -137,7 +244,7 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
           try {
             const p = JSON.parse(json);
             const c = p.choices?.[0]?.delta?.content;
-            if (c) upsert(c);
+            if (c) upsertMd(c);
           } catch {
             buf = line + "\n" + buf;
             break;
@@ -147,7 +254,7 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         console.error(e);
-        setError("Connection lost while streaming.");
+        setLlmError("Assistant chat lost the connection. Quick actions still work — they run locally.");
       }
     } finally {
       setLoading(false);
@@ -161,13 +268,7 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
     setLoading(false);
   };
 
-  const quickPrompts = [
-    "Audit my slip — what should I remove?",
-    "Build me a SAFE 2-leg from the pool.",
-    "Build a CASHOUT 3-leg from the pool.",
-    "Should I cash out now?",
-  ];
-
+  // ── Render ─────────────────────────────────────────────────────────
   if (!open) {
     return (
       <div className="rounded-xl border border-dashed border-primary/30 bg-primary/[0.04] p-4 sm:p-5">
@@ -178,8 +279,8 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
               DraftKings Execution Assistant
             </p>
             <p className="text-[11px] text-muted-foreground">
-              Converts your GameLens signals into clear "place / remove / do not bet"
-              decisions before you tap Submit on DraftKings.
+              Audit your slip · build SAFE / CASH-OUT alternatives · find the weakest leg.
+              Manual second-device workflow.
             </p>
           </div>
           <Button size="sm" onClick={() => setOpen(true)} className="gap-1 shrink-0">
@@ -203,19 +304,20 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
         </Button>
       </div>
 
-      {/* Context source toggle */}
+      {/* Context mode pills */}
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className="text-muted-foreground">Analyze:</span>
-        {(["slip", "pool", "both"] as Mode[]).map((m) => (
+        {(["slip", "pool", "both"] as ContextMode[]).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => setMode(m)}
-            className={`px-2 py-0.5 rounded-full border transition-colors ${
+            className={cn(
+              "px-2 py-0.5 rounded-full border transition-colors",
               mode === m
                 ? "bg-primary text-primary-foreground border-primary"
-                : "bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted"
-            }`}
+                : "bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted",
+            )}
           >
             {m === "slip" ? "My slip" : m === "pool" ? "Today's pool" : "Both"}
           </button>
@@ -226,52 +328,43 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
         </span>
       </div>
 
-      {/* Quick prompts */}
-      {messages.length === 0 ? (
-        <div className="flex flex-wrap gap-1.5">
-          {quickPrompts.map((q) => (
-            <button
-              key={q}
-              type="button"
-              onClick={() => send(q)}
-              disabled={loading}
-              className="text-[11px] px-2 py-1 rounded-full bg-muted/60 hover:bg-muted text-foreground/80 border border-border/60 disabled:opacity-50"
-            >
-              {q}
-            </button>
+      {/* Live safety warnings */}
+      {liveWarnings.length ? (
+        <div className="space-y-1">
+          {liveWarnings.map((w, i) => (
+            <WarningRow key={i} warning={w} />
           ))}
         </div>
       ) : null}
 
+      {/* Quick actions — always work; deterministic engine */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+        <QuickButton onClick={onAuditSlip} disabled={slipLegs.length === 0}>Audit my slip</QuickButton>
+        <QuickButton onClick={onFindWeakest} disabled={slipLegs.length === 0}>Find weakest leg</QuickButton>
+        <QuickButton onClick={onCompare} disabled={slipLegs.length === 0 || recommendedPool.length === 0}>Compare slip vs pool</QuickButton>
+        <QuickButton onClick={onBuildSafe} disabled={recommendedPool.length === 0}>Build SAFE 2-leg</QuickButton>
+        <QuickButton onClick={onBuildCashout} disabled={recommendedPool.length === 0}>Build CASH-OUT 3-leg</QuickButton>
+        <QuickButton onClick={onImprovePayout} disabled={recommendedPool.length === 0}>Improve payout</QuickButton>
+      </div>
+
       {/* Transcript */}
-      <div className="max-h-96 overflow-y-auto space-y-3 rounded-lg bg-muted/20 p-3 text-sm">
-        {messages.length === 0 ? (
+      <div className="max-h-[28rem] overflow-y-auto space-y-3 rounded-lg bg-muted/20 p-3 text-sm">
+        {turns.length === 0 ? (
           <p className="text-[11px] text-muted-foreground italic">
-            Ask anything execution-related, or tap a quick prompt above. The assistant
-            sees your current slip and today's recommended pool.
+            Tap a quick action above for an instant decision, or type a freeform question.
+            Quick actions run locally and don't depend on the LLM gateway.
           </p>
         ) : (
-          messages.map((m, i) => (
-            <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-              <div
-                className={`max-w-[90%] rounded-lg px-3 py-2 text-sm ${
-                  m.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-background border border-border/60 text-foreground"
-                }`}
-              >
-                {m.role === "assistant" ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_ul]:my-1 [&_p]:my-1">
-                    <ReactMarkdown>{m.content || "…"}</ReactMarkdown>
-                  </div>
-                ) : (
-                  <p className="whitespace-pre-wrap">{m.content}</p>
-                )}
-              </div>
-            </div>
+          turns.map((t, i) => (
+            <TurnView
+              key={i}
+              turn={t}
+              onApplyParlay={applyBuiltParlay}
+              onRemoveLeg={applyRemoveLeg}
+            />
           ))
         )}
-        {loading && messages[messages.length - 1]?.role === "user" ? (
+        {llmLoading && turns[turns.length - 1]?.kind === "user" ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
             Thinking…
@@ -279,8 +372,11 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
         ) : null}
       </div>
 
-      {error ? (
-        <p className="text-[11px] text-destructive">{error}</p>
+      {llmError ? (
+        <p className="text-[11px] text-destructive flex items-start gap-1.5">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>{llmError}</span>
+        </p>
       ) : null}
 
       {/* Composer */}
@@ -291,23 +387,221 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send();
+              sendFreeform();
             }
           }}
-          placeholder="e.g. Should I drop the Lakers leg?  ·  Build a SAFE 2-leg."
+          placeholder="Ask anything — e.g. Should I drop the Lakers leg?"
           rows={2}
           className="text-sm resize-none"
-          disabled={loading}
+          disabled={llmLoading}
         />
-        {loading ? (
+        {llmLoading ? (
           <Button size="sm" variant="outline" onClick={cancel}>Stop</Button>
         ) : (
-          <Button size="sm" onClick={() => send()} disabled={!input.trim()} className="gap-1">
+          <Button size="sm" onClick={sendFreeform} disabled={!input.trim()} className="gap-1">
             <Send className="w-3.5 h-3.5" />
             Send
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Sub-components ────────────────────────────────────────────────────
+
+function QuickButton({
+  children,
+  onClick,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "text-[11px] px-2 py-1.5 rounded-md border text-left transition-colors",
+        disabled
+          ? "border-border/40 bg-muted/20 text-muted-foreground/50 cursor-not-allowed"
+          : "border-border/60 bg-muted/40 text-foreground hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function WarningRow({ warning }: { warning: AssistantWarning }) {
+  return (
+    <div className={cn(
+      "rounded-md border px-2.5 py-1.5 text-[11px] flex items-start gap-1.5",
+      warning.level === "block"
+        ? "border-red-500/40 bg-red-500/[0.06] text-red-700 dark:text-red-400"
+        : "border-amber-500/40 bg-amber-500/[0.06] text-amber-700 dark:text-amber-400",
+    )}>
+      <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+      <span>{warning.message}</span>
+    </div>
+  );
+}
+
+function TurnView({
+  turn,
+  onApplyParlay,
+  onRemoveLeg,
+}: {
+  turn: Turn;
+  onApplyParlay: (legs: ValueBetCandidate[]) => void;
+  onRemoveLeg: (legId: string, label: string) => void;
+}) {
+  if (turn.kind === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[90%] rounded-lg px-3 py-2 text-sm bg-primary text-primary-foreground">
+          <p className="whitespace-pre-wrap">{turn.text}</p>
+        </div>
+      </div>
+    );
+  }
+  if (turn.kind === "assistant_md") {
+    return (
+      <div className="flex justify-start">
+        <div className="max-w-[90%] rounded-lg px-3 py-2 text-sm bg-background border border-border/60 text-foreground">
+          <div className="prose prose-sm dark:prose-invert max-w-none [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_ul]:my-1 [&_p]:my-1">
+            <ReactMarkdown>{turn.text || "…"}</ReactMarkdown>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Structured response card
+  return <StructuredResponseCard
+    response={turn.response}
+    onApplyParlay={onApplyParlay}
+    onRemoveLeg={onRemoveLeg}
+  />;
+}
+
+function StructuredResponseCard({
+  response,
+  onApplyParlay,
+  onRemoveLeg,
+}: {
+  response: AssistantResponse;
+  onApplyParlay: (legs: ValueBetCandidate[]) => void;
+  onRemoveLeg: (legId: string, label: string) => void;
+}) {
+  const verdictTone =
+    response.verdict === "PLACE" || response.verdict === "BUILD" ? "border-emerald-500/40 bg-emerald-500/[0.06]"
+    : response.verdict === "MODIFY" ? "border-amber-500/40 bg-amber-500/[0.06]"
+    : response.verdict === "AVOID" ? "border-red-500/40 bg-red-500/[0.06]"
+    : "border-border/60 bg-muted/30";
+  const verdictText =
+    response.verdict === "PLACE" || response.verdict === "BUILD" ? "text-emerald-700 dark:text-emerald-400"
+    : response.verdict === "MODIFY" ? "text-amber-700 dark:text-amber-400"
+    : response.verdict === "AVOID" ? "text-red-700 dark:text-red-400"
+    : "text-muted-foreground";
+  const riskTone =
+    response.risk === "Low" ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+    : response.risk === "Medium" ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+    : "bg-red-500/15 text-red-700 dark:text-red-400";
+
+  return (
+    <div className={cn("rounded-lg border px-3 py-3 space-y-2", verdictTone)}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide", verdictText, "bg-background/60 border border-current/30")}>
+          {response.verdict.replace("_", " ")}
+        </span>
+        <span className="text-sm font-bold text-foreground">{response.title}</span>
+        <span className={cn("ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full uppercase", riskTone)}>
+          Risk {response.risk}
+        </span>
+      </div>
+      <p className="text-xs text-foreground">{response.summary}</p>
+
+      {response.weakestLeg ? (
+        <div className="text-[11px] text-muted-foreground">
+          <span className="font-semibold text-foreground">Weakest leg: </span>
+          {response.weakestLeg.label} — {response.weakestLeg.reason}
+        </div>
+      ) : null}
+
+      {response.builtParlay && response.builtParlay.legs.length ? (
+        <div className="rounded-md bg-background/60 border border-border/40 p-2 space-y-1">
+          <p className="text-[11px] font-semibold text-foreground">
+            {response.builtParlay.legs.length}-leg build
+          </p>
+          <ul className="text-[11px] text-muted-foreground space-y-0.5">
+            {response.builtParlay.legs.map((l) => (
+              <li key={l.id} className="flex items-center gap-1.5">
+                <Check className="w-3 h-3 text-emerald-600" />
+                <span className="text-foreground">{l.selectionLabel}</span>
+                <span className="tabular-nums">{l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds}</span>
+              </li>
+            ))}
+          </ul>
+          <Button
+            size="sm"
+            variant="default"
+            className="w-full h-7 text-[11px] mt-1"
+            onClick={() => response.builtParlay && onApplyParlay(response.builtParlay.legs)}
+          >
+            Apply to slip
+          </Button>
+        </div>
+      ) : null}
+
+      {response.actions.length ? (
+        <div className="space-y-1">
+          {response.actions.map((a, i) => (
+            <ActionRow
+              key={i}
+              action={a}
+              onRemove={response.weakestLeg && a.kind === "remove"
+                ? () => response.weakestLeg && onRemoveLeg(response.weakestLeg.legId, response.weakestLeg.label)
+                : undefined}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {response.warnings.length ? (
+        <div className="space-y-1 pt-1 border-t border-current/20">
+          {response.warnings.map((w, i) => (
+            <WarningRow key={i} warning={w} />
+          ))}
+        </div>
+      ) : null}
+
+      <div className="rounded-md bg-background/80 border border-border/40 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-0.5">DraftKings instruction</p>
+        <p className="text-[12px] text-foreground">{response.draftKingsInstruction}</p>
+      </div>
+    </div>
+  );
+}
+
+function ActionRow({
+  action,
+  onRemove,
+}: {
+  action: { kind: string; text: string; legId?: string };
+  onRemove?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 text-[11px] text-foreground">
+      <ChevronRight className="w-3 h-3 text-muted-foreground shrink-0" />
+      <span className="flex-1 min-w-0">{action.text}</span>
+      {onRemove ? (
+        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={onRemove}>
+          Remove
+        </Button>
+      ) : null}
     </div>
   );
 }
