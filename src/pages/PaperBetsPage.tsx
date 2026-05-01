@@ -10,13 +10,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
 import { cn } from "@/lib/utils";
 import { PaperBetEntryForm } from "@/components/paperBets/PaperBetEntryForm";
 import { PaperBetCard } from "@/components/paperBets/PaperBetCard";
-import { PaperBankrollSummary } from "@/components/paperBets/PaperBankrollSummary";
+import { PaperHeaderTiles } from "@/components/paperBets/PaperHeaderTiles";
 import {
   getPaperBankroll,
   listPaperBets,
@@ -113,31 +114,7 @@ export default function PaperBetsPage() {
       </div>
 
       {migrationMissing ? (
-        <div className="rounded-lg border border-red-500/50 bg-red-500/[0.06] p-4 text-sm space-y-2">
-          <div className="flex items-start gap-2 text-red-700 dark:text-red-400 font-bold">
-            <AlertTriangle className="w-4 h-4 mt-0.5" />
-            <span>Paper Bets tables not deployed to Supabase.</span>
-          </div>
-          <p className="text-foreground">
-            The page can't read or write paper bets because <code className="px-1 rounded bg-muted">paper_bets</code> /{" "}
-            <code className="px-1 rounded bg-muted">paper_bankroll</code> don't exist in the project this deployment is pointing at.
-          </p>
-          <p className="text-muted-foreground">
-            Apply the migration:
-          </p>
-          <pre className="text-[11px] bg-muted/40 rounded px-2 py-1.5 overflow-x-auto">
-supabase/migrations/20260509000000_paper_bets.sql
-          </pre>
-          <p className="text-muted-foreground">
-            Either via the Supabase CLI (<code className="text-foreground">supabase db push</code>) or by pasting the SQL into the
-            Supabase dashboard → SQL editor → Run. Then refresh this page.
-          </p>
-          {otherError ? (
-            <p className="text-[11px] text-muted-foreground">
-              Raw error: <span className="text-foreground">{otherError.message}</span>
-            </p>
-          ) : null}
-        </div>
+        <PaperMigrationMissingCard rawError={otherError} />
       ) : otherError ? (
         <div className="rounded-lg border border-amber-500/50 bg-amber-500/[0.06] p-4 text-sm space-y-2">
           <div className="flex items-start gap-2 text-amber-700 dark:text-amber-400 font-bold">
@@ -146,9 +123,11 @@ supabase/migrations/20260509000000_paper_bets.sql
           </div>
           <p className="text-foreground">{otherError.message}</p>
         </div>
-      ) : null}
+      ) : (
+        <PaperReadyCard />
+      )}
 
-      <PaperBankrollSummary
+      <PaperHeaderTiles
         bankroll={bankrollQuery.data ?? null}
         bets={bets}
         onChanged={refresh}
@@ -196,6 +175,76 @@ supabase/migrations/20260509000000_paper_bets.sql
 
       {tab === "perf" ? (
         <PerformanceTab bets={settled} />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Green confirmation tile shown when the migration IS applied. Replaces
+ * the old red error banner that showed even on healthy installs and made
+ * the page look broken on first visit.
+ */
+function PaperReadyCard() {
+  return (
+    <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/[0.05] p-3 sm:p-4 flex items-start gap-3">
+      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-foreground">Paper mode is ready</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Track bets, test strategies, and measure performance — fake money only, no DraftKings connection.
+        </p>
+      </div>
+      <Disclosure variant="chevron" title={<span className="text-xs font-semibold">How it works</span>}>
+        <ul className="text-[11px] text-muted-foreground leading-relaxed list-disc pl-4 space-y-1 mt-1">
+          <li>Type a DraftKings selection verbatim — the normalizer extracts market / stat / line.</li>
+          <li>Add multiple legs to build a parlay; SGP is auto-detected when legs share a game id.</li>
+          <li>Auto-resolve sweeps the Open tab against ESPN final scores when you visit it.</li>
+          <li>Live bets capture a game-state snapshot at entry and resolve through the same pipeline.</li>
+          <li>Performance breaks down by sport / market / odds band, with Live and Pregame tracked separately.</li>
+        </ul>
+      </Disclosure>
+    </div>
+  );
+}
+
+/**
+ * Helpful empty state when the Supabase migration hasn't been applied
+ * yet. Clear primary action ("Run migration") with the exact filename
+ * to copy, plus one-line CLI fallback.
+ */
+function PaperMigrationMissingCard({ rawError }: { rawError?: Error }) {
+  return (
+    <div className="rounded-lg border border-amber-500/50 bg-amber-500/[0.05] p-4 space-y-3">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-foreground">One-time setup needed</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Apply the Paper Bets migration to your Supabase project — then refresh this page.
+          </p>
+        </div>
+      </div>
+      <div className="rounded-md bg-muted/40 px-3 py-2 space-y-1.5">
+        <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Migration file</p>
+        <pre className="text-[11px] overflow-x-auto text-foreground">
+supabase/migrations/20260509000000_paper_bets.sql
+        </pre>
+      </div>
+      <div className="text-[11px] text-muted-foreground space-y-1">
+        <p>
+          Run via CLI: <code className="text-foreground bg-muted/40 px-1 rounded">supabase db push</code>{" "}
+          — or paste the file into Supabase dashboard → SQL editor → Run.
+        </p>
+        <p>
+          The 20260510 file (<code className="text-foreground bg-muted/40 px-1 rounded">paper_bets_live_timing.sql</code>)
+          adds live-tracking columns; apply it too if you want the Live vs Pregame split.
+        </p>
+      </div>
+      {rawError ? (
+        <p className="text-[10px] text-muted-foreground">
+          Raw error: <span className="text-foreground">{rawError.message}</span>
+        </p>
       ) : null}
     </div>
   );

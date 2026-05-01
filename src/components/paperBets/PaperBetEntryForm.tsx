@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { normalizeDraftKingsLabel, americanToPayoutMultiplier, combineAmericanOdds } from "@/lib/paperBets/normalizer";
 import { placePaperBet } from "@/lib/paperBets/store";
+import { SlipSummaryCard } from "@/components/paperBets/SlipSummaryCard";
 import type { PaperLeg, PaperLiveState } from "@/lib/paperBets/types";
 
 const SPORTS = ["MLB", "NBA", "WNBA", "NFL", "BOXING", "MMA"] as const;
@@ -474,29 +475,23 @@ export function PaperBetEntryForm({ onPlaced }: Props) {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        <div>
-          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Paper stake ($)</Label>
-          <Input
-            type="text"
-            inputMode="decimal"
-            value={stake}
-            onChange={(e) => setStake(e.target.value)}
-            className="h-9 text-sm"
-          />
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Combined odds</Label>
-          <div className="h-9 flex items-center px-2 text-sm font-mono tabular-nums text-foreground rounded-md border border-border/40 bg-muted/30">
-            {legs.length ? (combinedOdds > 0 ? `+${combinedOdds}` : combinedOdds) : "—"}
-          </div>
-        </div>
-        <div>
-          <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Potential payout</Label>
-          <div className="h-9 flex items-center px-2 text-sm font-mono tabular-nums text-foreground rounded-md border border-border/40 bg-muted/30">
-            {potentialPayout > 0 ? `$${potentialPayout.toFixed(2)}` : "—"}
-          </div>
-        </div>
+      <SlipSummaryCard
+        legs={legs}
+        combinedOddsAmerican={combinedOdds}
+        potentialPayout={potentialPayout}
+        payoutMultiplier={decimalMult}
+        onClearAll={() => setLegs([])}
+      />
+
+      <div>
+        <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Paper stake ($)</Label>
+        <Input
+          type="text"
+          inputMode="decimal"
+          value={stake}
+          onChange={(e) => setStake(e.target.value)}
+          className="h-9 text-sm max-w-[180px]"
+        />
       </div>
 
       <div>
