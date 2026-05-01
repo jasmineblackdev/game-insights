@@ -113,6 +113,7 @@ export async function enrichCandidatesWithRecentPerformance(
 
       // Slice the same gamelog into 4 windows. Cheaper than 4 fetches
       // and keeps last5 / last10 perfectly aligned with season.
+      const last3  = computeRecentHitRate(seasonGames.slice(0, 3),  c.lineValue!, dir);
       const last5  = computeRecentHitRate(seasonGames.slice(0, 5),  c.lineValue!, dir);
       const last10 = computeRecentHitRate(seasonGames.slice(0, 10), c.lineValue!, dir);
       const season = computeRecentHitRate(seasonGames,              c.lineValue!, dir);
@@ -130,23 +131,73 @@ export async function enrichCandidatesWithRecentPerformance(
       const round = (n: number | undefined) =>
         n == null ? null : Math.round(n * 10000) / 10000;
 
+      // Per-game timeline (chronological oldest → newest) for the
+      // Outlier-style last-10 chart. Push-flagged with hit=null so the
+      // chart can render a neutral cell.
+      const last10ChronoSlice = seasonGames.slice(0, 10).slice().reverse();
+      const gameByGame = last10ChronoSlice.map((g) => {
+        if (!Number.isFinite(g.value)) {
+          return { date: g.date, opponent: g.opponent, value: g.value, hit: null };
+        }
+        if (g.value === c.lineValue!) {
+          return { date: g.date, opponent: g.opponent, value: g.value, hit: null };
+        }
+        const isOver = g.value > c.lineValue!;
+        const hit = (dir === "MORE" && isOver) || (dir === "LESS" && !isOver);
+        return { date: g.date, opponent: g.opponent, value: g.value, hit };
+      });
+
+      // Consistency: bucketed last10. <50% low / 50-70% medium / >70% high.
+      const last10Rate = last10 && last10.samples >= 5 ? last10.rate : null;
+      const consistency: "high" | "medium" | "low" | null =
+        last10Rate == null ? null
+        : last10Rate > 0.70 ? "high"
+        : last10Rate >= 0.50 ? "medium"
+        : "low";
+
+      // Trend: last3 vs last10. ≥10pp difference flips the label.
+      const last3Rate = last3 && last3.samples >= 2 ? last3.rate : null;
+      const trend: "up" | "down" | "flat" | null =
+        last3Rate == null || last10Rate == null ? null
+        : last3Rate >= last10Rate + 0.10 ? "up"
+        : last3Rate <= last10Rate - 0.10 ? "down"
+        : "flat";
+
+      // Matchup insight — Outlier-style "Opponent allows X" line.
+      // Derived from vs-opponent hit rate when sample is meaningful;
+      // falls back to NFL injury opportunity adjustment when relevant.
+      // Future: pipe in nba/mlb/nfl opponentMultiplier when those are
+      // surfaced on the candidate.
+      const matchupNote = deriveMatchupNote({
+        vsOpponentRate: vsOpponent?.rate ?? null,
+        vsOpponentSamples: vsOpponent?.samples ?? 0,
+        opponentAbbr: opp,
+        injuryImpactAdj: c.injuryImpactAdj,
+      });
+
       const enriched: ValueBetCandidate = {
         ...c,
         // Legacy alias — kept for computeLegScore + legPassesParlayBuildFilters.
         recentHitRate:        last5 ? round(last5.rate)! : c.recentHitRate,
         recentHitRateSamples: last5 ? last5.samples : c.recentHitRateSamples,
-        // Props.Cash-style quartet for UI consumption.
+        matchupNote: matchupNote || c.matchupNote,
+        // Props.Cash + Outlier visualization payload.
         hitRates: {
+          last3:  last3  && last3.samples  >= 2 ? round(last3.rate)  : null,
           last5:  last5  && last5.samples  >= 3 ? round(last5.rate)  : null,
           last10: last10 && last10.samples >= 5 ? round(last10.rate) : null,
           season: season && season.samples >= 5 ? round(season.rate) : null,
           vsOpponent: vsOpponent && vsOpponent.samples >= 1 ? round(vsOpponent.rate) : null,
           samples: {
+            last3:  last3?.samples  ?? 0,
             last5:  last5?.samples  ?? 0,
             last10: last10?.samples ?? 0,
             season: season?.samples ?? 0,
             vsOpponent: vsOpponent?.samples ?? 0,
           },
+          gameByGame,
+          consistency,
+          trend,
         },
       };
       // Re-derive after hitRates land — explanation.ts prefers L10 sample
@@ -171,4 +222,35 @@ function extractOpponentAbbr(matchupLabel: string | undefined, _sport: string): 
   if (!matchupLabel) return null;
   const m = matchupLabel.match(/(?:vs|@)\s*([A-Z]{2,4})/i);
   return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Compose an Outlier-style matchup insight line from the signals
+ * already on the candidate. Honest about sample size — small
+ * vs-opponent windows surface as "small sample" rather than a
+ * misleading hit rate.
+ */
+function deriveMatchupNote(args: {
+  vsOpponentRate: number | null;
+  vsOpponentSamples: number;
+  opponentAbbr: string | null;
+  injuryImpactAdj: number | undefined;
+}): string {
+  const opp = args.opponentAbbr ?? "OPP";
+  if (args.injuryImpactAdj != null && args.injuryImpactAdj >= 0.04) {
+    return `Role boost vs ${opp} — teammate injury elevates volume.`;
+  }
+  if (args.injuryImpactAdj != null && args.injuryImpactAdj <= -0.04) {
+    return `Injury risk vs ${opp} — pressure / coverage degraded.`;
+  }
+  if (args.vsOpponentRate != null && args.vsOpponentSamples >= 3) {
+    const pct = Math.round(args.vsOpponentRate * 100);
+    if (pct >= 70) return `vs ${opp} historically: ${pct}% hit rate (${args.vsOpponentSamples} games) — favourable matchup.`;
+    if (pct <= 30) return `vs ${opp} historically: ${pct}% hit rate (${args.vsOpponentSamples} games) — opponent has been tough.`;
+    return `vs ${opp} historically: ${pct}% hit rate (${args.vsOpponentSamples} games) — neutral matchup.`;
+  }
+  if (args.vsOpponentSamples > 0 && args.vsOpponentSamples < 3) {
+    return `vs ${opp}: small historical sample.`;
+  }
+  return "";
 }

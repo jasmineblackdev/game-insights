@@ -32,6 +32,9 @@ import { TrustRow } from "./TrustRow";
 import { HitRateBars } from "./HitRateBars";
 import { WhyThisPick } from "./WhyThisPick";
 import { MarketSignals } from "./MarketSignals";
+import { Last10Chart } from "./Last10Chart";
+import { ConsistencyTrendStrip } from "./ConsistencyTrendStrip";
+import { MatchupInsight } from "./MatchupInsight";
 
 interface Props {
   candidate: ValueBetCandidate;
@@ -94,18 +97,33 @@ export function BetCard({ candidate: c, defaultExpanded = false, hideAdd = false
       {/* Trust row — always visible */}
       <TrustRow candidate={c} />
 
+      {/* Outlier-style: last 10 chart + consistency/trend always visible.
+          The chart IS the visual story — keep it above the fold. */}
+      {c.hitRates?.gameByGame?.length ? (
+        <div className="space-y-1">
+          <Last10Chart candidate={c} compact />
+          <ConsistencyTrendStrip candidate={c} />
+        </div>
+      ) : null}
+
+      {/* Matchup insight — single line, always visible when present */}
+      <MatchupInsight candidate={c} />
+
       {/* Why this pick — always visible */}
       <WhyThisPick candidate={c} />
 
-      {/* Progressive disclosure */}
+      {/* Progressive disclosure: deep stats + DK action */}
       {expanded ? (
         <div className="space-y-2 pt-2 border-t border-border/40">
           {c.hitRates ? (
             <div>
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold mb-1">
-                Trend context
+                Hit rate windows
               </p>
               <HitRateBars rates={c.hitRates} />
+              <div className="mt-2">
+                <Last10Chart candidate={c} />
+              </div>
             </div>
           ) : null}
 

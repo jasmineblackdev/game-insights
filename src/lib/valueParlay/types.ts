@@ -168,12 +168,45 @@ export interface ValueBetCandidate {
    * Pushes (stat == line) are excluded from the denominator.
    */
   hitRates?: {
+    last3: number | null;
     last5: number | null;
     last10: number | null;
     season: number | null;
     vsOpponent: number | null;
-    samples: { last5: number; last10: number; season: number; vsOpponent: number };
+    samples: { last3: number; last5: number; last10: number; season: number; vsOpponent: number };
+    /**
+     * Outlier-style per-game timeline for the last 10 games. Each
+     * entry is one game in chronological order (oldest → newest)
+     * with the raw stat value, the line at the time, whether the
+     * leg's direction was hit, the date, and the opponent abbr.
+     * `hit = null` for pushes (value === line).
+     */
+    gameByGame?: {
+      date: string;
+      opponent: string;
+      value: number;
+      hit: boolean | null;
+    }[];
+    /**
+     * Derived: hitRateLast10 → "high" (>70%) / "medium" (50-70%) /
+     * "low" (<50%). Null when last10 is null.
+     */
+    consistency: "high" | "medium" | "low" | null;
+    /**
+     * Derived: last3 vs last10. "up" when last3 ≥ last10 + 0.10,
+     * "down" when last3 ≤ last10 − 0.10, "flat" otherwise. Null when
+     * either window is null.
+     */
+    trend: "up" | "down" | "flat" | null;
   };
+
+  /**
+   * Outlier-style matchup insight — single human-readable line.
+   * "Opponent allows +12% above avg vs this stat." Sourced from the
+   * opponent-context multipliers already computed at projection
+   * time. Empty string when no signal.
+   */
+  matchupNote?: string;
 
   /**
    * Single-line "why this pick" explanation. Deterministic — generated

@@ -29,6 +29,9 @@ import { TrustRow } from "./TrustRow";
 import { HitRateBars } from "./HitRateBars";
 import { WhyThisPick } from "./WhyThisPick";
 import { MarketSignals } from "./MarketSignals";
+import { Last10Chart } from "./Last10Chart";
+import { ConsistencyTrendStrip } from "./ConsistencyTrendStrip";
+import { MatchupInsight } from "./MatchupInsight";
 
 interface Props {
   /** Pool to scan — typically the recommended candidate pool. */
@@ -136,9 +139,14 @@ function ScannerRow({ candidate }: { candidate: ValueBetCandidate }) {
       {expanded ? (
         <div className="px-3 pb-3 pt-1 space-y-2 bg-background/40 border-t border-border/30">
           <TrustRow candidate={candidate} />
+          {candidate.hitRates?.gameByGame?.length ? (
+            <Last10Chart candidate={candidate} compact />
+          ) : null}
+          <ConsistencyTrendStrip candidate={candidate} />
           {candidate.hitRates ? (
             <HitRateBars rates={candidate.hitRates} compact />
           ) : null}
+          <MatchupInsight candidate={candidate} />
           <MarketSignals candidate={candidate} compact />
           <WhyThisPick candidate={candidate} />
           <div className="flex items-center justify-end pt-1">

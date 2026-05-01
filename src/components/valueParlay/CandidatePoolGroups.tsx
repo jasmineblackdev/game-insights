@@ -42,6 +42,9 @@ import { TrustRow } from "@/components/playerProps/TrustRow";
 import { HitRateBars } from "@/components/playerProps/HitRateBars";
 import { WhyThisPick } from "@/components/playerProps/WhyThisPick";
 import { MarketSignals } from "@/components/playerProps/MarketSignals";
+import { Last10Chart } from "@/components/playerProps/Last10Chart";
+import { ConsistencyTrendStrip } from "@/components/playerProps/ConsistencyTrendStrip";
+import { MatchupInsight } from "@/components/playerProps/MatchupInsight";
 
 interface Props {
   candidates: ValueBetCandidate[];
@@ -249,7 +252,12 @@ function CandidateRow({
           {!isAvoided ? (
             <>
               <TrustRow candidate={c} />
+              {isProp && c.hitRates?.gameByGame?.length ? (
+                <Last10Chart candidate={c} compact />
+              ) : null}
+              {isProp ? <ConsistencyTrendStrip candidate={c} /> : null}
               {isProp && c.hitRates ? <HitRateBars rates={c.hitRates} compact /> : null}
+              <MatchupInsight candidate={c} />
               <MarketSignals candidate={c} compact />
               <WhyThisPick candidate={c} />
             </>
