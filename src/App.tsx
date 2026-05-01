@@ -27,6 +27,7 @@ import DailyPlanPage from "./pages/DailyPlanPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
 import PicksPage from "./pages/PicksPage.tsx";
 import RecommendedParlaysPage from "./pages/RecommendedParlaysPage.tsx";
+import PaperBetsPage from "./pages/PaperBetsPage.tsx";
 import MLPerformancePage from "./pages/MLPerformancePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -113,6 +114,7 @@ const App = () => (
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
                     <Route path="/picks" element={<PicksPage />} />
                     <Route path="/parlays" element={<RecommendedParlaysPage />} />
+                    <Route path="/paper" element={<PaperBetsPage />} />
                     <Route path="/ml-performance" element={<MLPerformancePage />} />
                     {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                     <Route path="*" element={<NotFound />} />
