@@ -192,17 +192,60 @@ export async function getPaperBankroll(): Promise<PaperBankroll> {
 /**
  * Reset the paper bankroll. Useful for first-visit onboarding (set
  * starting balance) and explicit user-driven resets in settings.
+ *
+ * #166: before the reset writes, snapshot the current row into
+ * paper_bankroll_archives so the user keeps a record of how the
+ * prior session performed. The snapshot is non-fatal — if the
+ * archive insert fails (e.g. the migration hasn't been applied
+ * yet) the reset still proceeds. The user's intent to reset
+ * outweighs the loss of one history row.
  */
-export async function setPaperBankrollStart(amount: number): Promise<PaperBankroll> {
+export async function setPaperBankrollStart(
+  amount: number,
+  options: { label?: string | null } = {},
+): Promise<PaperBankroll> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("Supabase not configured.");
   }
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error("Starting balance must be positive.");
   }
-  // Ensure a row exists (no-op if one already exists) so the UPDATE
-  // below has a target.
-  await getPaperBankroll();
+  // Read the soon-to-be-replaced row first. Doubles as the
+  // "ensure row exists" guard the original implementation had.
+  const prior = await getPaperBankroll();
+
+  // Archive the prior session before clobbering it. Skipped only
+  // when the row is in its initial untouched state — no point
+  // archiving an empty session the user just minted.
+  const priorTouched =
+    prior.betsPlaced > 0 ||
+    Math.abs(prior.totalPnl) > 0.001 ||
+    prior.currentBankroll !== prior.startingBankroll;
+  if (priorTouched) {
+    try {
+      await supabase.from("paper_bankroll_archives").insert({
+        starting_bankroll:  prior.startingBankroll,
+        ending_bankroll:    prior.currentBankroll,
+        total_pnl:          prior.totalPnl,
+        open_risk_at_close: prior.openRisk,
+        bets_placed:        prior.betsPlaced,
+        bets_won:           prior.betsWon,
+        bets_lost:          prior.betsLost,
+        bets_push:          prior.betsPush,
+        // updated_at on paper_bankroll moves on every bet
+        // settle, so it's not the session-start time. Best
+        // effort: leave session_started_at null when we don't
+        // have a reliable signal. Future enhancement could read
+        // from the prior archive row's archived_at.
+        session_started_at: null,
+        label:              options.label?.trim() || null,
+        reason:             "user_reset",
+      });
+    } catch (e) {
+      console.warn("Bankroll archive insert failed (reset proceeding):", e);
+    }
+  }
+
   const { data, error } = await supabase
     .from("paper_bankroll")
     .update({
@@ -221,6 +264,72 @@ export async function setPaperBankrollStart(amount: number): Promise<PaperBankro
     .maybeSingle();
   if (error || !data) throw classifyError(error, "Failed to reset paper_bankroll.");
   return rowToBankroll(data as PaperBankrollRow);
+}
+
+/**
+ * Snapshot of a prior paper-trading session, captured at the moment
+ * the user reset their bankroll. Append-only — the UI displays a
+ * descending list under "Past sessions" so the user sees how each
+ * cycle ended.
+ */
+export interface PaperBankrollArchive {
+  id:                string;
+  startingBankroll:  number;
+  endingBankroll:    number;
+  totalPnl:          number;
+  openRiskAtClose:   number;
+  betsPlaced:        number;
+  betsWon:           number;
+  betsLost:          number;
+  betsPush:          number;
+  archivedAt:        string;
+  label:             string | null;
+  reason:            string;
+}
+
+interface PaperBankrollArchiveRow {
+  id: string;
+  starting_bankroll: number;
+  ending_bankroll: number;
+  total_pnl: number;
+  open_risk_at_close: number;
+  bets_placed: number;
+  bets_won: number;
+  bets_lost: number;
+  bets_push: number;
+  archived_at: string;
+  label: string | null;
+  reason: string;
+}
+
+/**
+ * Read the archived sessions, newest first. Capped at 50 — the
+ * panel only ever shows the recent entries, and the user's
+ * "lifetime" interest is captured by the running totals on the
+ * active row.
+ */
+export async function listPaperBankrollArchives(): Promise<PaperBankrollArchive[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data, error } = await supabase
+    .from("paper_bankroll_archives")
+    .select("*")
+    .order("archived_at", { ascending: false })
+    .limit(50);
+  if (error || !data) return [];
+  return (data as PaperBankrollArchiveRow[]).map((r) => ({
+    id:               r.id,
+    startingBankroll: Number(r.starting_bankroll),
+    endingBankroll:   Number(r.ending_bankroll),
+    totalPnl:         Number(r.total_pnl),
+    openRiskAtClose:  Number(r.open_risk_at_close),
+    betsPlaced:       Number(r.bets_placed),
+    betsWon:          Number(r.bets_won),
+    betsLost:         Number(r.bets_lost),
+    betsPush:         Number(r.bets_push),
+    archivedAt:       r.archived_at,
+    label:            r.label,
+    reason:           r.reason,
+  }));
 }
 
 // ── Bets ─────────────────────────────────────────────────────────────

@@ -12,13 +12,17 @@
  * so they don't crowd the dashboard view.
  */
 
-import { useState } from "react";
-import { Wallet, TrendingUp, TrendingDown, Trophy, ListChecks, Settings2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Wallet, TrendingUp, TrendingDown, Trophy, ListChecks, Settings2, History } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { setPaperBankrollStart } from "@/lib/paperBets/store";
+import {
+  setPaperBankrollStart,
+  listPaperBankrollArchives,
+  type PaperBankrollArchive,
+} from "@/lib/paperBets/store";
 import type { PaperBankroll, PaperBet } from "@/lib/paperBets/types";
 
 interface Props {
@@ -32,7 +36,26 @@ interface Props {
 export function PaperHeaderTiles({ bankroll, bets, onChanged, loading }: Props) {
   const [editing, setEditing] = useState(false);
   const [newStart, setNewStart] = useState("500");
+  const [resetLabel, setResetLabel] = useState("");
   const [saving, setSaving] = useState(false);
+  const [archives, setArchives] = useState<PaperBankrollArchive[]>([]);
+  // Lazy-load the archive history once when the user opens the
+  // disclosure. Refreshing on every render would hammer the table,
+  // and refreshing on every reset is enough for the headline view.
+  const [archivesLoaded, setArchivesLoaded] = useState(false);
+
+  const loadArchives = async () => {
+    setArchives(await listPaperBankrollArchives());
+    setArchivesLoaded(true);
+  };
+
+  useEffect(() => {
+    // Re-fetch after a successful reset so the new entry shows up.
+    if (archivesLoaded) {
+      void loadArchives();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankroll?.startingBankroll, bankroll?.updatedAt]);
 
   if (!bankroll) {
     if (loading) {
@@ -83,9 +106,10 @@ export function PaperHeaderTiles({ bankroll, bets, onChanged, loading }: Props) 
     }
     setSaving(true);
     try {
-      await setPaperBankrollStart(n);
+      await setPaperBankrollStart(n, { label: resetLabel || null });
       toast.success(`Paper bankroll reset to $${n}.`);
       setEditing(false);
+      setResetLabel("");
       onChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Reset failed.");
@@ -149,17 +173,35 @@ export function PaperHeaderTiles({ bankroll, bets, onChanged, loading }: Props) 
         </summary>
         <div className="mt-3 space-y-3">
           {editing ? (
-            <div className="flex items-end gap-2">
-              <div className="flex-1">
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">New starting balance</p>
-                <Input value={newStart} onChange={(e) => setNewStart(e.target.value)} inputMode="decimal" className="h-9" />
+            <div className="space-y-2">
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">New starting balance</p>
+                  <Input value={newStart} onChange={(e) => setNewStart(e.target.value)} inputMode="decimal" className="h-9" />
+                </div>
+                <Button onClick={reset} disabled={saving} size="sm" className="h-9">
+                  {saving ? "Saving…" : "Reset"}
+                </Button>
+                <Button onClick={() => setEditing(false)} disabled={saving} variant="ghost" size="sm" className="h-9">
+                  Cancel
+                </Button>
               </div>
-              <Button onClick={reset} disabled={saving} size="sm" className="h-9">
-                {saving ? "Saving…" : "Reset"}
-              </Button>
-              <Button onClick={() => setEditing(false)} disabled={saving} variant="ghost" size="sm" className="h-9">
-                Cancel
-              </Button>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                  Label this session before resetting (optional)
+                </p>
+                <Input
+                  value={resetLabel}
+                  onChange={(e) => setResetLabel(e.target.value)}
+                  placeholder='e.g. "Pre-MLB Run", "March Tournament"'
+                  className="h-9"
+                  maxLength={80}
+                />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  The current session is archived under this label so the
+                  ending balance and W-L record stay visible after reset.
+                </p>
+              </div>
             </div>
           ) : (
             <Button size="sm" variant="outline" className="gap-1" onClick={() => setEditing(true)}>
@@ -167,6 +209,38 @@ export function PaperHeaderTiles({ bankroll, bets, onChanged, loading }: Props) 
               Reset starting balance
             </Button>
           )}
+
+          {/* Past sessions — collapsed by default, lazily loads on
+              first open. Each archive row reflects the bankroll
+              state captured the moment the user reset.  */}
+          <details
+            className="rounded-md border border-border/30 bg-muted/10 p-2"
+            onToggle={(e) => {
+              if ((e.target as HTMLDetailsElement).open && !archivesLoaded) {
+                void loadArchives();
+              }
+            }}
+          >
+            <summary className="font-semibold text-foreground cursor-pointer select-none flex items-center gap-2 text-[11px]">
+              <History className="w-3 h-3" />
+              Past sessions{archives.length ? ` (${archives.length})` : ""}
+            </summary>
+            <div className="mt-2">
+              {!archivesLoaded ? (
+                <p className="text-[11px] text-muted-foreground italic">Loading…</p>
+              ) : archives.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground italic">
+                  No sessions archived yet — your first reset will start the history.
+                </p>
+              ) : (
+                <ul className="space-y-1.5 text-[11px]">
+                  {archives.map((a) => (
+                    <ArchiveRow key={a.id} archive={a} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </details>
 
           {settled.length ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
@@ -233,6 +307,48 @@ function RateBlock({ title, rows }: { title: string; rows: { key: string; w: num
         })}
       </ul>
     </div>
+  );
+}
+
+function ArchiveRow({ archive }: { archive: PaperBankrollArchive }) {
+  const net = archive.totalPnl;
+  const tone = net > 0.001 ? "win" : net < -0.001 ? "loss" : "neutral";
+  const settled = archive.betsWon + archive.betsLost + archive.betsPush;
+  const archived = new Date(archive.archivedAt);
+  const dateLabel = archived.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const roi = archive.startingBankroll > 0
+    ? (archive.totalPnl / archive.startingBankroll) * 100
+    : 0;
+  return (
+    <li className="flex items-start justify-between gap-3 rounded-md border border-border/30 bg-background/40 px-2 py-1.5">
+      <div className="min-w-0 flex-1">
+        <p className="font-semibold text-foreground truncate">
+          {archive.label || "Untitled session"}
+        </p>
+        <p className="text-muted-foreground tabular-nums">
+          {dateLabel} · {settled} settled
+          {settled > 0 ? ` · ${archive.betsWon}-${archive.betsLost}${archive.betsPush ? `-${archive.betsPush}` : ""}` : ""}
+        </p>
+      </div>
+      <div className="text-right tabular-nums shrink-0">
+        <p className={cn(
+          "font-bold",
+          tone === "win"  ? "text-emerald-600 dark:text-emerald-400"
+          : tone === "loss" ? "text-red-600 dark:text-red-400"
+          : "text-foreground",
+        )}>
+          {net >= 0 ? "+" : ""}${net.toFixed(2)}
+        </p>
+        <p className="text-muted-foreground">
+          ${archive.endingBankroll.toFixed(0)} from ${archive.startingBankroll.toFixed(0)}
+          {archive.startingBankroll > 0 ? ` · ${roi >= 0 ? "+" : ""}${roi.toFixed(1)}%` : ""}
+        </p>
+      </div>
+    </li>
   );
 }
 
