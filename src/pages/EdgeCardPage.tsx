@@ -95,7 +95,11 @@ function EdgeCardPageInner() {
         {/* ── Decision-first triplet ───────────────────────────────── */}
         <SystemStatusSection summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
         <ModelTrustSection   summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
-        <DataHealthSection   summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
+        <DataHealthSection
+          summary={summaryQuery.data ?? null}
+          loading={summaryQuery.isPending}
+          onChanged={() => summaryQuery.refetch()}
+        />
 
         {/* ── CLV (headline first; breakdowns hide when empty) ─────── */}
         <section className="space-y-3 border-t border-border pt-8">

@@ -5,6 +5,7 @@
  * level and the sub-components are presentational.
  */
 
+import { useState } from "react";
 import {
   AlertTriangle,
   Activity,
@@ -13,20 +14,26 @@ import {
   ClipboardList,
   Clock,
   Database,
+  Loader2,
   Sparkles,
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   modelTrustLabel,
   modelTrustToneClass,
   type SystemSummary,
 } from "@/lib/insights/systemSummary";
+import { aggressivelyResolvePendingParlays } from "@/lib/learning/aggressivePendingResolver";
 
 interface Props {
   summary: SystemSummary | null;
   loading: boolean;
+  /** Called after a Data Health action completes so the page can refetch. */
+  onChanged?: () => void;
 }
 
 // ── System Status ────────────────────────────────────────────────────
@@ -124,14 +131,72 @@ export function ModelTrustSection({ summary, loading }: Props) {
 
 // ── Data Health ──────────────────────────────────────────────────────
 
-export function DataHealthSection({ summary, loading }: Props) {
+export function DataHealthSection({ summary, loading, onChanged }: Props) {
   const stale = summary?.stalePending ?? 0;
+  const pending = summary?.pendingCount ?? 0;
+  const [resolving, setResolving] = useState(false);
+
+  // Stale-void cutoff = today (midnight). Anything dated before today
+  // that's still pending after a fresh resolver pass gets force-voided
+  // with a transparent "Auto-voided" note. Idempotent: rerunning is
+  // safe.
+  const handleResolveStale = async () => {
+    if (resolving) return;
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const cutoff = `${yyyy}-${mm}-${dd}`;
+    if (!window.confirm(
+      `Clear stale pending parlays dated before ${cutoff}?\n\n` +
+      `Auto-resolver runs first; anything still pending after that ` +
+      `gets marked PUSH with an "Auto-voided" note. ML training is ` +
+      `unaffected — voided rows are not bridged into prediction_history.\n\n` +
+      `Idempotent — safe to run multiple times.`,
+    )) return;
+
+    setResolving(true);
+    try {
+      const r = await aggressivelyResolvePendingParlays({
+        voidStaleBeforeDate: cutoff,
+      });
+      const parts: string[] = [];
+      if (r.resolved)          parts.push(`${r.resolved} resolved`);
+      if (r.staleVoided)       parts.push(`${r.staleVoided} voided`);
+      if (r.needsReviewMarked) parts.push(`${r.needsReviewMarked} flagged`);
+      if (parts.length === 0)  parts.push("nothing to do");
+      toast.success(`Stale pending sweep: ${parts.join(" · ")}`);
+      onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sweep failed.");
+    } finally {
+      setResolving(false);
+    }
+  };
+
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
-        <Database className="w-4 h-4 text-primary" />
-        Data health
-      </h2>
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
+          <Database className="w-4 h-4 text-primary" />
+          Data health
+        </h2>
+        {pending > 0 || stale > 0 ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={resolving}
+            onClick={handleResolveStale}
+            className="h-7 gap-1 text-xs"
+            title="Run the auto-resolver against pending parlays; anything still pending after gets force-voided so the count actually drops."
+          >
+            {resolving
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <AlertTriangle className="w-3 h-3" />}
+            {resolving ? "Resolving…" : "Resolve stale"}
+          </Button>
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <Tile
           label="Pending"
