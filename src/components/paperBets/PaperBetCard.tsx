@@ -150,10 +150,13 @@ export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
   };
 
   const tone = statusTone(bet.status);
-  const pnlText = bet.pnl != null ? formatPnl(bet.pnl) : null;
+  const isTerminal =
+    bet.status === "won" || bet.status === "lost"
+    || bet.status === "push" || bet.status === "voided";
 
   return (
-    <div className={cn("rounded-lg border p-3 sm:p-4 space-y-3", tone)}>
+    <div className={cn("rounded-xl border-2 p-3 sm:p-4 space-y-3", tone)}>
+      {/* ── Ticket header ───────────────────────────── */}
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge status={bet.status} />
         <span className="text-[10px] uppercase tracking-wide text-muted-foreground font-bold">
@@ -162,10 +165,15 @@ export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
         </span>
         <LiveStatusPill bet={bet} />
         <ResolutionVia bet={bet} />
-        <span className="text-xs text-muted-foreground tabular-nums ml-auto">
-          ${bet.stake.toFixed(2)} risk · {bet.combinedOddsAmerican > 0 ? `+${bet.combinedOddsAmerican}` : bet.combinedOddsAmerican}
+        <span className="text-[10px] text-muted-foreground ml-auto tabular-nums">
+          {new Date(bet.placedAt).toLocaleString(undefined, {
+            month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+          })}
         </span>
       </div>
+
+      {/* ── Money row (ticket-style stake/payout/PnL trio) ───── */}
+      <MoneyRow bet={bet} />
 
       <ul className="space-y-2">
         {bet.legs.map((l, i) => (
@@ -206,11 +214,8 @@ export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
         ))}
       </ul>
 
-      {pnlText ? (
-        <div className="text-sm font-bold text-foreground tabular-nums">
-          P/L: <span className={cn(bet.pnl != null && bet.pnl > 0 ? "text-emerald-600 dark:text-emerald-400" : bet.pnl != null && bet.pnl < 0 ? "text-red-600 dark:text-red-400" : "")}>{pnlText}</span>
-        </div>
-      ) : null}
+      {/* ── Outcome banner — settled bets only ──────── */}
+      {isTerminal ? <OutcomeBanner bet={bet} /> : null}
 
       {bet.notes ? (
         <p className="text-[11px] text-muted-foreground italic">"{bet.notes}"</p>
@@ -229,6 +234,124 @@ export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
       </div>
     </div>
   );
+}
+
+/**
+ * Money row — ticket-style stake / to-win / net-PnL trio. Gives
+ * every paper bet a betslip-y visual anchor regardless of status.
+ *
+ * • Pending/open: shows Stake + To Win + "—" for net.
+ * • Settled: net replaces the placeholder with the signed P/L.
+ *
+ * Math comes from the existing combinedOddsAmerican on the row;
+ * we don't recompute the optimizer's payout. To-win is the gross
+ * profit (stake × multiplier − stake), so a $10 stake at +220 reads
+ * "Stake $10 · To Win $22 · Net +$22" on a winner.
+ */
+function MoneyRow({ bet }: { bet: PaperBet }) {
+  const stake   = bet.stake;
+  const payout  = bet.potentialPayout;
+  const toWin   = payout > 0 ? payout - stake : 0;
+  const netText = bet.pnl != null ? formatPnl(bet.pnl) : null;
+  const netTone =
+    bet.pnl != null && bet.pnl > 0 ? "text-emerald-600 dark:text-emerald-400"
+    : bet.pnl != null && bet.pnl < 0 ? "text-red-600 dark:text-red-400"
+    : "text-muted-foreground";
+
+  return (
+    <div className="grid grid-cols-3 gap-2 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-center">
+      <Field label="Stake"   value={`$${stake.toFixed(2)}`} />
+      <Field label="To Win"  value={toWin > 0 ? `$${toWin.toFixed(2)}` : "—"} />
+      <Field
+        label="Net"
+        value={netText ?? "—"}
+        valueClass={cn("font-bold tabular-nums", netTone)}
+      />
+    </div>
+  );
+}
+
+function Field({
+  label, value, valueClass,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
+  return (
+    <div>
+      <p className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={cn("text-sm tabular-nums text-foreground font-semibold", valueClass)}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Outcome banner — "Why it won/lost" framing for settled tickets.
+ * Composes a single-line summary from leg statuses + resolvedReasons:
+ *
+ *   Won   — every settled-and-non-pushed leg won. Highlights the
+ *           lead leg's reason ("Lakers won 110-95.").
+ *   Lost  — at least one leg lost; surfaces the FIRST losing leg's
+ *           name + its reason as the killshot.
+ *   Push  — bet voided / pushed; brief neutral framing.
+ *   Voided — paid back; no profit/loss reasoning.
+ *
+ * Falls back to a minimal "Settled — X-Y-Z" tally when no per-leg
+ * resolvedReason was captured.
+ */
+function OutcomeBanner({ bet }: { bet: PaperBet }) {
+  const summary = composeOutcomeSummary(bet);
+  if (!summary) return null;
+  const tone =
+    bet.status === "won" ? "border-emerald-500/40 bg-emerald-500/[0.06] text-emerald-700 dark:text-emerald-400"
+    : bet.status === "lost" ? "border-red-500/40 bg-red-500/[0.06] text-red-700 dark:text-red-400"
+    : "border-border/60 bg-muted/30 text-muted-foreground";
+  const headline =
+    bet.status === "won" ? "Won"
+    : bet.status === "lost" ? "Lost"
+    : bet.status === "push" ? "Push"
+    : bet.status === "voided" ? "Voided"
+    : "Settled";
+  return (
+    <div className={cn("rounded-md border px-3 py-2 text-[12px]", tone)}>
+      <span className="font-bold">{headline}</span>
+      {" — "}
+      <span className="text-foreground">{summary}</span>
+    </div>
+  );
+}
+
+function composeOutcomeSummary(bet: PaperBet): string | null {
+  const legs = bet.legs ?? [];
+  if (legs.length === 0) return null;
+  if (bet.status === "voided") {
+    return "Bet voided — stake returned, no P/L.";
+  }
+  if (bet.status === "lost") {
+    const killer = legs.find((l) => l.status === "lost");
+    if (killer) {
+      const who = killer.playerName ?? killer.teamLabel ?? "Leg";
+      const why = killer.resolvedReason ?? "didn't cover.";
+      return `${who} ${why}`;
+    }
+    return "At least one leg didn't cover.";
+  }
+  if (bet.status === "won") {
+    const lead = legs[0];
+    const who = lead?.playerName ?? lead?.teamLabel ?? "All legs";
+    const why = lead?.resolvedReason ?? "covered.";
+    if (legs.length === 1) return `${who} — ${why}`;
+    return `All ${legs.length} legs hit. Lead: ${who} — ${why}`;
+  }
+  if (bet.status === "push") {
+    const pushed = legs.find((l) => l.status === "push");
+    if (pushed?.resolvedReason) return pushed.resolvedReason;
+    return "Pushed — stake returned.";
+  }
+  return null;
 }
 
 /**
