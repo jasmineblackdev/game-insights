@@ -30,6 +30,8 @@ import { ParlayBuilderSection } from "@/components/valueParlay/ParlayBuilderSect
 import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
 import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { TodaysDecisionCard } from "@/components/home/TodaysDecisionCard";
+import { selectTodaysDecision } from "@/lib/insights/todaysDecision";
 import { BestPlayerPropToday } from "@/components/home/BestPlayerPropToday";
 import { StatusStrip } from "@/components/StatusStrip";
 import { ProBetCard } from "@/components/ProBetCard";
@@ -874,15 +876,28 @@ const Index = ({ defaultView }: IndexProps = {}) => {
 
               {/* Content */}
               {viewMode === "home" && homeDateMode === "today" ? (
-                <HomeDashboard
-                  topGames={topPicksForToday(leagueGamesWithIntel)}
-                  topProps={topHomeProps}
-                  isPropsPending={homePropsQuery.isPending}
-                  league={league}
-                  onSelectGame={setSelectedGame}
-                  onNavigatePlayerProps={() => handleViewModeChange("player_props")}
-                  onNavigateToParlay={handleNavigateToParlay}
-                />
+                <div className="space-y-5">
+                  {/* Phase 2 of consolidation: single decision card up
+                      top so users see one verdict (BET / MODIFY / SKIP)
+                      before the dashboard opens any sub-surfaces. Pulls
+                      from the same daily-plan pipeline the Builder uses
+                      so the words match. */}
+                  <TodaysDecisionCard
+                    decision={selectTodaysDecision({
+                      candidates: homeAutoProfitCandidates,
+                      sharpMode: sharpMode.enabled,
+                    })}
+                  />
+                  <HomeDashboard
+                    topGames={topPicksForToday(leagueGamesWithIntel)}
+                    topProps={topHomeProps}
+                    isPropsPending={homePropsQuery.isPending}
+                    league={league}
+                    onSelectGame={setSelectedGame}
+                    onNavigatePlayerProps={() => handleViewModeChange("player_props")}
+                    onNavigateToParlay={handleNavigateToParlay}
+                  />
+                </div>
               ) : (viewMode === "home" && homeDateMode === "tomorrow") || viewMode === "tomorrow" ? (
                 <TomorrowTab
                   allGames={allGames}
