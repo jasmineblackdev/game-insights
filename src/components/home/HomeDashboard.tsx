@@ -17,10 +17,12 @@
  */
 
 import { forwardRef } from "react";
-import { Sparkles, ChevronRight } from "lucide-react";
+import { MinusCircle, Sparkles, ChevronRight } from "lucide-react";
 import type { GamePrediction, League } from "@/data/mockGames";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import type { ParlayBuildMode } from "@/lib/valueParlay/types";
+import { useDayIsSkip } from "@/context/TodaysDecisionContext";
+import { cn } from "@/lib/utils";
 import { HomePickCard } from "./HomePickCard";
 import { HomePropCard } from "./HomePropCard";
 
@@ -45,8 +47,26 @@ export const HomeDashboard = forwardRef<HTMLDivElement, HomeDashboardProps>(func
   onNavigatePlayerProps,
   onNavigateToParlay,
 }, ref) {
+  // Phase 5: when the day-level Today's Decision is SKIP, mute the
+  // Home dashboard's strong-recommendation styling and surface a
+  // single inline notice. The picks below remain visible (some users
+  // want to override) but they're framed as "advisory" so we don't
+  // contradict the SKIP verdict on the same screen.
+  const dayIsSkip = useDayIsSkip();
+
   return (
-    <div ref={ref} className="space-y-10">
+    <div ref={ref} className={cn("space-y-10", dayIsSkip && "opacity-90")}>
+      {dayIsSkip ? (
+        <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground flex items-start gap-2">
+          <MinusCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <span>
+            Today's Decision says <span className="font-semibold text-foreground">SKIP</span> —
+            the picks below are shown for reference. They didn't clear the discipline gates;
+            verify before betting.
+          </span>
+        </div>
+      ) : null}
+
       {/* Top AI Picks Today */}
       <section>
         <div className="mb-4">

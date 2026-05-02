@@ -32,6 +32,7 @@ import { HomeAutoProfit } from "@/components/dailyPlan/HomeAutoProfit";
 import { HomeDashboard } from "@/components/home/HomeDashboard";
 import { TodaysDecisionCard } from "@/components/home/TodaysDecisionCard";
 import { selectTodaysDecision } from "@/lib/insights/todaysDecision";
+import { TodaysDecisionProvider } from "@/context/TodaysDecisionContext";
 import { BestPlayerPropToday } from "@/components/home/BestPlayerPropToday";
 import { StatusStrip } from "@/components/StatusStrip";
 import { ProBetCard } from "@/components/ProBetCard";
@@ -875,30 +876,33 @@ const Index = ({ defaultView }: IndexProps = {}) => {
               ) : null}
 
               {/* Content */}
-              {viewMode === "home" && homeDateMode === "today" ? (
-                <div className="space-y-5">
-                  {/* Phase 2 of consolidation: single decision card up
-                      top so users see one verdict (BET / MODIFY / SKIP)
-                      before the dashboard opens any sub-surfaces. Pulls
-                      from the same daily-plan pipeline the Builder uses
-                      so the words match. */}
-                  <TodaysDecisionCard
-                    decision={selectTodaysDecision({
-                      candidates: homeAutoProfitCandidates,
-                      sharpMode: sharpMode.enabled,
-                    })}
-                  />
-                  <HomeDashboard
-                    topGames={topPicksForToday(leagueGamesWithIntel)}
-                    topProps={topHomeProps}
-                    isPropsPending={homePropsQuery.isPending}
-                    league={league}
-                    onSelectGame={setSelectedGame}
-                    onNavigatePlayerProps={() => handleViewModeChange("player_props")}
-                    onNavigateToParlay={handleNavigateToParlay}
-                  />
-                </div>
-              ) : (viewMode === "home" && homeDateMode === "tomorrow") || viewMode === "tomorrow" ? (
+              {viewMode === "home" && homeDateMode === "today" ? (() => {
+                // Compute Today's Decision once so the card and the
+                // descendant context share the same verdict. Phase 5
+                // of the consolidation: descendants under the
+                // provider can read the verdict and suppress
+                // conflicting strong-rec signals when SKIP.
+                const todaysDecision = selectTodaysDecision({
+                  candidates: homeAutoProfitCandidates,
+                  sharpMode: sharpMode.enabled,
+                });
+                return (
+                  <TodaysDecisionProvider verdict={todaysDecision.verdict}>
+                    <div className="space-y-5">
+                      <TodaysDecisionCard decision={todaysDecision} />
+                      <HomeDashboard
+                        topGames={topPicksForToday(leagueGamesWithIntel)}
+                        topProps={topHomeProps}
+                        isPropsPending={homePropsQuery.isPending}
+                        league={league}
+                        onSelectGame={setSelectedGame}
+                        onNavigatePlayerProps={() => handleViewModeChange("player_props")}
+                        onNavigateToParlay={handleNavigateToParlay}
+                      />
+                    </div>
+                  </TodaysDecisionProvider>
+                );
+              })() : (viewMode === "home" && homeDateMode === "tomorrow") || viewMode === "tomorrow" ? (
                 <TomorrowTab
                   allGames={allGames}
                   allProps={homePropsQuery.data?.items ?? []}
