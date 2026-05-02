@@ -26,7 +26,7 @@ import Index from "./pages/Index.tsx";
 import BuilderPage from "./pages/BuilderPage.tsx";
 import EdgeCardPage from "./pages/EdgeCardPage.tsx";
 import PlayerEdgeDetailPage from "./pages/PlayerEdgeDetailPage.tsx";
-import PicksPage from "./pages/PicksPage.tsx";
+import SettingsPage from "./pages/SettingsPage.tsx";
 import PaperBetsPage from "./pages/PaperBetsPage.tsx";
 import MLPerformancePage from "./pages/MLPerformancePage.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -114,16 +114,17 @@ const App = () => (
                     <Route path="/builder"   element={<BuilderPage />} />
                     <Route path="/insights"  element={<EdgeCardPage />} />
                     <Route path="/paper"     element={<PaperBetsPage />} />
-                    <Route path="/settings"  element={<PicksPage />} />
+                    <Route path="/settings"  element={<SettingsPage />} />
 
-                    {/* ── Phase A redirects: old URLs keep working ─────── */}
-                    {/* /daily → Builder Plan tab; /parlays → Builder Recommended tab. */}
-                    <Route path="/daily"          element={<Navigate to="/builder?tab=plan" replace />} />
-                    <Route path="/parlays"        element={<Navigate to="/builder?tab=recommended" replace />} />
-                    {/* /edge already mapped to /insights above; old direct hits redirect for parity */}
+                    {/* ── Legacy redirects (consolidation Phase 1) ───────
+                        /daily → / (Today's Decision lives on Home)
+                        /parlays → /paper (Paper is the only tracking surface)
+                        /edge, /ml-performance → /insights (analytics hub)
+                        /picks deleted entirely — My Picks is gone. */}
+                    <Route path="/daily"          element={<Navigate to="/" replace />} />
+                    <Route path="/parlays"        element={<Navigate to="/paper" replace />} />
                     <Route path="/edge"           element={<Navigate to="/insights" replace />} />
                     <Route path="/ml-performance" element={<Navigate to="/insights" replace />} />
-                    <Route path="/picks"          element={<Navigate to="/settings" replace />} />
 
                     {/* ── Deep links retained ─────────────────────────── */}
                     <Route path="/player-edge/:projectionId" element={<PlayerEdgeDetailPage />} />
