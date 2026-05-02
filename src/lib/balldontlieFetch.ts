@@ -12,6 +12,13 @@
  * Fail-soft contract: every helper returns null / [] on any error
  * (proxy unreachable, upstream 4xx envelope, parse failure) so
  * callers can keep rendering with whatever data they already have.
+ *
+ * Authentication: balldontlie revamped their pricing — every
+ * endpoint now requires an Authorization header, including the
+ * "free" tier (which is just rate-limited). Set
+ * BALLDONTLIE_API_KEY in the Edge function env. Without it the
+ * proxy reaches upstream but every call comes back as a wrapped
+ * 401 envelope and the helpers return null.
  */
 
 function trim(s: string | undefined): string {

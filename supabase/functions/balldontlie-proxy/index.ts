@@ -19,9 +19,11 @@
  *   teams                    — list teams
  *   stats                    — &player_ids[]=... → game-by-game stats
  *
- * The free tier has lower rate limits and no advanced endpoints; the
- * paid tier requires the Authorization header. Both are supported —
- * if the env var is missing the proxy still works for free endpoints.
+ * Auth: balldontlie revamped pricing — every endpoint now requires
+ * an Authorization header, including the free tier (which is just
+ * rate-limited, no longer keyless). Set BALLDONTLIE_API_KEY in the
+ * Edge function env. Without it the proxy reaches upstream but
+ * every call comes back as 401 (wrapped 200 envelope).
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
