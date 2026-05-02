@@ -148,31 +148,45 @@ function ModelContributionPanel({ days }: { days: number }) {
               <tr className="text-muted-foreground/70">
                 <th className="text-left py-1 pr-3 font-medium">Variant</th>
                 <th className="text-right py-1 pr-3 font-medium">n</th>
-                <th className="text-right py-1 pr-3 font-medium">Hit %</th>
                 <th className="text-right py-1 pr-3 font-medium">ROI</th>
+                <th className="text-right py-1 pr-3 font-medium">Hit %</th>
                 <th className="text-right py-1 font-medium">Avg edge</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.model_variant} className="border-t border-border/40">
-                  <td className="py-1.5 pr-3 font-medium text-foreground">
-                    {VARIANT_LABEL[r.model_variant] ?? r.model_variant}
-                  </td>
-                  <td className="text-right py-1.5 pr-3 tabular-nums">
-                    <SampleBadge n={Number(r.resolved_count)} />
-                  </td>
-                  <td className={cn("text-right py-1.5 pr-3 tabular-nums font-semibold", hitColor(r.hit_rate_pct))}>
-                    {pct(r.hit_rate_pct)}
-                  </td>
-                  <td className={cn("text-right py-1.5 pr-3 tabular-nums font-semibold", roiColor(r.roi_pct))}>
-                    {pct(r.roi_pct)}
-                  </td>
-                  <td className="text-right py-1.5 tabular-nums text-muted-foreground">
-                    {r.avg_edge != null ? `${(Number(r.avg_edge) * 100).toFixed(1)}pp` : "—"}
-                  </td>
-                </tr>
-              ))}
+              {rows.map((r) => {
+                const n = Number(r.resolved_count);
+                const hit = r.hit_rate_pct == null ? null : Number(r.hit_rate_pct);
+                const roi = r.roi_pct == null ? null : Number(r.roi_pct);
+                const misleading = hit != null && roi != null && n >= 10 && hit >= 55 && roi <= -2;
+                return (
+                  <tr key={r.model_variant} className="border-t border-border/40">
+                    <td className="py-1.5 pr-3 font-medium text-foreground">
+                      {VARIANT_LABEL[r.model_variant] ?? r.model_variant}
+                      {misleading ? (
+                        <span
+                          className="ml-1.5 text-[9px] font-bold text-amber-600 dark:text-amber-400"
+                          title="High hit rate but negative ROI — small-dog farming masking large losses."
+                        >
+                          ⚠ misleading
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="text-right py-1.5 pr-3 tabular-nums">
+                      <SampleBadge n={n} />
+                    </td>
+                    <td className={cn("text-right py-1.5 pr-3 tabular-nums font-semibold", roiColor(r.roi_pct))}>
+                      {pct(r.roi_pct)}
+                    </td>
+                    <td className={cn("text-right py-1.5 pr-3 tabular-nums font-semibold", hitColor(r.hit_rate_pct))}>
+                      {pct(r.hit_rate_pct)}
+                    </td>
+                    <td className="text-right py-1.5 tabular-nums text-muted-foreground">
+                      {r.avg_edge != null ? `${(Number(r.avg_edge) * 100).toFixed(1)}pp` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

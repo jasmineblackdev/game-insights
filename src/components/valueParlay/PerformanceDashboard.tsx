@@ -106,6 +106,34 @@ function fmt(n: number | null, suffix = "%", decimals = 1): string {
   return `${n.toFixed(decimals)}${suffix}`;
 }
 
+/**
+ * "Looks profitable, isn't" detector — high hit rate paired with
+ * negative ROI usually means small-dog farming masking a few large
+ * losses. Surfaced as an inline flag on the row so the eye-catching
+ * Hit% doesn't get misread as good news.
+ */
+function isMisleadingRow(
+  hit: number | null,
+  roi: number | null,
+  n: number,
+): boolean {
+  if (hit == null || roi == null) return false;
+  if (n < MIN_RELIABLE) return false; // sample too thin to trust either
+  return hit >= 55 && roi <= -2;
+}
+
+function MisleadingFlag() {
+  return (
+    <span
+      className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-600 dark:text-amber-400"
+      title="Hit rate looks strong but ROI is negative — likely small-dog farming masking large losses."
+    >
+      <AlertTriangle className="w-2.5 h-2.5" />
+      misleading
+    </span>
+  );
+}
+
 /** Panel-level total resolved count badge — warns when entire panel is low-N. */
 function PanelNBadge({ n }: { n: number }) {
   const cls =
@@ -289,14 +317,18 @@ function TimingPanel({ rows, loading }: { rows: TimingBucketRow[]; loading: bool
           <tr className="text-muted-foreground text-left border-b border-border">
             <th className="py-1 pr-3 font-semibold">Bucket</th>
             <th className="py-1 pr-3 font-semibold text-right">n (resolved)</th>
-            <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 pr-3 font-semibold text-right">ROI%</th>
+            <th className="py-1 pr-3 font-semibold text-right">Hit%</th>
             <th className="py-1 font-semibold text-right">Avg edge</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => {
             const n = r.resolved_predictions;
+            // "Looks profitable, isn't" — high hit rate but negative ROI
+            // means we're winning small dogs and losing on the few big
+            // bets, so the row's eye-catching Hit% misleads. Flag it.
+            const misleading = isMisleadingRow(r.hit_rate_pct, r.roi_pct, n);
             return (
               <tr key={r.timing_bucket} className="border-b border-border/50 last:border-0">
                 <td className="py-1.5 pr-3 font-semibold">
@@ -308,15 +340,16 @@ function TimingPanel({ rows, loading }: { rows: TimingBucketRow[]; loading: bool
                   )}>
                     {timingBucketLabel(r.timing_bucket)}
                   </span>
+                  {misleading ? <MisleadingFlag /> : null}
                 </td>
                 <td className={cn("py-1.5 pr-3 text-right font-semibold", sampleSizeClass(n))}>
                   {n}<SampleNote n={n} />
                 </td>
-                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
-                  {fmt(r.hit_rate_pct)}
-                </td>
                 <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : roiColor(r.roi_pct))}>
                   {r.roi_pct != null && r.roi_pct >= 0 ? "+" : ""}{fmt(r.roi_pct)}
+                </td>
+                <td className={cn("py-1.5 pr-3 text-right font-semibold", n < MIN_NOISY ? "text-muted-foreground/50" : pctColor(r.hit_rate_pct))}>
+                  {fmt(r.hit_rate_pct)}
                 </td>
                 <td className="py-1.5 text-right text-muted-foreground">
                   {r.avg_edge != null ? `${(r.avg_edge * 100).toFixed(1)}pp` : "—"}

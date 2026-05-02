@@ -1,16 +1,25 @@
 /**
- * /edge — Analytics surface.
+ * /insights — System Health Dashboard.
  *
- * Refactored from the old "team picks + best value + parlay builder + ML
- * analytics" hub. Pick-building lives on Home now; this page is purely
- * the analytics + saved-history readout so users can review model and
- * parlay performance without picker-UI noise on the same screen.
+ * Decision-first layout:
+ *   1. System Status (7d ROI / Hit / Avg CLV / Sample)
+ *   2. Model Trust   (Brier / Calibration error / Status)
+ *   3. Data Health   (Pending / Stale / Manual override rate)
+ *   4. CLV dashboard (headline first; breakdowns hidden when empty)
+ *   5. Saved Edge Cards (history readout)
+ *   6. Advanced analytics — collapsed by default:
+ *        Model performance · Parlay performance · ML training coverage · ML Perf
+ *
+ * BankrollWidget moved to Settings — Insights is read-only.
  */
 
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   Brain,
+  ChevronDown,
+  ChevronUp,
   History,
   TrendingUp,
 } from "lucide-react";
@@ -20,10 +29,15 @@ import { PerformanceDashboard } from "@/components/valueParlay/PerformanceDashbo
 import { ParlayPerformanceDashboard } from "@/components/valueParlay/ParlayPerformanceDashboard";
 import { TrainingDataHealthPanel } from "@/components/ml/TrainingDataHealthPanel";
 import { ClvDashboard } from "@/components/insights/ClvDashboard";
-import { BankrollWidget } from "@/components/bankroll/BankrollWidget";
+import {
+  SystemStatusSection,
+  ModelTrustSection,
+  DataHealthSection,
+} from "@/components/insights/SystemHealthSections";
 import { MLPerformanceContent } from "@/pages/MLPerformancePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { getSystemSummary } from "@/lib/insights/systemSummary";
 import {
   type EdgeSlipOutcome,
   isDraftEdgeSlipItem,
@@ -34,11 +48,19 @@ function leagueShort(l: string) {
   return l.toUpperCase();
 }
 
-type AnalyticsTab = "performance" | "ml_perf";
+type AdvancedTab = "performance" | "parlay" | "training" | "ml_perf";
 
 function EdgeCardPageInner() {
   const { history, setHistoryOutcome } = useEdgeCard();
-  const [tab, setTab] = useState<AnalyticsTab>("performance");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedTab, setAdvancedTab] = useState<AdvancedTab>("performance");
+
+  const summaryQuery = useQuery({
+    queryKey: ["system-health-summary"],
+    queryFn: getSystemSummary,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   const historyRecord = useMemo(() => {
     let w = 0;
@@ -60,9 +82,9 @@ function EdgeCardPageInner() {
           <div className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-primary" />
             <div>
-              <h1 className="font-display font-bold text-base text-foreground">Analytics</h1>
+              <h1 className="font-display font-bold text-base text-foreground">System Health</h1>
               <p className="text-[11px] text-muted-foreground">
-                ML model performance · parlay history · saved Edge Cards
+                Recent ROI · model trust · data pipeline state
               </p>
             </div>
           </div>
@@ -70,68 +92,17 @@ function EdgeCardPageInner() {
       </header>
 
       <main className="container max-w-6xl mx-auto py-5 sm:py-6 space-y-8">
-        <BankrollWidget />
+        {/* ── Decision-first triplet ───────────────────────────────── */}
+        <SystemStatusSection summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
+        <ModelTrustSection   summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
+        <DataHealthSection   summary={summaryQuery.data ?? null} loading={summaryQuery.isPending} />
 
-        {/* Performance / ML Perf sub-tabs — ML Perf used to be a
-            separate top-level nav entry; folded in here so Analytics
-            is the single hub for model + parlay + training-data
-            insight. The /ml-performance route still works for direct
-            links and renders the same MLPerformanceContent. */}
-        <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5">
-          {([
-            { id: "performance", icon: BarChart3, label: "Performance" },
-            { id: "ml_perf",     icon: Brain,     label: "ML Perf" },
-          ] as const).map(({ id, icon: Icon, label }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={cn(
-                "flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors",
-                tab === id
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="w-3 h-3" />
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {tab === "ml_perf" ? (
-          <MLPerformanceContent embedded />
-        ) : (
-          <>
-
-        <section className="space-y-3">
+        {/* ── CLV (headline first; breakdowns hide when empty) ─────── */}
+        <section className="space-y-3 border-t border-border pt-8">
           <ClvDashboard />
         </section>
 
-        <section className="space-y-3 border-t border-border pt-8">
-          <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-confidence-high" />
-            Model performance
-          </h2>
-          <PerformanceDashboard />
-        </section>
-
-        <section className="space-y-3 border-t border-border pt-8">
-          <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-primary" />
-            Parlay performance
-          </h2>
-          <ParlayPerformanceDashboard />
-        </section>
-
-        <section className="space-y-3 border-t border-border pt-8">
-          <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-primary" />
-            ML training coverage
-          </h2>
-          <TrainingDataHealthPanel />
-        </section>
-
+        {/* ── Saved Edge Cards ─────────────────────────────────────── */}
         <section className="space-y-3 border-t border-border pt-8">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
@@ -226,8 +197,57 @@ function EdgeCardPageInner() {
             </ul>
           )}
         </section>
-          </>
-        )}
+
+        {/* ── Advanced analytics — collapsed by default ───────────── */}
+        <section className="space-y-3 border-t border-border pt-8">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((v) => !v)}
+            className="flex items-center justify-between gap-2 w-full text-left group"
+            aria-expanded={advancedOpen}
+          >
+            <h2 className="text-sm font-display font-bold text-foreground flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-primary" />
+              Advanced analytics
+            </h2>
+            <span className="text-[11px] text-muted-foreground group-hover:text-foreground inline-flex items-center gap-1">
+              {advancedOpen ? "Hide" : "Show"}
+              {advancedOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+            </span>
+          </button>
+          {advancedOpen ? (
+            <div className="space-y-6">
+              <div className="inline-flex items-center rounded-full bg-muted p-0.5 gap-0.5 flex-wrap">
+                {([
+                  { id: "performance", icon: TrendingUp, label: "Model" },
+                  { id: "parlay",      icon: BarChart3,  label: "Parlay" },
+                  { id: "training",    icon: BarChart3,  label: "Training" },
+                  { id: "ml_perf",     icon: Brain,      label: "ML Perf" },
+                ] as const).map(({ id, icon: Icon, label }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setAdvancedTab(id)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
+                      advancedTab === id
+                        ? "bg-card text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="w-3 h-3" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {advancedTab === "performance" ? <PerformanceDashboard /> : null}
+              {advancedTab === "parlay"      ? <ParlayPerformanceDashboard /> : null}
+              {advancedTab === "training"    ? <TrainingDataHealthPanel /> : null}
+              {advancedTab === "ml_perf"     ? <MLPerformanceContent embedded /> : null}
+            </div>
+          ) : null}
+        </section>
       </main>
     </div>
   );

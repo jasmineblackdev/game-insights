@@ -134,20 +134,30 @@ export function ClvDashboard() {
         </div>
       ) : null}
 
-      {/* Breakdowns */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <BreakdownCard title="By sport"  rows={bySportQ.data ?? []} loading={bySportQ.isPending} />
-        <BreakdownCard title="By market" rows={byMarketQ.data ?? []} loading={byMarketQ.isPending} />
-      </div>
-
-      <details className="rounded-md border border-border/40 bg-card/40 p-2 text-xs">
-        <summary className="font-semibold text-foreground cursor-pointer select-none">
-          Sport × market crossed ({(bySportMarketQ.data ?? []).length} rows)
-        </summary>
-        <div className="mt-2">
-          <BreakdownCard title="" rows={bySportMarketQ.data ?? []} loading={bySportMarketQ.isPending} compact />
+      {/* Breakdowns — only render when there's something to show.
+          Empty tables on a fresh deploy were noisy; the headline tiles
+          above already make the no-data state clear. */}
+      {(bySportQ.data?.length ?? 0) > 0 || (byMarketQ.data?.length ?? 0) > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {(bySportQ.data?.length ?? 0) > 0 ? (
+            <BreakdownCard title="By sport"  rows={bySportQ.data ?? []} loading={bySportQ.isPending} />
+          ) : null}
+          {(byMarketQ.data?.length ?? 0) > 0 ? (
+            <BreakdownCard title="By market" rows={byMarketQ.data ?? []} loading={byMarketQ.isPending} />
+          ) : null}
         </div>
-      </details>
+      ) : null}
+
+      {(bySportMarketQ.data?.length ?? 0) > 0 ? (
+        <details className="rounded-md border border-border/40 bg-card/40 p-2 text-xs">
+          <summary className="font-semibold text-foreground cursor-pointer select-none">
+            Sport × market crossed ({bySportMarketQ.data?.length ?? 0} rows)
+          </summary>
+          <div className="mt-2">
+            <BreakdownCard title="" rows={bySportMarketQ.data ?? []} loading={bySportMarketQ.isPending} compact />
+          </div>
+        </details>
+      ) : null}
 
       <p className="text-[10px] text-muted-foreground italic">
         CLV is the per-leg pp delta between entry implied probability and closing implied probability.
