@@ -18,8 +18,12 @@ import {
   fetchClvBySport,
   fetchClvByMarket,
   fetchClvBySportMarket,
+  fetchClvResultsBySport,
+  fetchClvResultsSummary,
   fetchClvSummary,
   type ClvBreakdownRow,
+  type ClvResultsBySportRow,
+  type ClvResultsSummary,
   type ClvSummary,
 } from "@/lib/analytics/clv";
 
@@ -44,6 +48,16 @@ export function ClvDashboard() {
   const bySportMarketQ = useQuery({
     queryKey: ["clv-by-sport-market", 30],
     queryFn: () => fetchClvBySportMarket(30),
+    staleTime: 5 * 60_000,
+  });
+  const resultsSummaryQ = useQuery({
+    queryKey: ["clv-results-summary", 30],
+    queryFn: () => fetchClvResultsSummary(30),
+    staleTime: 5 * 60_000,
+  });
+  const resultsBySportQ = useQuery({
+    queryKey: ["clv-results-by-sport", 30],
+    queryFn: () => fetchClvResultsBySport(30),
     staleTime: 5 * 60_000,
   });
 
@@ -134,6 +148,17 @@ export function ClvDashboard() {
         </div>
       ) : null}
 
+      {/* Per-pick CLV result distribution (#169) — five-bucket
+          breakdown of every prediction in the window plus the
+          headline beat-rate split between apples-to-apples and
+          line-changed cohorts so neither inflates the other. */}
+      {resultsSummaryQ.data && resultsSummaryQ.data.total > 0 ? (
+        <ResultsDistributionCard
+          summary={resultsSummaryQ.data}
+          bySport={resultsBySportQ.data ?? []}
+        />
+      ) : null}
+
       {/* Breakdowns — only render when there's something to show.
           Empty tables on a fresh deploy were noisy; the headline tiles
           above already make the no-data state clear. */}
@@ -169,6 +194,117 @@ export function ClvDashboard() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────
+
+/**
+ * Per-pick CLV result distribution (#169). Five buckets across the
+ * window with the headline beat-rate split by cohort so the
+ * line_changed group doesn't pollute the "% beating close" claim.
+ */
+function ResultsDistributionCard({
+  summary, bySport,
+}: {
+  summary: ClvResultsSummary;
+  bySport: ClvResultsBySportRow[];
+}) {
+  const apples = summary.beatClose + summary.lostToClose + summary.same;
+  const drifted = summary.lineChanged;
+  return (
+    <div className="rounded-md border border-border/40 bg-card/40 p-3 space-y-3">
+      <div>
+        <p className="text-xs font-semibold text-foreground">Per-pick CLV result</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">
+          Bucket distribution across {summary.total.toLocaleString()} picks (last 30d).
+          Drifted-line picks are reported separately.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+        <BucketCell label="Beat close"    value={summary.beatClose}    tone="win" />
+        <BucketCell label="Lost to close" value={summary.lostToClose}  tone="loss" />
+        <BucketCell label="Same"          value={summary.same}         tone="neutral" />
+        <BucketCell label="Line changed"  value={summary.lineChanged}  tone="warn" />
+        <BucketCell label="Unavailable"   value={summary.unavailable}  tone="muted" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-[11px] tabular-nums">
+        <div className="rounded-md border border-border/30 bg-background/40 px-2.5 py-1.5">
+          <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Apples-to-apples</p>
+          <p className={cn(
+            "font-bold",
+            summary.pctBeatCloseApples != null && summary.pctBeatCloseApples >= 55
+              ? "text-emerald-600 dark:text-emerald-400"
+              : summary.pctBeatCloseApples != null && summary.pctBeatCloseApples <= 45
+                ? "text-red-600 dark:text-red-400"
+                : "text-foreground",
+          )}>
+            {summary.pctBeatCloseApples != null ? `${summary.pctBeatCloseApples.toFixed(1)}% beat close` : "—"}
+            <span className="text-muted-foreground font-normal ml-1">({apples.toLocaleString()})</span>
+          </p>
+        </div>
+        <div className="rounded-md border border-border/30 bg-background/40 px-2.5 py-1.5">
+          <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Line changed</p>
+          <p className="font-bold text-foreground">
+            {summary.pctBeatCloseDrifted != null ? `${summary.pctBeatCloseDrifted.toFixed(1)}% beat close` : "—"}
+            <span className="text-muted-foreground font-normal ml-1">({drifted.toLocaleString()})</span>
+          </p>
+        </div>
+      </div>
+
+      {bySport.length > 0 ? (
+        <details className="text-[11px]">
+          <summary className="font-semibold text-foreground cursor-pointer select-none">
+            By sport ({bySport.length})
+          </summary>
+          <table className="w-full mt-2">
+            <thead>
+              <tr className="text-muted-foreground text-left">
+                <th className="font-medium pr-2">Sport</th>
+                <th className="font-medium text-right pr-2">Beat</th>
+                <th className="font-medium text-right pr-2">Lost</th>
+                <th className="font-medium text-right pr-2">Same</th>
+                <th className="font-medium text-right pr-2">Line ∆</th>
+                <th className="font-medium text-right">N/A</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bySport.map((r) => (
+                <tr key={r.sport} className="border-t border-border/20">
+                  <td className="py-1 uppercase font-semibold text-foreground">{r.sport}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{r.beatClose}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums text-red-600 dark:text-red-400">{r.lostToClose}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums text-foreground">{r.same}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums text-amber-700 dark:text-amber-400">{r.lineChanged}</td>
+                  <td className="py-1 text-right tabular-nums text-muted-foreground">{r.unavailable}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function BucketCell({
+  label, value, tone,
+}: {
+  label: string;
+  value: number;
+  tone: "win" | "loss" | "warn" | "neutral" | "muted";
+}) {
+  const cls =
+    tone === "win"  ? "text-emerald-600 dark:text-emerald-400"
+    : tone === "loss" ? "text-red-600 dark:text-red-400"
+    : tone === "warn" ? "text-amber-700 dark:text-amber-400"
+    : tone === "muted" ? "text-muted-foreground"
+    : "text-foreground";
+  return (
+    <div className="rounded-md border border-border/30 bg-background/40 px-2 py-1.5">
+      <p className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className={cn("text-base font-bold tabular-nums leading-tight", cls)}>{value}</p>
+    </div>
+  );
+}
 
 function Tile({
   label, value, tone, subtitle, trendIcon,

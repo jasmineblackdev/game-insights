@@ -106,6 +106,81 @@ export async function fetchClvBySportMarket(lookbackDays = 30): Promise<ClvBreak
   }));
 }
 
+// ── Per-pick CLV result bucket (#169) ────────────────────────────────
+
+/**
+ * Distribution of clv_result values across every prediction in the
+ * window. Five buckets:
+ *   beat_close     — apples-to-apples row with clv_pp > 0
+ *   lost_to_close  — apples-to-apples row with clv_pp < 0
+ *   same           — apples-to-apples row with abs(clv_pp) < 0.01
+ *   line_changed   — line drifted between entry and close (separate
+ *                    cohort so it doesn't inflate the headline beat
+ *                    rate)
+ *   unavailable    — clv_pp missing OR partial-line cohort
+ *
+ * Source: analytics_clv_results_summary RPC (migration 20260515).
+ * Fail-soft: returns null on RPC error / migration not applied.
+ */
+export interface ClvResultsSummary {
+  total: number;
+  beatClose: number;
+  lostToClose: number;
+  same: number;
+  lineChanged: number;
+  unavailable: number;
+  /** Headline beat-rate, restricted to apples-to-apples rows. */
+  pctBeatCloseApples: number | null;
+  /** Beat-rate inside the line_changed cohort, for comparison. */
+  pctBeatCloseDrifted: number | null;
+}
+
+export interface ClvResultsBySportRow {
+  sport: string;
+  total: number;
+  beatClose: number;
+  lostToClose: number;
+  same: number;
+  lineChanged: number;
+  unavailable: number;
+}
+
+export async function fetchClvResultsSummary(lookbackDays = 30): Promise<ClvResultsSummary | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.rpc("analytics_clv_results_summary", {
+    lookback_days: lookbackDays,
+  });
+  if (error || !data || !Array.isArray(data) || data.length === 0) return null;
+  const r = data[0] as Record<string, unknown>;
+  return {
+    total:               num(r.total),
+    beatClose:           num(r.beat_close),
+    lostToClose:         num(r.lost_to_close),
+    same:                num(r.same),
+    lineChanged:         num(r.line_changed),
+    unavailable:         num(r.unavailable),
+    pctBeatCloseApples:  numOrNull(r.pct_beat_close_apples),
+    pctBeatCloseDrifted: numOrNull(r.pct_beat_close_drifted),
+  };
+}
+
+export async function fetchClvResultsBySport(lookbackDays = 30): Promise<ClvResultsBySportRow[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+  const { data, error } = await supabase.rpc("analytics_clv_results_by_sport", {
+    lookback_days: lookbackDays,
+  });
+  if (error || !data || !Array.isArray(data)) return [];
+  return (data as Array<Record<string, unknown>>).map((r) => ({
+    sport:        String(r.sport ?? ""),
+    total:        num(r.total),
+    beatClose:    num(r.beat_close),
+    lostToClose:  num(r.lost_to_close),
+    same:         num(r.same),
+    lineChanged:  num(r.line_changed),
+    unavailable:  num(r.unavailable),
+  }));
+}
+
 /**
  * 7-day vs 30-day trend direction. Positive deltaPct = improving.
  * Returns null when either window is too thin to compare.
