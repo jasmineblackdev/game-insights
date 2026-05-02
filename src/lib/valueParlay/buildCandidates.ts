@@ -39,6 +39,11 @@ import { calibrateProbability } from "@/lib/ml/plattCalibration";
 import { computeValueScore, valueGrade } from "@/lib/valueParlay/valueScore";
 import { computePatternBoostSync } from "@/lib/learning/userBettingPatterns";
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
+import {
+  formatCombatLabel,
+  isCombatSport,
+  validateCombatProp,
+} from "@/lib/playerProps/combatMarketValidation";
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
@@ -724,6 +729,24 @@ export function buildEnrichedPropCandidates(
     const sport = SPORT_TO_LEAGUE[pred.sport];
     if (!sport) continue;
 
+    // Drop combat-sports props with malformed market shapes (binary
+    // stat with LESS direction, or unknown stat_type). The generic
+    // "Over/Under {n} {stat_type}" composer below would produce
+    // "Under 89.5 fight winner" otherwise. Non-combat sports are
+    // always valid here — validateCombatProp is a no-op for them.
+    if (isCombatSport(pred.sport)) {
+      const v = validateCombatProp(pred);
+      if (!v.valid) {
+        if (typeof console !== "undefined") {
+          console.debug(
+            `[combatMarketValidation] dropped: ${v.reason}`,
+            { id: pred.id, sport: pred.sport, stat_type: pred.stat_type },
+          );
+        }
+        continue;
+      }
+    }
+
     // Map confidence tier
     const conf: import("@/data/mockGames").ConfidenceLevel =
       pred.confidence === "HIGH" ? "high"
@@ -845,7 +868,12 @@ export function buildEnrichedPropCandidates(
       riskBandLabel(riskBand(risk)),
     ].filter(Boolean).slice(0, 3).join(" · ");
 
-    const label = `${pred.player_name} ${pred.prediction_direction === "MORE" ? "Over" : "Under"} ${pred.line_value} ${pred.stat_type.replace(/_/g, " ")}`;
+    // Combat sports use a dedicated label formatter — binary outcomes
+    // ("Player to win", "Player by KO/TKO") never get an Over/Under
+    // prefix. Non-combat keeps the generic composer.
+    const label = isCombatSport(pred.sport)
+      ? formatCombatLabel(pred)
+      : `${pred.player_name} ${pred.prediction_direction === "MORE" ? "Over" : "Under"} ${pred.line_value} ${pred.stat_type.replace(/_/g, " ")}`;
 
     out.push({
       id:                  `ml-prop-${pred.id}`,

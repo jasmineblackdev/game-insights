@@ -28,7 +28,8 @@ export function TopPropsScanDebug({ stats, oddsStale }: Props) {
     + stats.filtered_out.duplicate_player_capped
     + stats.filtered_out.duplicate_game_capped
     + stats.filtered_out.duplicate_sport_capped
-    + stats.filtered_out.high_volatility_in_top_capped;
+    + stats.filtered_out.high_volatility_in_top_capped
+    + stats.filtered_out.invalid_combat_market;
 
   return (
     <div className={cn(
@@ -64,6 +65,7 @@ export function TopPropsScanDebug({ stats, oddsStale }: Props) {
           <Row label="Filtered: inactive / no leader data" value={stats.filtered_out.inactive_player} />
           <Row label="Filtered: probability < 0.50" value={stats.filtered_out.low_probability} />
           <Row label="Filtered: high vol + thin edge" value={stats.filtered_out.high_volatility_blocked} />
+          <Row label="Filtered: invalid combat market" value={stats.filtered_out.invalid_combat_market} />
           <Row label="Capped: duplicate player (≥2)" value={stats.filtered_out.duplicate_player_capped} />
           <Row label="Capped: duplicate game (≥3)" value={stats.filtered_out.duplicate_game_capped} />
           <Row label="Capped: sport limit (≥3 in Top 10)" value={stats.filtered_out.duplicate_sport_capped} />

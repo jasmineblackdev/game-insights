@@ -20,13 +20,14 @@
  */
 
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Copy, Plus } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Copy, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useValueParlay } from "@/context/ValueParlayContext";
 import type { ValueBetCandidate } from "@/lib/valueParlay/types";
 import { legAudit } from "@/lib/valueParlay/executionAssistant";
+import { isLikelyMalformedCombatLabel } from "@/lib/playerProps/combatMarketValidation";
 import { DecisionPill } from "./DecisionPill";
 import { TrustRow } from "./TrustRow";
 import { HitRateBars } from "./HitRateBars";
@@ -53,6 +54,30 @@ export function BetCard({ candidate: c, defaultExpanded = false, hideAdd = false
   const { addValueLeg, isValueLegAdded } = useValueParlay();
   const added = isValueLegAdded(c.id);
   const decision = c.decision ?? legAudit(c);
+
+  // Final UI safeguard for combat-sports market shapes. Upstream
+  // filters in topPropsRanker + buildEnrichedPropCandidates should
+  // already drop malformed combat props; this catches anything that
+  // slipped through (cached candidates, third-party sources) and
+  // disables Add-to-slip so the bad leg can never enter the slip.
+  const isMalformedCombat = isLikelyMalformedCombatLabel(
+    c.sport, c.selectionLabel, c.statType,
+  );
+
+  if (isMalformedCombat) {
+    return (
+      <div className="rounded-lg border border-red-500/40 bg-red-500/[0.04] p-3 text-xs text-red-700 dark:text-red-400 flex items-start gap-2">
+        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="font-bold">Invalid market — hidden for safety</p>
+          <p className="text-[11px] opacity-80 mt-0.5">
+            Combat prop combined a binary market with an Over/Under line. Source feed
+            needs review.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const onAdd = () => {
     const r = addValueLeg(c);

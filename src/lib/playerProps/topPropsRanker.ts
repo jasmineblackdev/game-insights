@@ -30,6 +30,10 @@
  */
 
 import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
+import {
+  isCombatSport,
+  validateCombatProp,
+} from "@/lib/playerProps/combatMarketValidation";
 
 export interface ScanStats {
   total_scanned: number;
@@ -42,6 +46,13 @@ export interface ScanStats {
     duplicate_game_capped: number;
     duplicate_sport_capped: number;
     high_volatility_in_top_capped: number;
+    /**
+     * Boxing/MMA props whose market shape is invalid — e.g. a
+     * fight_winner prop with a numeric Over/Under line, or a
+     * binary stat with LESS direction (no inverse market exists).
+     * Bumped before scoring so these never reach the user.
+     */
+    invalid_combat_market: number;
   };
   pool_after_filters: number;
   final_ranked: number;
@@ -270,6 +281,24 @@ function passesHardFilters(
   targetYmd: string,
   stats: ScanStats,
 ): boolean {
+  // Combat-market validation runs first — a malformed combat prop
+  // shouldn't burn a "no_game_today" slot (and the row will never
+  // render anyway, so counting it under the right reason matters
+  // for the debug panel).
+  if (isCombatSport(pred.sport)) {
+    const v = validateCombatProp(pred);
+    if (!v.valid) {
+      stats.filtered_out.invalid_combat_market++;
+      if (typeof console !== "undefined") {
+        console.debug(
+          `[topPropsRanker] invalid combat market filtered: ${v.reason}`,
+          { id: pred.id, sport: pred.sport, stat_type: pred.stat_type },
+        );
+      }
+      return false;
+    }
+  }
+
   if (!gameMatchesDate(pred, targetYmd)) {
     stats.filtered_out.no_game_today++;
     return false;
@@ -447,6 +476,7 @@ export function rankTopProps(
       duplicate_game_capped: 0,
       duplicate_sport_capped: 0,
       high_volatility_in_top_capped: 0,
+      invalid_combat_market: 0,
     },
     pool_after_filters: 0,
     final_ranked: 0,
