@@ -15,7 +15,10 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Settings as SettingsIcon } from "lucide-react";
 import { SharpModeSettings } from "@/components/SharpModeSettings";
-import { SleeperAccountPanel } from "@/components/settings/SleeperAccountPanel";
+// SleeperAccountPanel intentionally not imported — fantasy context
+// is a future layer, kept out of Settings until it actually feeds
+// recommendations. Component file preserved at
+// src/components/settings/SleeperAccountPanel.tsx for re-mount.
 
 export default function SettingsPage() {
   return (
@@ -32,8 +35,6 @@ export default function SettingsPage() {
         </div>
 
         <SharpModeSettings />
-
-        <SleeperAccountPanel />
 
         <Link
           to="/paper"
