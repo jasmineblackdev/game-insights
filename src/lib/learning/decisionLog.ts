@@ -34,7 +34,8 @@ export type DecisionAction =
   | "shown"
   | "followed"
   | "overridden"
-  | "ignored";
+  | "ignored"
+  | "skip";
 
 interface LogArgs {
   decisionId: string;
@@ -121,6 +122,26 @@ export function logDecisionOverridden(args: {
     source: args.source,
     verdict: args.verdict,
     action: "overridden",
+    payload: args.payload ?? {},
+  });
+}
+
+/**
+ * Logged when the AI verdict is SKIP and the user takes no action
+ * to override. Fires automatically alongside the "shown" impression
+ * so analytics can distinguish "user saw a SKIP and respected it"
+ * from "user saw a SKIP and overrode it".
+ */
+export function logDecisionSkipped(args: {
+  decisionId: string;
+  source: DecisionSource;
+  payload?: Record<string, unknown>;
+}): void {
+  void writeRow({
+    decisionId: args.decisionId,
+    source: args.source,
+    verdict: "SKIP",
+    action: "skip",
     payload: args.payload ?? {},
   });
 }

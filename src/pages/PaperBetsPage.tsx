@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,9 +34,29 @@ import { useLiveBetTracker } from "@/hooks/useLiveBetTracker";
 type Tab = "build" | "open" | "settled" | "perf" | "myslips";
 
 export default function PaperBetsPage() {
-  const [tab, setTab] = useState<Tab>("build");
+  // Deep-link support: Today's Decision → Paper hand-off uses
+  //   /paper?tab=myslips&sub=drafts&edit={draftId}
+  // so the user lands on the right tab with the draft pre-selected.
+  // Plain ?tab=drafts also resolves to the My Slips Drafts subtab.
+  const [searchParams] = useSearchParams();
+  const initialTab: Tab = (() => {
+    const t = searchParams.get("tab");
+    if (t === "open" || t === "settled" || t === "perf" || t === "myslips" || t === "build") return t;
+    if (t === "drafts") return "myslips";
+    return "build";
+  })();
+  const initialDraftId = searchParams.get("edit");
+  const initialMySlipsSub: "all" | "drafts" | "open" | "settled" | undefined = (() => {
+    const t = searchParams.get("tab");
+    const s = searchParams.get("sub");
+    if (t === "drafts" || s === "drafts") return "drafts";
+    if (s === "open" || s === "settled" || s === "all") return s;
+    return undefined;
+  })();
+
+  const [tab, setTab] = useState<Tab>(initialTab);
   /** When set, the slip builder hydrates from this draft id on mount. */
-  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(initialDraftId);
   const queryClient = useQueryClient();
 
   const bankrollQuery = useQuery({
@@ -250,6 +271,7 @@ export default function PaperBetsPage() {
       {tab === "myslips" ? (
         <MySlipsTable
           bets={bets}
+          defaultSubtab={initialMySlipsSub}
           onEditDraft={(id) => {
             setEditingDraftId(id);
             setTab("build");

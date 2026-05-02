@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Filter, Pencil, Plus, Trash2 } from "lucide-react";
+import { Filter, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { listDrafts, deleteDraft, type PaperDraft } from "@/lib/paperBets/drafts";
@@ -25,6 +25,8 @@ interface Props {
   onEditDraft: (id: string) => void;
   onNewSlip: () => void;
   onChange?: () => void;
+  /** Initial subtab — used by deep links from Today's Decision. */
+  defaultSubtab?: SubTab;
 }
 
 interface Row {
@@ -40,8 +42,8 @@ interface Row {
   raw: PaperDraft | PaperBet;
 }
 
-export function MySlipsTable({ bets, onEditDraft, onNewSlip, onChange }: Props) {
-  const [subtab, setSubtab] = useState<SubTab>("all");
+export function MySlipsTable({ bets, onEditDraft, onNewSlip, onChange, defaultSubtab }: Props) {
+  const [subtab, setSubtab] = useState<SubTab>(defaultSubtab ?? "all");
   const [draftsTick, setDraftsTick] = useState(0);
 
   const drafts = useMemo(() => {
@@ -152,10 +154,32 @@ export function MySlipsTable({ bets, onEditDraft, onNewSlip, onChange }: Props) 
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
+              {visible.map((row) => {
+                // Auto-plan-source drafts get a small badge + the
+                // first reason line so the user immediately sees
+                // "this came from Today's Decision, here's why".
+                const isAutoPlan = row.kind === "draft"
+                  && (row.raw as PaperDraft).source === "auto_plan";
+                const firstReason = isAutoPlan
+                  ? (row.raw as PaperDraft).reasonSnapshot?.whyThisSlip?.[0]
+                  : undefined;
+                return (
                 <tr key={row.key} className="border-t border-border/40 hover:bg-muted/20 transition-colors">
                   <td className="px-3 py-2 max-w-[260px]">
-                    <p className="text-foreground font-semibold truncate">{row.label}</p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <p className="text-foreground font-semibold truncate">{row.label}</p>
+                      {isAutoPlan ? (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary uppercase tracking-wide">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          Auto-plan
+                        </span>
+                      ) : null}
+                    </div>
+                    {firstReason ? (
+                      <p className="text-[10px] text-muted-foreground truncate mt-0.5" title={firstReason}>
+                        {firstReason}
+                      </p>
+                    ) : null}
                   </td>
                   <td className="px-2 py-2">
                     <StatusBadge status={row.status} />
@@ -204,7 +228,8 @@ export function MySlipsTable({ bets, onEditDraft, onNewSlip, onChange }: Props) 
                     ) : null}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

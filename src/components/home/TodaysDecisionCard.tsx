@@ -15,11 +15,13 @@
  */
 
 import { useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import {
   ArrowRight,
   CheckCircle2,
   ChevronRight,
+  ClipboardList,
   MinusCircle,
   Sparkles,
   TriangleAlert,
@@ -30,7 +32,9 @@ import {
   logDecisionFollowed,
   logDecisionOverridden,
   logDecisionShown,
+  logDecisionSkipped,
 } from "@/lib/learning/decisionLog";
+import { createDraftFromDecision } from "@/lib/paperBets/draftFromDecision";
 
 interface Props {
   decision: TodaysDecision;
@@ -63,9 +67,22 @@ export function TodaysDecisionCard({ decision, compact = false }: Props) {
       source: "todays_decision",
       decision,
     });
+    // SKIP verdicts also fire a separate "skip" action so analytics
+    // can distinguish "user saw a SKIP and respected it" from
+    // "user saw a SKIP and overrode it" (logged on click).
+    if (decision.verdict === "SKIP") {
+      logDecisionSkipped({
+        decisionId,
+        source: "todays_decision",
+        payload: { headline: decision.headline },
+      });
+    }
     // Re-fire when the decision content actually changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [decisionId]);
+
+  const navigate = useNavigate();
+
 
   const { verdict, headline, reasons, confidence, risk, card, poolHadCandidates } = decision;
 
@@ -131,21 +148,52 @@ export function TodaysDecisionCard({ decision, compact = false }: Props) {
       {/* Action row */}
       <div className="flex flex-wrap items-center gap-2 pl-7">
         {verdict === "BET" || verdict === "MODIFY" ? (
-          <Link
-            to="/builder?view=parlay_builder"
-            onClick={() => logDecisionFollowed({
-              decisionId, source: "todays_decision", verdict,
-            })}
-            className={cn(
-              "inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
-              verdict === "BET"
-                ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
-                : "bg-amber-600 text-white hover:bg-amber-600/90",
-            )}
-          >
-            Open in Builder
-            <ArrowRight className="w-3 h-3" />
-          </Link>
+          <>
+            {/* Primary CTA: snapshot the verdict's card into a Paper
+                draft and route to /paper to review. The user
+                explicitly hits Submit paper bet there — Home never
+                creates an open bet directly. */}
+            <button
+              type="button"
+              onClick={() => {
+                const draft = createDraftFromDecision({ decision });
+                if (!draft) {
+                  toast.error("Couldn't create a paper draft from this decision.");
+                  return;
+                }
+                logDecisionFollowed({
+                  decisionId,
+                  source: "todays_decision",
+                  verdict,
+                  payload: { draftId: draft.id, source: "auto_plan" },
+                });
+                toast.success("Paper draft created — review before submitting.");
+                navigate(`/paper?tab=myslips&sub=drafts&edit=${draft.id}`);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
+                verdict === "BET"
+                  ? "bg-emerald-600 text-white hover:bg-emerald-600/90"
+                  : "bg-amber-600 text-white hover:bg-amber-600/90",
+              )}
+            >
+              <ClipboardList className="w-3 h-3" />
+              Track as Paper Bet
+              <ArrowRight className="w-3 h-3" />
+            </button>
+            {/* Secondary: still allow a power-user shortcut to the
+                Builder when they want to re-optimize before tracking. */}
+            <Link
+              to="/builder?view=parlay_builder"
+              onClick={() => logDecisionFollowed({
+                decisionId, source: "todays_decision", verdict,
+                payload: { route: "builder" },
+              })}
+              className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            >
+              Open in Builder →
+            </Link>
+          </>
         ) : null}
 
         {/* "View best available anyway" — only when SKIP and the pool

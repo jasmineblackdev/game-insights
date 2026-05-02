@@ -22,6 +22,39 @@ const STORAGE_VERSION = 1;
 
 export const CURRENT_DRAFT_ID = "current" as const;
 
+/**
+ * Where a draft came from. Used to attribute auto-generated drafts
+ * (e.g. Today's Decision → "Track as Paper Bet") so analytics can
+ * compare auto-plan ROI against manual user entries downstream.
+ */
+export type PaperDraftSource = "manual" | "auto_plan";
+
+/**
+ * Frozen snapshot of the reasoning that led to an auto-plan draft —
+ * the model probability, edge, confidence, risk, and the
+ * why-this-pick lines surfaced on Home. Captured at draft creation
+ * so later analysis can compare model reasoning against actual
+ * outcome without re-running the pipeline.
+ */
+export interface PaperDraftReasonSnapshot {
+  /** The "why this slip" lines surfaced on Today's Decision card. */
+  whyThisSlip: string[];
+  /** Per-leg headline reason, when known. */
+  whyPerLeg?: Array<{ legId: string; reason: string }>;
+  /** Aggregate model probability for the slip (uncorrelated). */
+  modelProbability: number | null;
+  /** Aggregate edge in pp (modelProb − impliedProb). */
+  edgePp: number | null;
+  /** Coarse confidence label from the verdict. */
+  confidence: "HIGH" | "MED" | "LOW" | null;
+  /** Coarse risk label from the verdict. */
+  risk: "Low" | "Medium" | "High" | null;
+  /** Daily-plan tier (primary | balanced | upside) when present. */
+  tier?: string;
+  /** ISO timestamp of capture. */
+  capturedAt: string;
+}
+
 export interface PaperDraft {
   id: string;
   /** "current" for the auto-saved in-progress slip, or a uuid for snapshots. */
@@ -39,6 +72,18 @@ export interface PaperDraft {
   label?: string;
   /** ISO timestamp of the most recent update. */
   updatedAt: string;
+  /**
+   * "manual" for user-typed drafts; "auto_plan" for drafts created
+   * by Today's Decision → Track as Paper Bet. Defaults to "manual"
+   * when omitted (back-compat with pre-#167 drafts).
+   */
+  source?: PaperDraftSource;
+  /**
+   * Reason payload captured at the moment the draft was created.
+   * Read-only — the entry form preserves this on every save so the
+   * snapshot follows the slip into placePaperBet.
+   */
+  reasonSnapshot?: PaperDraftReasonSnapshot;
 }
 
 interface StorageShape {
