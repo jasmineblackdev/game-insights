@@ -285,15 +285,20 @@ interface ResolveOptions {
   onProgress?: (done: number, total: number) => void;
   /**
    * When set (YYYY-MM-DD), any parlay still "pending" after the
-   * resolution attempt AND whose `date` is strictly earlier than
-   * this cutoff gets force-voided: outcome flipped to "push"
-   * (the closest no-decision state the schema's CHECK constraint
-   * allows) with a transparent user_notes flag explaining the action.
-   *
-   * Pure cleanup mechanism — only call from an explicit user action,
-   * never from a silent sweep. Idempotent.
+   * resolution attempt AND whose `date` (game date) is strictly
+   * earlier than this cutoff gets force-voided. Game-date semantic.
    */
   voidStaleBeforeDate?: string;
+  /**
+   * When set (ISO timestamp), any parlay still "pending" after the
+   * resolution attempt AND whose `recommended_at` (row logged_at)
+   * is strictly earlier than this cutoff gets force-voided. Used by
+   * the System Health "Resolve stale" action so the sweep targets
+   * the SAME rows Health's count flags (which is also based on
+   * recommended_at). Either of the two cutoffs triggers a void —
+   * they're an OR, not an AND.
+   */
+  voidStaleBeforeRecommendedAt?: string;
 }
 
 export async function aggressivelyResolvePendingParlays(
@@ -314,21 +319,23 @@ export async function aggressivelyResolvePendingParlays(
     return result;
   }
 
-  const sources = options.sources ?? ["app_recommended", "user_manual"];
-  const maxParlays = options.maxParlays ?? 200;
+  const sources = options.sources;
+  const maxParlays = options.maxParlays ?? 500;
 
-  // Pull every pending parlay across the requested sources. No date
-  // cutoff — old "pending" rows are exactly what this resolver exists
-  // to clean up.
+  // Pull every pending parlay. Default candidate query is "all
+  // pending rows" — same filter Data Health uses for its count, so
+  // the sweep can act on every row Health flags. Callers can still
+  // narrow with options.sources for backtest scenarios.
   let pending: PendingParlay[] = [];
   try {
-    const { data, error } = await supabase
+    let q = supabase
       .from("recommended_parlays")
       .select("id, source, date, recommended_at, resolved_at, user_id, legs, outcome")
-      .in("source", sources)
       .eq("outcome", "pending")
       .order("recommended_at", { ascending: false })
       .limit(maxParlays);
+    if (sources && sources.length > 0) q = q.in("source", sources);
+    const { data, error } = await q;
     if (error) {
       result.errors.push(error.message);
       return result;
@@ -340,6 +347,25 @@ export async function aggressivelyResolvePendingParlays(
   }
 
   result.scanned = pending.length;
+
+  // Debug — surfaces the candidate count and first 5 ids so the
+  // System Health "Resolve stale" path can compare against the
+  // health-side count and detect any future filter drift early.
+  if (typeof console !== "undefined") {
+    console.debug("[aggressivePendingResolver] candidates:", {
+      sweepCandidateCount: pending.length,
+      sourcesFilter: sources ?? null,
+      voidStaleBeforeDate: options.voidStaleBeforeDate ?? null,
+      voidStaleBeforeRecommendedAt: options.voidStaleBeforeRecommendedAt ?? null,
+      first5: pending.slice(0, 5).map((p) => ({
+        id: p.id,
+        source: p.source,
+        date: p.date,
+        recommended_at: p.recommended_at,
+      })),
+    });
+  }
+
   if (pending.length === 0) return result;
 
   let progressDone = 0;
@@ -458,16 +484,21 @@ export async function aggressivelyResolvePendingParlays(
     let stalenessVoided = false;
     let unparseableMarked = false;
 
-    // Stale-void path — explicit cleanup. Only fires when caller opted
-    // in via voidStaleBeforeDate AND the parlay is still pending after
-    // leg resolution AND parlay.date is strictly earlier than the
-    // cutoff. Never fires from silent sweeps.
-    if (
+    // Stale-void path — explicit cleanup. Either cutoff fires the
+    // void (game-date OR row-logged-at). System Health's "Resolve
+    // stale" passes the recommended_at one because that's the field
+    // its count is based on; legacy callers pass the game-date one.
+    // Both are honored; never both required.
+    const gameStale =
       options.voidStaleBeforeDate
-      && newOutcome === "pending"
       && parlay.date
-      && parlay.date < options.voidStaleBeforeDate
-    ) {
+      && parlay.date < options.voidStaleBeforeDate;
+    const loggedAtStale =
+      options.voidStaleBeforeRecommendedAt
+      && parlay.recommended_at
+      && parlay.recommended_at < options.voidStaleBeforeRecommendedAt;
+
+    if (newOutcome === "pending" && (gameStale || loggedAtStale)) {
       newOutcome = "push";
       stalenessVoided = true;
     }

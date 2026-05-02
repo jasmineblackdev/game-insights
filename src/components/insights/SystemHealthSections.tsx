@@ -136,36 +136,68 @@ export function DataHealthSection({ summary, loading, onChanged }: Props) {
   const pending = summary?.pendingCount ?? 0;
   const [resolving, setResolving] = useState(false);
 
-  // Stale-void cutoff = today (midnight). Anything dated before today
-  // that's still pending after a fresh resolver pass gets force-voided
-  // with a transparent "Auto-voided" note. Idempotent: rerunning is
-  // safe.
+  // Stale-void cutoffs aligned with Data Health's count signal:
+  //   • voidStaleBeforeRecommendedAt = now − 48h (matches the Health
+  //     query that flags `recommended_at < now-48h` as stale)
+  //   • voidStaleBeforeDate = today's YMD (game-date semantic kept
+  //     for legacy parity; either cutoff fires the void)
+  // The sweep used to only honor the YMD cutoff against the game-
+  // date column, which let rows with `date = today` slip past even
+  // when their row had been pending for 3+ days. Now Health and
+  // sweep target the same set.
   const handleResolveStale = async () => {
     if (resolving) return;
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, "0");
     const dd = String(today.getDate()).padStart(2, "0");
-    const cutoff = `${yyyy}-${mm}-${dd}`;
+    const cutoffYmd = `${yyyy}-${mm}-${dd}`;
+    const cutoffIso = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
     if (!window.confirm(
-      `Clear stale pending parlays dated before ${cutoff}?\n\n` +
-      `Auto-resolver runs first; anything still pending after that ` +
-      `gets marked PUSH with an "Auto-voided" note. ML training is ` +
-      `unaffected — voided rows are not bridged into prediction_history.\n\n` +
-      `Idempotent — safe to run multiple times.`,
+      `Resolve stale pending — auto-resolver runs first; anything ` +
+      `still pending whose row is older than 48h (or whose game ` +
+      `date is before ${cutoffYmd}) gets marked PUSH with an ` +
+      `"Auto-voided" note. ML training is unaffected — voided rows ` +
+      `are not bridged into prediction_history. Idempotent.`,
     )) return;
+
+    // Debug snapshot for parity check against the sweep.
+    if (typeof console !== "undefined") {
+      console.debug("[Resolve stale] dispatching", {
+        healthPendingCount: summary?.pendingCount ?? null,
+        healthStaleCount:   summary?.stalePending ?? null,
+        cutoffYmd,
+        cutoffIso,
+      });
+    }
 
     setResolving(true);
     try {
       const r = await aggressivelyResolvePendingParlays({
-        voidStaleBeforeDate: cutoff,
+        voidStaleBeforeDate: cutoffYmd,
+        voidStaleBeforeRecommendedAt: cutoffIso,
       });
-      const parts: string[] = [];
-      if (r.resolved)          parts.push(`${r.resolved} resolved`);
-      if (r.staleVoided)       parts.push(`${r.staleVoided} voided`);
-      if (r.needsReviewMarked) parts.push(`${r.needsReviewMarked} flagged`);
-      if (parts.length === 0)  parts.push("nothing to do");
-      toast.success(`Stale pending sweep: ${parts.join(" · ")}`);
+      // Skipped = anything the sweep saw but neither resolved nor
+      // voided nor flagged. Rare once the cutoffs match Health but
+      // still possible (e.g. resolver bug, bridge insert errors).
+      const skipped = Math.max(
+        0,
+        r.scanned - r.resolved - r.staleVoided - r.needsReviewMarked,
+      );
+      const parts = [
+        `Resolved ${r.resolved}`,
+        `Voided ${r.staleVoided}`,
+        `Skipped ${skipped}`,
+      ];
+      if (r.needsReviewMarked) parts.push(`Flagged ${r.needsReviewMarked}`);
+      if (r.errors.length) parts.push(`${r.errors.length} errors`);
+      const msg = parts.join(" · ");
+      // Choose tone: success when something landed, error on errors,
+      // neutral otherwise.
+      if (r.errors.length) toast.error(msg);
+      else if (r.resolved + r.staleVoided + r.needsReviewMarked > 0) toast.success(msg);
+      else toast.message(msg);
       onChanged?.();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sweep failed.");
