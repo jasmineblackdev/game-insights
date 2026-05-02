@@ -14,10 +14,11 @@
  * point of that surface.
  */
 
-import { useRef } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { Layers, X, Trash2, Shuffle, Sparkles } from "lucide-react";
+import { useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Layers, X, Trash2, Shuffle, Sparkles, ClipboardCheck, Radio } from "lucide-react";
 import { toast } from "sonner";
+import { createSlipDraft } from "@/lib/paperBets/drafts";
 import {
   Sheet,
   SheetClose,
@@ -48,6 +49,7 @@ function formatAmerican(o: number): string {
 
 export function StickyParlaySlipDrawer() {
   const { pathname, search } = useLocation();
+  const navigate = useNavigate();
   const {
     builderLegs,
     builderMetrics,
@@ -56,6 +58,10 @@ export function StickyParlaySlipDrawer() {
     setBuilderLegs,
     candidatePool,
   } = useValueParlay();
+  // Track Live toggle — flips through to the paper draft so the
+  // entry form opens with the live tracker pre-armed.
+  const [trackLive, setTrackLive] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const {
     currentBankroll,
     suggestStake,
@@ -279,67 +285,152 @@ export function StickyParlaySlipDrawer() {
           </ul>
         ) : null}
 
-        <div className="mt-4 pt-3 border-t border-border flex flex-wrap items-center gap-2">
-          {count >= 2 && builderMetrics?.weakestLegId ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 min-w-0"
-              disabled={candidatePool.length === 0}
-              title={
-                candidatePool.length === 0
-                  ? "Open the parlay builder or /daily once for the candidate pool to populate"
-                  : "Swap the lowest-quality leg with the next-best alternative"
-              }
-              onClick={() => {
-                if (!builderMetrics?.weakestLegId) return;
-                if (candidatePool.length === 0) {
-                  toast.message("Candidate pool empty — open the parlay builder first");
-                  return;
-                }
-                const r = replaceWeakestLeg({
-                  legs: builderLegs,
-                  pool: candidatePool,
-                  weakestLegId: builderMetrics.weakestLegId,
-                });
-                if (!r.ok || !r.legs || !r.added || !r.removed) {
-                  toast.message(r.reason ?? "Could not replace weakest leg");
-                  return;
-                }
-                setBuilderLegs(r.legs);
-                toast.success(`Removed ${r.removed.selectionLabel} → added ${r.added.selectionLabel}`);
-              }}
-            >
-              <Shuffle className="w-3.5 h-3.5" />
-              Replace weakest
-            </Button>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="flex-1 min-w-0"
-            onClick={() => {
-              if (!count) return;
-              clearValueBuilder();
-              toast.success("Slip cleared");
-            }}
-            disabled={!count}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear
-          </Button>
-          <Link
-            to="/?view=parlay_builder"
-            onClick={() => closeRef.current?.click()}
-            aria-disabled={!count}
+        {/* Track Live toggle — only meaningful when there are legs.
+            Routes through createSlipDraft so the entry form opens
+            with the live tracker pre-armed. */}
+        {count > 0 ? (
+          <label
             className={cn(
-              buttonVariants({ variant: "default", size: "sm" }),
-              "flex-1 min-w-0",
-              !count && "pointer-events-none opacity-50",
+              "mt-3 flex items-center gap-2 cursor-pointer select-none rounded-md border px-3 py-2 text-xs",
+              trackLive
+                ? "border-blue-500/40 bg-blue-500/[0.05]"
+                : "border-border/40 bg-background/40",
             )}
           >
-            Open builder
-          </Link>
+            <input
+              type="checkbox"
+              checked={trackLive}
+              onChange={(e) => setTrackLive(e.target.checked)}
+              className="h-4 w-4 accent-blue-500"
+            />
+            <Radio className={cn("w-3.5 h-3.5", trackLive ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground")} />
+            <span className="font-bold text-foreground">Track Live</span>
+            <span className="text-[11px] text-muted-foreground">
+              — game already started; live tracker fills score/clock automatically.
+            </span>
+          </label>
+        ) : null}
+
+        <div className="mt-3 pt-3 border-t border-border space-y-2">
+          {/* Primary — Save as Paper Bet (slip → draft → /paper).
+              The slip is a staging area; settlement happens in
+              Paper. User must still click Submit on the draft to
+              actually place the bet (no bankroll impact yet). */}
+          <Button
+            variant="default"
+            size="default"
+            className="w-full gap-2"
+            disabled={!count || savingDraft}
+            onClick={() => {
+              if (!count) return;
+              setSavingDraft(true);
+              try {
+                const draft = createSlipDraft({
+                  legs: builderLegs.map((l) => ({
+                    selectionLabel: l.selectionLabel,
+                    sport:          String(l.sport),
+                    gameId:         l.gameId,
+                    marketType:     l.marketType,
+                    statType:       l.statType,
+                    lineValue:      l.lineValue,
+                    americanOdds:   l.americanOdds,
+                    playerName:     l.playerName,
+                    playerId:       l.playerId,
+                    teamId:         l.teamId,
+                  })),
+                  trackLive,
+                  reason: builderMetrics ? {
+                    whyThisSlip:       builderMetrics.warnings ?? [],
+                    modelProbability:  builderMetrics.projectedHitProbability ?? null,
+                    edgePp:            null,
+                    confidence:        builderMetrics.cardConfidence === "high" ? "HIGH"
+                                       : builderMetrics.cardConfidence === "medium" ? "MED"
+                                       : builderMetrics.cardConfidence === "low" ? "LOW"
+                                       : null,
+                    risk:              null,
+                    capturedAt:        new Date().toISOString(),
+                  } : undefined,
+                });
+                toast.success("Paper parlay draft saved — review before submitting.");
+                clearValueBuilder();
+                setTrackLive(false);
+                closeRef.current?.click();
+                navigate(`/paper?tab=myslips&sub=drafts&edit=${draft.id}`);
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not save draft.");
+              } finally {
+                setSavingDraft(false);
+              }
+            }}
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            {savingDraft ? "Saving…" : "Save as Paper Bet"}
+          </Button>
+
+          {/* Secondary row — Replace weakest / Clear / Open builder */}
+          <div className="flex flex-wrap items-center gap-2">
+            {count >= 2 && builderMetrics?.weakestLegId ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 min-w-0"
+                disabled={candidatePool.length === 0}
+                title={
+                  candidatePool.length === 0
+                    ? "Open the parlay builder or /daily once for the candidate pool to populate"
+                    : "Swap the lowest-quality leg with the next-best alternative"
+                }
+                onClick={() => {
+                  if (!builderMetrics?.weakestLegId) return;
+                  if (candidatePool.length === 0) {
+                    toast.message("Candidate pool empty — open the parlay builder first");
+                    return;
+                  }
+                  const r = replaceWeakestLeg({
+                    legs: builderLegs,
+                    pool: candidatePool,
+                    weakestLegId: builderMetrics.weakestLegId,
+                  });
+                  if (!r.ok || !r.legs || !r.added || !r.removed) {
+                    toast.message(r.reason ?? "Could not replace weakest leg");
+                    return;
+                  }
+                  setBuilderLegs(r.legs);
+                  toast.success(`Removed ${r.removed.selectionLabel} → added ${r.added.selectionLabel}`);
+                }}
+              >
+                <Shuffle className="w-3.5 h-3.5" />
+                Replace weakest
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1 min-w-0"
+              onClick={() => {
+                if (!count) return;
+                clearValueBuilder();
+                setTrackLive(false);
+                toast.success("Slip cleared");
+              }}
+              disabled={!count}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Clear
+            </Button>
+            <Link
+              to="/?view=parlay_builder"
+              onClick={() => closeRef.current?.click()}
+              aria-disabled={!count}
+              className={cn(
+                buttonVariants({ variant: "outline", size: "sm" }),
+                "flex-1 min-w-0",
+                !count && "pointer-events-none opacity-50",
+              )}
+            >
+              Open builder
+            </Link>
+          </div>
         </div>
       </SheetContent>
     </Sheet>

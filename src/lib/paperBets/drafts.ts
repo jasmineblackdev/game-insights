@@ -174,6 +174,112 @@ export function draftHasContent(draft: PaperDraft): boolean {
 }
 
 /**
+ * Convert the in-app parlay slip (ValueBetCandidate shape) into a
+ * paper draft. Used by the slip drawer's "Save as Paper Bet" action
+ * — the slip is a staging area, the draft is the persistent record,
+ * Paper is where settlement happens. No bankroll impact until the
+ * user submits the draft.
+ *
+ * The legs come in as the optimizer's ValueBetCandidate shape; we
+ * translate to PaperLeg here so the slip drawer doesn't need to
+ * import the paper types.
+ *
+ * source defaults to "ai_parlay" since the slip is populated by the
+ * recommendation surfaces (Auto Profit, Daily Plan, builder). When
+ * the user manually composes a slip the source is still "ai_parlay"
+ * because the picks themselves are AI-generated — the manual entry
+ * path lives in PaperBetEntryForm.
+ */
+export interface SlipDraftInput {
+  /** Loose subset of ValueBetCandidate — only what we translate. */
+  legs: Array<{
+    selectionLabel: string;
+    sport: string;
+    gameId?: string;
+    marketType: "moneyline" | "spread" | "total" | "player_prop";
+    statType?: string;
+    lineValue?: number;
+    americanOdds: number;
+    playerName?: string;
+    playerId?: string;
+    teamId?: string;
+  }>;
+  /** Optional label — defaults to "Saved from slip · {N} legs". */
+  label?: string;
+  /** When true, persists trackLive=true so the entry form opens with
+   *  the live tracker pre-armed. Caller flips this from the toggle. */
+  trackLive?: boolean;
+  /**
+   * Slip-level reasoning snapshot for the learning capture layer.
+   * Optional — caller passes whatever the optimizer surfaced.
+   */
+  reason?: PaperDraftReasonSnapshot;
+}
+
+/**
+ * Parse the over/under direction out of a selection label like
+ * "Aaron Judge Over 1.5 Total Bases". Returns undefined for team
+ * markets where direction doesn't apply.
+ */
+function parseDirection(label: string): "over" | "under" | undefined {
+  const m = /\b(over|under)\b/i.exec(label);
+  if (!m) return undefined;
+  return m[1].toLowerCase() as "over" | "under";
+}
+
+export function createSlipDraft(input: SlipDraftInput): PaperDraft {
+  const id = (typeof crypto !== "undefined" && "randomUUID" in crypto)
+    ? crypto.randomUUID()
+    : `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const legs: PaperLeg[] = input.legs.map((l) => {
+    const sportUpper = String(l.sport).toUpperCase();
+    // PaperLeg.sport accepts a fixed union — normalize by mapping
+    // common league strings. Fall back to MLB if unknown so the
+    // shape is valid (the user can always edit before submitting).
+    const sport: PaperLeg["sport"] =
+      sportUpper === "NFL" || sportUpper === "NBA" || sportUpper === "WNBA"
+        || sportUpper === "MLB" || sportUpper === "BOXING" || sportUpper === "MMA"
+        ? (sportUpper as PaperLeg["sport"])
+        : "MLB";
+    return {
+      dkLabel:        l.selectionLabel,
+      sport,
+      league:         String(l.sport).toLowerCase(),
+      gameId:         l.gameId,
+      teamLabel:      l.teamId,
+      playerName:     l.playerName,
+      playerId:       l.playerId,
+      marketType:     l.marketType,
+      statType:       l.statType,
+      direction:      parseDirection(l.selectionLabel),
+      line:           l.lineValue,
+      americanOdds:   l.americanOdds,
+      selectionLabel: l.selectionLabel,
+      status:         "open",
+    };
+  });
+  const draft: PaperDraft = {
+    id,
+    legs,
+    stake:           "10",
+    notes:           "",
+    trackLive:       input.trackLive ?? false,
+    liveScoreHome:   "",
+    liveScoreAway:   "",
+    livePeriod:      "",
+    liveGameClock:   "",
+    livePlayerStat:  "",
+    liveModelProb:   "",
+    label:           input.label ?? `Saved from slip · ${legs.length} leg${legs.length === 1 ? "" : "s"}`,
+    updatedAt:       new Date().toISOString(),
+    source:          "auto_plan",
+    reasonSnapshot:  input.reason,
+  };
+  saveDraft(draft);
+  return draft;
+}
+
+/**
  * Convert a placed paper bet's data into a fresh draft so the user
  * can edit malformed fields (game id, team abbr, etc.) and resubmit.
  * The original bet is left in place — caller decides whether to
