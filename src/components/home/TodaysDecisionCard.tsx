@@ -14,6 +14,7 @@
  *             empty (nothing to override to).
  */
 
+import { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
@@ -25,6 +26,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { TodaysDecision } from "@/lib/insights/todaysDecision";
+import {
+  logDecisionFollowed,
+  logDecisionOverridden,
+  logDecisionShown,
+} from "@/lib/learning/decisionLog";
 
 interface Props {
   decision: TodaysDecision;
@@ -32,7 +38,35 @@ interface Props {
   compact?: boolean;
 }
 
+/** Minimal UUID v4 generator — avoids pulling crypto.randomUUID
+ *  through the build for browsers that don't expose it. */
+function newDecisionId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `dec-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function TodaysDecisionCard({ decision, compact = false }: Props) {
+  // Stable decision_id per (verdict, headline) tuple within a session
+  // — re-render with same content shouldn't double-log. Headline
+  // change (different pick / new slate) gets a fresh id.
+  const decisionId = useMemo(
+    () => newDecisionId(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [decision.verdict, decision.headline],
+  );
+
+  useEffect(() => {
+    logDecisionShown({
+      decisionId,
+      source: "todays_decision",
+      decision,
+    });
+    // Re-fire when the decision content actually changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decisionId]);
+
   const { verdict, headline, reasons, confidence, risk, card, poolHadCandidates } = decision;
 
   const tone = verdict === "BET"
@@ -99,6 +133,9 @@ export function TodaysDecisionCard({ decision, compact = false }: Props) {
         {verdict === "BET" || verdict === "MODIFY" ? (
           <Link
             to="/builder?view=parlay_builder"
+            onClick={() => logDecisionFollowed({
+              decisionId, source: "todays_decision", verdict,
+            })}
             className={cn(
               "inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors",
               verdict === "BET"
@@ -113,10 +150,14 @@ export function TodaysDecisionCard({ decision, compact = false }: Props) {
 
         {/* "View best available anyway" — only when SKIP and the pool
             has SOMETHING to look at. Suppressed on truly-empty slates
-            where there's nothing to override to. */}
+            where there's nothing to override to. Logged as an
+            override since the user is going against the SKIP verdict. */}
         {verdict === "SKIP" && poolHadCandidates ? (
           <Link
             to="/builder"
+            onClick={() => logDecisionOverridden({
+              decisionId, source: "todays_decision", verdict,
+            })}
             className="text-[11px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
           >
             View best available anyway →
