@@ -18,6 +18,7 @@
 
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { combineAmericanOdds, americanToPayoutMultiplier } from "./normalizer";
+import { bridgePaperBetLegs } from "@/lib/learning/paperBetLegBridge";
 import type {
   PaperBankroll,
   PaperBet,
@@ -535,6 +536,22 @@ export async function settlePaperBet(args: {
     }
   } catch (e) {
     console.warn("Bankroll update on settle failed (bet still settled):", e);
+  }
+
+  // #164 — bridge into prediction_history so paper activity flows
+  // into CLV / strategy / calibration analytics. Fire-and-forget so
+  // the user's UI never waits on it. Non-fatal; voided bets are
+  // skipped inside the bridge to keep the calibration signal clean.
+  // We only bridge terminal statuses — needs_review re-tries the
+  // next time the bet settles.
+  if (isTerminal && args.status !== "voided") {
+    void bridgePaperBetLegs(rowToBet(updated as PaperBetRow))
+      .then((r) => {
+        if (r.errors.length) {
+          console.warn("[paper bridge] errors during settle:", r.errors);
+        }
+      })
+      .catch((e) => console.warn("[paper bridge] failed:", e));
   }
 
   return rowToBet(updated as PaperBetRow);
