@@ -1,47 +1,37 @@
 /**
  * BestPlayerPropToday — Home hero card.
  *
- * Surfaces the single highest-ranked **DraftKings-supported** player prop across
- * all sports using the existing `computePlayerEdgeScore` (weights: edge .40,
- * volume .25, matchup .15, trend .10, line .10 − variance) with a small DK-
- * priority tie-break so the top recommendation favours the bet types DK
- * markets prioritise per spec (NBA: Pts > Reb > Ast > PRA …, etc.).
+ * As of #177 (Player Prop Ranking Fix item 3), this card is fed by
+ * the SAME `rankTopProps` ranker that drives the Top Props list,
+ * so the hero's #1 pick can never disagree with the list's #1.
+ * Previously the card ran its own `computePlayerEdgeScore` +
+ * `dkAwareSort` pipeline (40% edge / 25% confidence / 15% matchup),
+ * which produced a different ordering than the Top Props ranker
+ * (30% prob / 22% edge / 16% stability …) and routinely disagreed
+ * with it.
  *
- * Eligibility gates applied here (in addition to the engine's own):
- *   - DraftKings market must be supported (`isDraftKingsAvailable`)
- *   - model probability  ≥ 0.57   (proxied via confidence_score_0_100 ≥ 57
- *                                  or ml_hit_probability ≥ 0.57)
- *   - |edge|             ≥ 5 %    (sport-normalised via maxEdge in scorer)
- *   - role stability     ≥ 70/100 (consistency_label !== "volatile")
- *   - high-variance props (volatility_flag) only when edge ≥ 10 %
- *
- * Each row exposes: Sport · Player · DK bet type · Over/Under · DK line ·
- * Odds · Model projection · Edge % · Confidence · Action verdict · Reason.
- *
- * Action verdict: Bet now / Monitor / Pass — derived from
- * `pickActionForPrediction` so it stays in lockstep with the rest of the app.
+ * Surface contract:
+ *   - Top 6 ranked props (one hero, five alternatives)
+ *   - All filters / DK support / probability floor / volatility
+ *     gates / diversity caps live in `topPropsRanker`. This card
+ *     is presentational.
  */
 
 import { useMemo } from "react";
 import { Sparkles, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  computePlayerEdgeScore,
-  sortPlayerEdgePredictions,
-  type PlayerEdgePrediction,
-} from "@/data/playerEdgeMock";
+import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import {
   pickActionForPrediction,
   pickActionLabel,
   pickActionClass,
 } from "@/lib/dailyPlan/pickAction";
 import {
-  isDraftKingsAvailable,
   dkLabelFor,
   dkShortLabelFor,
-  dkPriorityFor,
   getDkMapping,
 } from "@/lib/draftkings/dkMarketCatalog";
+import { rankTopProps } from "@/lib/playerProps/topPropsRanker";
 import { cn } from "@/lib/utils";
 import { InjuryBadge } from "@/components/InjuryBadge";
 
@@ -50,41 +40,14 @@ export interface BestPlayerPropTodayProps {
   isPending?: boolean;
 }
 
-/** Sport-normalised edge floor (5 %) expressed in raw stat units. */
+/** Sport-normalised edge floor (5 %) expressed in raw stat units.
+ *  Local to this file because it's display-only — the ranker has
+ *  its own normalization that's the source of truth for ordering. */
 function maxEdgeFor(sport: PlayerEdgePrediction["sport"]): number {
   return sport === "NBA" || sport === "WNBA" ? 8
        : sport === "NFL" ? 30
        : sport === "MLB" ? 3
        : 15;
-}
-function meetsEdgeFloor(p: PlayerEdgePrediction): boolean {
-  return Math.abs(p.edge) / maxEdgeFor(p.sport) >= 0.05;
-}
-function meetsProbabilityFloor(p: PlayerEdgePrediction): boolean {
-  if (p.ml_hit_probability != null && p.ml_active) {
-    return p.ml_hit_probability >= 0.57;
-  }
-  const conf = p.confidence_score_0_100
-    ?? (p.confidence === "HIGH" ? 72 : p.confidence === "MED" ? 58 : 44);
-  return conf >= 57;
-}
-function meetsRoleFloor(p: PlayerEdgePrediction): boolean {
-  return p.consistency_label !== "volatile";
-}
-function passesVarianceRule(p: PlayerEdgePrediction): boolean {
-  if (!p.volatility_flag) return true;
-  return Math.abs(p.edge) / maxEdgeFor(p.sport) >= 0.10;
-}
-/** Spec: do not recommend DK-unsupported markets — mark unavailable and skip. */
-function meetsDkSupport(p: PlayerEdgePrediction): boolean {
-  return isDraftKingsAvailable(p.sport, p.stat_type);
-}
-function eligible(p: PlayerEdgePrediction): boolean {
-  return meetsDkSupport(p)
-      && meetsEdgeFloor(p)
-      && meetsProbabilityFloor(p)
-      && meetsRoleFloor(p)
-      && passesVarianceRule(p);
 }
 
 /** "Over 24.5 Points" using the DK label so the UI matches the sportsbook. */
@@ -112,19 +75,10 @@ function dkReason(p: PlayerEdgePrediction): string {
   return `DK ${mkt} (${dir}) — model ${Math.round((p.projected_value ?? 0) * 10) / 10} vs line ${p.line_value} · edge ${edgePct(p)} · confidence ${conf}/100`;
 }
 
-/** DK priority breaks score ties so highest-priority DK markets bubble up. */
-function dkAwareSort(a: PlayerEdgePrediction, b: PlayerEdgePrediction): number {
-  const sa = computePlayerEdgeScore(a);
-  const sb = computePlayerEdgeScore(b);
-  if (Math.abs(sa - sb) > 0.5) return sb - sa;
-  return dkPriorityFor(a.sport, a.stat_type) - dkPriorityFor(b.sport, b.stat_type);
-}
-
 export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTodayProps) {
   const ranked = useMemo(() => {
-    const filtered = predictions.filter(eligible);
-    // Sort with DK-priority tie-break, then keep top 6
-    return [...sortPlayerEdgePredictions(filtered)].sort(dkAwareSort).slice(0, 6);
+    const { ranked } = rankTopProps(predictions, { date: "today", topN: 6 });
+    return ranked.map((r) => r.pred);
   }, [predictions]);
 
   if (isPending) {

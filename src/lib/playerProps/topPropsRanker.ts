@@ -34,6 +34,8 @@ import {
   isCombatSport,
   validateCombatProp,
 } from "@/lib/playerProps/combatMarketValidation";
+import { isDraftKingsAvailable } from "@/lib/draftkings/dkMarketCatalog";
+import { getPropRiskLevel } from "@/lib/valueParlay/propRiskLevels";
 
 export interface ScanStats {
   total_scanned: number;
@@ -46,6 +48,10 @@ export interface ScanStats {
     duplicate_game_capped: number;
     duplicate_sport_capped: number;
     high_volatility_in_top_capped: number;
+    /** Cap from new high-risk-stat diversity gate (#177 item 7). */
+    high_risk_stat_in_top_capped: number;
+    /** DK market not booked for this (sport, stat_type) combo. */
+    dk_not_supported: number;
     /**
      * Boxing/MMA props whose market shape is invalid — e.g. a
      * fight_winner prop with a numeric Over/Under line, or a
@@ -119,26 +125,52 @@ function targetDateYmd(date: "today" | "tomorrow", now: Date): string {
 /**
  * Date-match the prediction's game_time against the target slate.
  *
- * `game_time` is normally a human-readable string ("7:30 PM ET") set by
- * formatGameTime in espnPlayerStats — NOT an ISO timestamp. Real ISO
- * is rare here, so the lenient default is: when we can't parse a date,
- * accept the prop. The prop pool is built freshly per pageload from
- * today's scoreboard, so every candidate is implicitly on today's
- * slate. Only when game_time IS a real ISO date do we honor it as a
- * tomorrow/today filter.
+ * Strict policy (#177 item 5): only accept the prop when we can
+ * confidently parse a date from `game_time` and that date matches
+ * the target slate. Either:
+ *   • ISO-ish: `YYYY-MM-DD…` parsed via Date()
+ *   • Numeric: epoch seconds or millis
+ *
+ * Display-only labels ("7:30 PM ET", "Final", etc.) and missing
+ * `game_time` fall through to a separate `game_date` field check
+ * when present; otherwise rejected. The previous lenient default
+ * (accept anything we couldn't parse) was a no-op for almost every
+ * production row because `formatGameTime` in espnPlayerStats emits
+ * display strings.
+ *
+ * The reject-when-unsure policy is paired with the prop fetcher
+ * setting `game_date` to a real YYYY-MM-DD on every emitted row;
+ * if upstream forgets to populate it, the user sees an empty Top
+ * Props list and we get a loud signal rather than a quiet tomorrow-
+ * leakage bug.
  */
 function gameMatchesDate(pred: PlayerEdgePrediction, targetYmd: string): boolean {
-  if (!pred.game_time) return true;
-  // Heuristic: ISO-ish strings start with YYYY-MM-DD. Anything else
-  // (e.g. "7:30 PM ET") is a display-only label — accept it.
-  if (!/^\d{4}-\d{2}-\d{2}/.test(pred.game_time)) return true;
-  try {
-    const gameDate = new Date(pred.game_time);
-    if (Number.isNaN(gameDate.getTime())) return true;
-    return toLocalYmd(gameDate) === targetYmd;
-  } catch {
-    return true;
+  // Prefer an explicit YYYY-MM-DD `game_date` when set — this is
+  // what the prop fetcher should emit going forward.
+  const gd = (pred as { game_date?: string }).game_date;
+  if (typeof gd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(gd)) {
+    return gd === targetYmd;
   }
+  if (!pred.game_time) return false;
+  // ISO-ish — let Date() do the work and compare local YMDs.
+  if (/^\d{4}-\d{2}-\d{2}/.test(pred.game_time)) {
+    const gameDate = new Date(pred.game_time);
+    if (!Number.isNaN(gameDate.getTime())) {
+      return toLocalYmd(gameDate) === targetYmd;
+    }
+  }
+  // Numeric epoch (sec or ms) — sometimes upstream emits these.
+  const asNum = Number(pred.game_time);
+  if (Number.isFinite(asNum) && asNum > 0) {
+    const ms = asNum > 1e12 ? asNum : asNum * 1000;
+    const gameDate = new Date(ms);
+    if (!Number.isNaN(gameDate.getTime())) {
+      return toLocalYmd(gameDate) === targetYmd;
+    }
+  }
+  // Unparseable display string — reject. Upstream must provide a
+  // parseable date if the prop is to enter Top Props.
+  return false;
 }
 
 // ── Repeat-exposure cache (localStorage) ──────────────────────────────
@@ -310,9 +342,13 @@ function passesHardFilters(
     stats.filtered_out.inactive_player++;
     return false;
   }
-  // Probability floor — ML hit prob OR confidence proxy.
+  // Probability floor (#177 item 4) — tightened from 0.50 to 0.55.
+  // 0.50 is "no information" for a binary prop; 0.55 means the
+  // model has at least a 5pp lean. Combined with the synthetic
+  // `recent_form` removal, this keeps the bottom of the pool out
+  // of Top Props entirely.
   const p = calibratedProb01(pred);
-  if (p < 0.50) {
+  if (p < 0.55) {
     stats.filtered_out.low_probability++;
     return false;
   }
@@ -321,6 +357,16 @@ function passesHardFilters(
   // the brutal "high vol + nothing to back it" block.
   if (pred.volatility_flag && edgeNorm01(pred) < 0.05) {
     stats.filtered_out.high_volatility_blocked++;
+    return false;
+  }
+  // DraftKings availability (#177 item 6) — applied consistently
+  // across surfaces. Hero card already enforces this; Top Props
+  // now matches so users don't see picks DK doesn't book and
+  // can't actually act on. Combat sports skip the DK gate (the
+  // catalog only knows team-sport markets).
+  if (!isCombatSport(pred.sport)
+      && !isDraftKingsAvailable(pred.sport, pred.stat_type)) {
+    stats.filtered_out.dk_not_supported++;
     return false;
   }
   return true;
@@ -349,12 +395,17 @@ function score(
     + timing         * 0.06
     - volatilityPenalty * 0.04;
 
-  // Repeat-player penalty. Player IDs may be sport-prefixed, so we
-  // lookup the bare id. Strong-enough edge waives the penalty.
+  // Repeat-player penalty (#177 item 1 — bug fix).
+  // The previous comparator was `edgePct < REPEAT_OVERRIDE_EDGE / 0.10`
+  // which evaluated to `0.08 / 0.10 = 0.8`, so the penalty fired
+  // unless edge cleared 80% of sport-max — almost never. Players
+  // appearing yesterday were biased against regardless of signal
+  // strength. Compare edgePct directly against REPEAT_OVERRIDE_EDGE
+  // so a strong-enough signal (≥8% of sport-max) waives the penalty.
   let repeatPenalty = 0;
   if (yesterdayPlayers.has(String(pred.player_id))) {
     const edgePct = Math.abs(pred.edge ?? 0) / maxEdgeFor(pred.sport);
-    if (edgePct < REPEAT_OVERRIDE_EDGE / 0.10) {
+    if (edgePct < REPEAT_OVERRIDE_EDGE) {
       repeatPenalty = REPEAT_PENALTY;
     }
   }
@@ -384,17 +435,36 @@ interface DiversityCaps {
   maxPerGame: number;
   maxPerSportInTop: number;
   maxHighVolInTop: number;
+  /** New (#177 item 7): cap how many "high risk" stat-types
+   *  (RBIs, HRs, stolen bases, MLB combined picks, KO/TKO) can
+   *  reach the final list. Was implicitly unbounded before. */
+  maxHighRiskStatInTop: number;
 }
 
 const DEFAULT_CAPS: DiversityCaps = {
-  maxPerPlayer:      2,
-  maxPerGame:        3,
-  maxPerSportInTop:  3,
-  maxHighVolInTop:   1,
+  maxPerPlayer:         2,
+  maxPerGame:           3,
+  maxPerSportInTop:     3,
+  maxHighVolInTop:      1,
+  maxHighRiskStatInTop: 1,
 };
 
 function isHighVol(p: PlayerEdgePrediction): boolean {
   return Boolean(p.volatility_flag) || p.consistency_label === "volatile";
+}
+
+/**
+ * Per-stat-type structural risk classifier (#177 item 7). Reads
+ * propRiskLevels — the same source-of-truth the parlay optimizer
+ * uses — so the ranker doesn't drift from Sharp Mode's view of
+ * which markets are inherently noisy.
+ */
+function isHighRiskStat(p: PlayerEdgePrediction): boolean {
+  return getPropRiskLevel({
+    statType:       p.stat_type,
+    marketType:     "player_prop",
+    selectionLabel: `${p.player_name ?? ""} ${p.stat_type ?? ""}`,
+  }) === "high";
 }
 
 /**
@@ -416,10 +486,16 @@ function applyDiversityCaps(
   const playerCount = new Map<string, number>();
   const gameCount   = new Map<string, number>();
   let highVolUsed   = 0;
+  let highRiskStatUsed = 0;
 
-  // Detect single-sport slate.
-  const distinctSports = new Set(scored.map((s) => s.pred.sport));
-  const sportCapEffective = distinctSports.size <= 1 ? Infinity : caps.maxPerSportInTop;
+  // Sport cap is now hard (#177 item 7 alignment) — the previous
+  // single-sport waiver let MLB-only Tuesdays surface 10 MLB
+  // combined-stat props in the same Top 10 with no diversity
+  // protection. With a hard cap and a fallback that only kicks in
+  // when the slate genuinely lacks alternates, the ranker behaves
+  // the same on multi-sport days and degrades gracefully on
+  // single-sport days.
+  const sportCapEffective = caps.maxPerSportInTop;
 
   const accepted: RankedProp[] = [];
   for (const r of scored) {
@@ -445,13 +521,47 @@ function applyDiversityCaps(
       stats.filtered_out.high_volatility_in_top_capped++;
       continue;
     }
+    if (isHighRiskStat(pred) && highRiskStatUsed >= caps.maxHighRiskStatInTop) {
+      stats.filtered_out.high_risk_stat_in_top_capped++;
+      continue;
+    }
 
     accepted.push(r);
     sportCount.set(sport, (sportCount.get(sport) ?? 0) + 1);
     playerCount.set(player, (playerCount.get(player) ?? 0) + 1);
     gameCount.set(gameId, (gameCount.get(gameId) ?? 0) + 1);
-    if (isHighVol(pred)) highVolUsed++;
+    if (isHighVol(pred))      highVolUsed++;
+    if (isHighRiskStat(pred)) highRiskStatUsed++;
   }
+
+  // Single-sport fallback — if the slate genuinely had only one
+  // sport on board and we ran out before reaching topN because of
+  // the (now hard) sport cap, top up by ignoring sport. Player /
+  // game / stat caps still apply so we don't regress to "10 hits
+  // props on the same player". Keeps the ranker useful on quiet
+  // days without re-introducing the silent waiver.
+  if (accepted.length < topN) {
+    const distinctSports = new Set(scored.map((s) => s.pred.sport));
+    if (distinctSports.size <= 1) {
+      for (const r of scored) {
+        if (accepted.length >= topN) break;
+        if (accepted.includes(r)) continue;
+        const pred = r.pred;
+        const player = String(pred.player_id);
+        const gameId = String(pred.game_id);
+        if ((playerCount.get(player) ?? 0) >= caps.maxPerPlayer) continue;
+        if ((gameCount.get(gameId)  ?? 0) >= caps.maxPerGame)   continue;
+        if (isHighVol(pred)      && highVolUsed      >= caps.maxHighVolInTop)      continue;
+        if (isHighRiskStat(pred) && highRiskStatUsed >= caps.maxHighRiskStatInTop) continue;
+        accepted.push(r);
+        playerCount.set(player, (playerCount.get(player) ?? 0) + 1);
+        gameCount.set(gameId, (gameCount.get(gameId) ?? 0) + 1);
+        if (isHighVol(pred))      highVolUsed++;
+        if (isHighRiskStat(pred)) highRiskStatUsed++;
+      }
+    }
+  }
+
   return accepted;
 }
 
@@ -476,6 +586,8 @@ export function rankTopProps(
       duplicate_game_capped: 0,
       duplicate_sport_capped: 0,
       high_volatility_in_top_capped: 0,
+      high_risk_stat_in_top_capped: 0,
+      dk_not_supported: 0,
       invalid_combat_market: 0,
     },
     pool_after_filters: 0,

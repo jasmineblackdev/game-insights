@@ -1042,9 +1042,16 @@ async function fetchSportPlayerEdge(
             // current projection vs line.
             is_home:               isHome,
             opponent_win_pct:      oppWinPct,
-            recent_form:           edgeMag >= t.high
-              ? (direction === "MORE" ? "hot" : "cold")
-              : "steady",
+            // recent_form intentionally undefined — the synthetic
+            // edge-derived label was double-counting `edge` as a
+            // "form" signal in topPropsRanker. The real recent-form
+            // signal is computed asynchronously via
+            // src/lib/ml/recentForm.ts and applied by
+            // enrichWithRealRecentForm() in playerEdgeApi.ts after
+            // the rules pass. Leaving undefined so recentHitRate01
+            // returns its neutral 0.50 default until the real
+            // value is bound.
+            recent_form: undefined,
             // Transparency: where the leader came from (live scoreboard vs
             // team-leaders fallback) — surfaced in the Model Status badge.
             prop_source:           propSource,
@@ -1144,7 +1151,7 @@ async function fetchSportPlayerEdge(
           confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
           risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
           is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
-          recent_form: edgeMag >= t.high ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          recent_form: undefined, // see #177 — synthetic field removed; bound async by enrichWithRealRecentForm
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high ? "stable" : edgeMag >= t.med ? "medium" : "volatile",
           matchup_quality: oppDef?.matchupQuality,
@@ -1189,7 +1196,7 @@ async function fetchSportPlayerEdge(
           confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
           risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
           is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
-          recent_form: edgeMag >= t.high * 2.5 ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          recent_form: undefined, // see #177 — synthetic field removed; bound async by enrichWithRealRecentForm
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high * 2.5 ? "stable" : edgeMag >= t.med * 2.5 ? "medium" : "volatile",
           matchup_quality: oppDef?.matchupQuality,
@@ -1247,7 +1254,7 @@ async function fetchSportPlayerEdge(
           confidence_score_0_100: confidence === "HIGH" ? 72 : confidence === "MED" ? 58 : 44,
           risk_tier: confidence === "HIGH" ? "safe" : confidence === "MED" ? "balanced" : "longshot",
           is_home: acc.isHome, opponent_win_pct: acc.oppWinPct,
-          recent_form: edgeMag >= t.high * 2.0 ? (direction === "MORE" ? "hot" : "cold") : "steady",
+          recent_form: undefined, // see #177 — synthetic field removed; bound async by enrichWithRealRecentForm
           prop_source: acc.propSource,
           consistency_label: edgeMag >= t.high * 2.0 ? "stable" : edgeMag >= t.med * 2.0 ? "medium" : "volatile",
           matchup_quality: acc.mlbOpposingSp?.matchupQuality,

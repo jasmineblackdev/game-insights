@@ -8,6 +8,7 @@ import { fetchLivePlayerEdgePredictions } from "@/lib/espnPlayerStats";
 import { fetchCombatPlayerEdgePredictions } from "@/lib/combatPlayerEdge";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { enrichPredictions } from "@/lib/ml/playerEdgeEnrichment";
+import { getAthleteRecentForm } from "@/lib/ml/recentForm";
 
 export type PlayerEdgeAccuracyRollup = {
   window: string;
@@ -29,6 +30,102 @@ function ensureGameSort(items: PlayerEdgePrediction[]): PlayerEdgePrediction[] {
     ...p,
     game_sort: typeof p.game_sort === "number" ? p.game_sort : i * 10,
   }));
+}
+
+/**
+ * Async enrichment pass that replaces the synthetic `recent_form`
+ * label (previously a recoded edge magnitude in espnPlayerStats —
+ * see #177) with a real signal computed from each athlete's
+ * recent ESPN game logs via the existing `recentForm` module.
+ *
+ * - Only runs for player-prop predictions with a `playerId` and a
+ *   non-zero `projected_value` (used as the per-game baseline).
+ * - Sport gate: NBA / NFL / MLB / WNBA — the gamelog endpoints
+ *   `playerGameLog.ts` knows about. Combat sports are skipped.
+ * - Concurrency capped at 8 to avoid hammering ESPN. ~30 props on
+ *   a typical pageload finish in ~4 batches (~1-2s on warm cache).
+ * - Fail-soft per-call: a single 500 leaves that prop's
+ *   `recent_form` undefined; the ranker's `recentHitRate01`
+ *   already returns its neutral 0.50 default in that case.
+ *
+ * Mapping (multiplier ∈ [0.6, 1.4] → label):
+ *   ≥ 1.10 → "hot"
+ *   ≤ 0.90 → "cold"
+ *   else   → "steady"
+ */
+const SUPPORTED_RECENTFORM_SPORTS = new Set(["NBA", "NFL", "MLB", "WNBA"]);
+const RECENTFORM_CONCURRENCY = 8;
+
+function multiplierToFormLabel(m: number): "hot" | "cold" | "steady" {
+  if (m >= 1.10) return "hot";
+  if (m <= 0.90) return "cold";
+  return "steady";
+}
+
+async function enrichWithRealRecentForm(
+  items: PlayerEdgePrediction[],
+): Promise<PlayerEdgePrediction[]> {
+  // Index of items eligible for enrichment, with the args we need.
+  const targets: Array<{
+    idx: number;
+    sport: string;
+    athleteId: string;
+    statType: string;
+    seasonPerGame: number;
+  }> = [];
+  for (let i = 0; i < items.length; i++) {
+    const p = items[i];
+    const sport = String(p.sport).toUpperCase();
+    if (!SUPPORTED_RECENTFORM_SPORTS.has(sport)) continue;
+    const athleteId = String(p.player_id ?? "").trim();
+    if (!athleteId) continue;
+    if (!p.stat_type) continue;
+    const baseline = Number(p.projected_value);
+    if (!Number.isFinite(baseline) || baseline <= 0) continue;
+    targets.push({
+      idx: i,
+      sport,
+      athleteId,
+      statType: p.stat_type,
+      seasonPerGame: baseline,
+    });
+  }
+  if (targets.length === 0) return items;
+
+  const out = items.slice();
+  // Simple concurrency-limited worker pool. Avoids
+  // Promise.all-on-everything which would fan out 30+ ESPN calls
+  // at once on first paint.
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (cursor < targets.length) {
+      const myIdx = cursor++;
+      const t = targets[myIdx];
+      try {
+        const r = await getAthleteRecentForm({
+          sport:         t.sport,
+          athleteId:     t.athleteId,
+          statType:      t.statType,
+          seasonPerGame: t.seasonPerGame,
+        });
+        if (r.sampleSize >= 2) {
+          out[t.idx] = {
+            ...out[t.idx],
+            recent_form: multiplierToFormLabel(r.multiplier),
+          };
+        }
+      } catch {
+        // Per-call failure — leave recent_form undefined, ranker
+        // falls back to neutral 0.50.
+      }
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(RECENTFORM_CONCURRENCY, targets.length) },
+    () => worker(),
+  );
+  await Promise.all(workers);
+  return out;
 }
 
 function resolvePlayerEdgeDataUrl(): string | null {
@@ -116,7 +213,8 @@ export async function fetchPlayerEdgePredictions(
       if (stat !== "all") params.statType = stat;
       const { items, accuracy } = await fetchPlayerEdgeJson(dataUrl, params);
       const enriched = enrichPredictions(ensureGameSort(items));
-      return { items: enriched, accuracy, source: "api" };
+      const withForm = await enrichWithRealRecentForm(enriched);
+      return { items: withForm, accuracy, source: "api" };
     } catch (e) {
       console.warn("[GameLens] Player Edge API unavailable, falling back to ESPN stats:", e);
     }
@@ -136,7 +234,8 @@ export async function fetchPlayerEdgePredictions(
       return true;
     });
     const enriched = enrichPredictions(ensureGameSort(filtered));
-    return { items: enriched, source: "api" };
+    const withForm = await enrichWithRealRecentForm(enriched);
+    return { items: withForm, source: "api" };
   } catch (e) {
     console.warn("[GameLens] Player stats unavailable:", e);
     return { items: [], source: "api" };
