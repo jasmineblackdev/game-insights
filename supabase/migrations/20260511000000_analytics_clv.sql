@@ -86,7 +86,9 @@ as $$
     )                                                                            as pct_beating_close,
     round((select avg(clv_pp) from apples), 2)                                   as avg_clv_pp,
     round(
-      (select percentile_cont(0.5) within group (order by clv_pp) from apples),
+      -- percentile_cont returns double precision regardless of input
+      -- type; round(double precision, int) doesn't exist, so cast.
+      (select percentile_cont(0.5) within group (order by clv_pp) from apples)::numeric,
       2
     )                                                                            as median_clv_pp,
     (select count(*) from apples_7d)                                             as total_7d,

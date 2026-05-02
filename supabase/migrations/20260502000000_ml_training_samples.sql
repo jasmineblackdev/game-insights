@@ -90,11 +90,14 @@ create index if not exists ml_training_samples_game_idx
 
 -- Dedup hint: same user, same game, same player, same market, same
 -- line, same source on the same calendar day = same sample.
+-- Sentinel epoch date instead of current_date — Postgres requires
+-- IMMUTABLE expressions in unique-index keys, and current_date is
+-- STABLE.
 create unique index if not exists ml_training_samples_dedup_idx
   on ml_training_samples (
     coalesce(user_id, '00000000-0000-0000-0000-000000000000'::uuid),
     sport, bet_type, coalesce(market, ''), coalesce(player, team, ''), coalesce(line, 0),
-    coalesce(event_date, current_date), source
+    coalesce(event_date, '1970-01-01'::date), source
   );
 
 alter table ml_training_samples enable row level security;

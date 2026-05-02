@@ -29,7 +29,7 @@ alter table prediction_history
   add column if not exists platt_batch_id         uuid;
 
 create index if not exists prediction_history_platt_pending_idx
-  on prediction_history (platt_applied, sport, resolved_at)
+  on prediction_history (platt_applied, sport, settled_at)
   where platt_applied = false and outcome is not null;
 
 create index if not exists prediction_history_clv_idx
@@ -121,7 +121,7 @@ as $$
            else null
       end as win_int
     from prediction_history
-    where resolved_at >= now() - (window_days || ' days')::interval
+    where settled_at >= now() - (window_days || ' days')::interval
       and clv_pp is not null
       and outcome in ('win','loss')
   ),

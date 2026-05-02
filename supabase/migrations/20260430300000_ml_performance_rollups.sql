@@ -19,7 +19,7 @@ returns table (
 )
 language sql stable security definer as $$
   select
-    coalesce(legs.sport, ph.sport)                           as sport,
+    ph.sport,
     count(*) filter (where ph.outcome in ('win','loss','push'))::int as resolved_count,
     count(*) filter (where ph.outcome = 'win')::int          as won,
     count(*) filter (where ph.outcome = 'loss')::int         as lost,
@@ -28,10 +28,9 @@ language sql stable security definer as $$
       nullif(count(*) filter (where ph.outcome in ('win','loss')), 0), 2) as win_pct,
     null::numeric                                            as avg_payout_x
   from prediction_history ph
-  left join lateral (select ph.sport) legs on true
-  where ph.resolved_at >= now() - (window_days || ' days')::interval
-  group by sport
-  order by sport;
+  where ph.settled_at >= now() - (window_days || ' days')::interval
+  group by ph.sport
+  order by ph.sport;
 $$;
 
 -- ── Win rate by bet/market type ──────────────────────────────────
@@ -54,7 +53,7 @@ language sql stable security definer as $$
     round(100.0 * count(*) filter (where outcome = 'win') /
       nullif(count(*) filter (where outcome in ('win','loss')), 0), 2) as win_pct
   from prediction_history
-  where resolved_at >= now() - (window_days || ' days')::interval
+  where settled_at >= now() - (window_days || ' days')::interval
   group by bet_type
   having count(*) filter (where outcome in ('win','loss')) >= 5
   order by win_pct desc nulls last;
@@ -143,7 +142,7 @@ language sql stable security definer as $$
     round(100.0 * count(*) filter (where outcome = 'loss') /
       nullif(count(*) filter (where outcome in ('win','loss')), 0), 2) as loss_pct
   from prediction_history
-  where resolved_at >= now() - (window_days || ' days')::interval
+  where settled_at >= now() - (window_days || ' days')::interval
   group by sport, stat_type
   having count(*) filter (where outcome in ('win','loss')) >= 5
   order by loss_pct desc nulls last

@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS boxing_odds_latest (
 -- Boxing prediction factors (per-factor breakdown for audit/backtesting)
 CREATE TABLE IF NOT EXISTS boxing_prediction_factors (
   factor_id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  prediction_id          text   REFERENCES boxing_predictions(prediction_id) ON DELETE CASCADE,
+  prediction_id          bigint REFERENCES boxing_predictions(prediction_id) ON DELETE CASCADE,
   fight_id               text   NOT NULL REFERENCES boxing_fights(fight_id) ON DELETE CASCADE,
   factor_opponent_quality  numeric(6,4),
   factor_style_matchup     numeric(6,4),
@@ -349,7 +349,8 @@ ALTER TABLE boxing_odds_snapshots       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE boxing_odds_latest          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE boxing_prediction_factors   ENABLE ROW LEVEL SECURITY;
 
--- Public read
+-- Public read. Postgres has no `CREATE POLICY IF NOT EXISTS`, so we
+-- DROP-then-CREATE to keep the migration idempotent.
 DO $$
 DECLARE t text;
 BEGIN
@@ -358,8 +359,9 @@ BEGIN
     'mma_odds_latest','mma_predictions','mma_prediction_versions','mma_learning_history',
     'boxing_odds_snapshots','boxing_odds_latest','boxing_prediction_factors'
   ] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS "%s_public_read" ON %s', t, t);
     EXECUTE format(
-      'CREATE POLICY IF NOT EXISTS "%s_public_read" ON %s FOR SELECT USING (true)',
+      'CREATE POLICY "%s_public_read" ON %s FOR SELECT USING (true)',
       t, t
     );
   END LOOP;
@@ -374,8 +376,9 @@ BEGIN
     'mma_odds_latest','mma_predictions','mma_prediction_versions','mma_learning_history',
     'boxing_odds_snapshots','boxing_odds_latest','boxing_prediction_factors'
   ] LOOP
+    EXECUTE format('DROP POLICY IF EXISTS "%s_service_write" ON %s', t, t);
     EXECUTE format(
-      'CREATE POLICY IF NOT EXISTS "%s_service_write" ON %s FOR ALL TO service_role USING (true) WITH CHECK (true)',
+      'CREATE POLICY "%s_service_write" ON %s FOR ALL TO service_role USING (true) WITH CHECK (true)',
       t, t
     );
   END LOOP;
