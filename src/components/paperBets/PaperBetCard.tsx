@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Check, X, Circle, AlertTriangle, Clock, RefreshCw } from "lucide-react";
+import { Check, X, Circle, AlertTriangle, Clock, Radio, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
@@ -20,6 +20,7 @@ import {
   voidPaperBet,
 } from "@/lib/paperBets/store";
 import { americanToPayoutMultiplier } from "@/lib/paperBets/normalizer";
+import { formatLiveStateLine } from "@/lib/paperBets/liveTracker";
 import {
   diagnosisLabel,
   isTransient,
@@ -150,6 +151,7 @@ export function PaperBetCard({ bet, onChanged }: Props) {
           {bet.betType}
           {bet.legs.length > 1 ? ` · ${bet.legs.length} legs` : ""}
         </span>
+        <LiveStatusPill bet={bet} />
         <ResolutionVia bet={bet} />
         <span className="text-xs text-muted-foreground tabular-nums ml-auto">
           ${bet.stake.toFixed(2)} risk · {bet.combinedOddsAmerican > 0 ? `+${bet.combinedOddsAmerican}` : bet.combinedOddsAmerican}
@@ -174,6 +176,8 @@ export function PaperBetCard({ bet, onChanged }: Props) {
                 {l.direction && l.line != null ? ` · ${l.direction} ${l.line}` : ""}
               </p>
             ) : null}
+            <LivePlayerPropNote bet={bet} leg={l} />
+
             {l.resolvedActual != null || l.resolvedReason ? (
               <p className="text-[11px] text-foreground">
                 {l.resolvedActual != null ? <span className="font-semibold">Actual {l.resolvedActual} · </span> : null}
@@ -215,6 +219,50 @@ export function PaperBetCard({ bet, onChanged }: Props) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * Player-prop legs on live bets: ESPN's athlete gamelog isn't real-
+ * time, so we can't show in-game stats. Surface a small note so
+ * the user understands why no live actual is rendered. Auto-resolves
+ * via the existing resolver path once the box score lands.
+ */
+function LivePlayerPropNote({ bet, leg }: { bet: PaperBet; leg: PaperLeg }) {
+  if (bet.betTiming !== "live") return null;
+  if (leg.marketType !== "player_prop") return null;
+  if (leg.status !== "open" && leg.status !== "needs_review") return null;
+  return (
+    <p className="text-[10px] text-muted-foreground italic flex items-center gap-1">
+      <Clock className="w-3 h-3" />
+      Settles when box score is published.
+    </p>
+  );
+}
+
+/**
+ * Live status pill — only renders for open bets marked
+ * bet_timing="live" AND with a non-empty live_state (i.e. the
+ * tracker has polled at least once and the game is in progress).
+ * Format: "LIVE — {away}–{home} {period}".
+ *
+ * On terminal bets the resolved_via badge takes over; on pregame
+ * bets nothing renders here.
+ */
+function LiveStatusPill({ bet }: { bet: PaperBet }) {
+  if (bet.betTiming !== "live") return null;
+  if (
+    bet.status !== "open"
+    && bet.status !== "in_progress"
+    && bet.status !== "needs_review"
+  ) return null;
+  const line = formatLiveStateLine(bet);
+  if (!line) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-700 dark:text-red-400 animate-pulse-slow">
+      <Radio className="w-3 h-3" />
+      LIVE — {line}
+    </span>
   );
 }
 

@@ -28,6 +28,7 @@ import {
   PaperBetsMigrationMissingError,
 } from "@/lib/paperBets/store";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
+import { useLiveBetTracker } from "@/hooks/useLiveBetTracker";
 
 type Tab = "build" | "open" | "settled" | "perf" | "myslips";
 
@@ -66,6 +67,12 @@ export default function PaperBetsPage() {
     () => bets.filter((b) => b.status === "open" || b.status === "in_progress" || b.status === "needs_review"),
     [bets],
   );
+
+  // Live-bet tracker — polls ESPN every 60s for any open bets with
+  // bet_timing="live". Updates live_state during the game and
+  // auto-settles when the game flips to FINAL via the existing
+  // resolver path (resolved_via='espn'). Page-visibility gated.
+  useLiveBetTracker({ bets, onChanged: refresh });
   const settled = useMemo(
     () => bets.filter((b) => b.status === "won" || b.status === "lost" || b.status === "push" || b.status === "voided"),
     [bets],
