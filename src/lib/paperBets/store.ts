@@ -85,6 +85,8 @@ interface PaperBetRow {
   /** New columns from 20260510000000_paper_bets_live_timing migration. */
   bet_timing?: string | null;
   live_state?: Record<string, unknown> | null;
+  /** New column from 20260512000000_resolution_metadata migration. */
+  resolved_via?: string | null;
 }
 
 interface PaperBankrollRow {
@@ -132,6 +134,7 @@ function rowToBet(r: PaperBetRow): PaperBet {
     resolvedAt: r.resolved_at,
     betTiming: (r.bet_timing as PaperBetTiming) ?? "pregame",
     liveState,
+    resolvedVia: (r.resolved_via as PaperBet["resolvedVia"]) ?? null,
   };
 }
 
@@ -348,6 +351,13 @@ export async function settlePaperBet(args: {
   pnl: number;
   legs: PaperLeg[];
   resolvedAt?: string;
+  /**
+   * Tracks the resolution path. "espn" when the auto-resolver settled
+   * the bet, "manual" when the user clicked Won/Lost/Push. Defaults
+   * to "manual" if not specified — caller should pass "espn"
+   * explicitly from the auto-resolver.
+   */
+  resolvedVia?: "espn" | "manual";
 }): Promise<PaperBet> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("Supabase not configured.");
@@ -363,14 +373,22 @@ export async function settlePaperBet(args: {
   if (!existing) throw new Error(`Paper bet ${args.betId} not found.`);
   const wasOpen = ["open", "in_progress", "needs_review"].includes(existing.status as string);
 
+  // Only set resolved_via for terminal statuses. needs_review / open
+  // / in_progress are not "resolved" yet — the column stays null
+  // until a real outcome lands.
+  const isTerminal = ["won", "lost", "push", "voided"].includes(args.status);
+  const updatePayload: Record<string, unknown> = {
+    status: args.status,
+    pnl: args.pnl,
+    legs: args.legs,
+    resolved_at: args.resolvedAt ?? new Date().toISOString(),
+  };
+  if (isTerminal) {
+    updatePayload.resolved_via = args.resolvedVia ?? "manual";
+  }
   const { data: updated, error } = await supabase
     .from("paper_bets")
-    .update({
-      status: args.status,
-      pnl: args.pnl,
-      legs: args.legs,
-      resolved_at: args.resolvedAt ?? new Date().toISOString(),
-    })
+    .update(updatePayload)
     .eq("id", args.betId)
     .select("*")
     .maybeSingle();
@@ -427,6 +445,29 @@ export async function markPaperBetNeedsReview(
     .select("*")
     .maybeSingle();
   if (error || !data) throw classifyError(error, "Failed to mark needs_review.");
+  return rowToBet(data as PaperBetRow);
+}
+
+/**
+ * Update only the legs JSONB for a bet, preserving status. Used when
+ * the auto-resolver tries a still-pending bet — the per-leg diagnosis
+ * should surface in the UI ("Pending — game not final") even though
+ * the bet stays open.
+ */
+export async function updatePaperBetLegs(
+  betId: string,
+  legs: PaperLeg[],
+): Promise<PaperBet> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error("Supabase not configured.");
+  }
+  const { data, error } = await supabase
+    .from("paper_bets")
+    .update({ legs })
+    .eq("id", betId)
+    .select("*")
+    .maybeSingle();
+  if (error || !data) throw classifyError(error, "Failed to update paper bet legs.");
   return rowToBet(data as PaperBetRow);
 }
 

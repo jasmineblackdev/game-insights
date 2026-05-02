@@ -6,6 +6,11 @@
  * DraftKings labelling before risking real bankroll.
  */
 
+import type {
+  ResolutionDiagnosis,
+  ResolutionVia,
+} from "@/lib/learning/resolutionDiagnosis";
+
 export type PaperBetType = "single" | "parlay" | "sgp";
 
 /** Pregame = entered before tipoff/first pitch; live = entered in-game. */
@@ -83,6 +88,13 @@ export interface PaperLeg {
   resolvedActual?: number | null;
   resolvedReason?: string | null;
   resolvedAt?: string | null;
+  /**
+   * Canonical diagnosis when the auto-resolver couldn't verify this
+   * leg. Drives the "Pending — game not final" / "Needs review —
+   * stat not found" status row in the UI. Cleared on a successful
+   * resolution.
+   */
+  resolutionDiagnosis?: ResolutionDiagnosis | null;
 }
 
 export interface PaperBet {
@@ -106,6 +118,13 @@ export interface PaperBet {
   betTiming: PaperBetTiming;
   /** Game state at the moment of a live bet; null for pregame. */
   liveState?: PaperLiveState | null;
+  /**
+   * How this bet reached its terminal status:
+   *   "espn"   → auto-resolved against ESPN feeds
+   *   "manual" → user clicked Won/Lost/Push
+   *   null     → still pending (or pre-migration row)
+   */
+  resolvedVia?: ResolutionVia;
 }
 
 export interface PaperBankroll {

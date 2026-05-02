@@ -13,8 +13,18 @@ import { Check, X, Circle, AlertTriangle, Clock, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
-import { settlePaperBet, voidPaperBet } from "@/lib/paperBets/store";
+import {
+  markPaperBetNeedsReview,
+  settlePaperBet,
+  updatePaperBetLegs,
+  voidPaperBet,
+} from "@/lib/paperBets/store";
 import { americanToPayoutMultiplier } from "@/lib/paperBets/normalizer";
+import {
+  diagnosisLabel,
+  isTransient,
+  type ResolutionDiagnosis,
+} from "@/lib/learning/resolutionDiagnosis";
 import type { PaperBet, PaperLeg, PaperLegStatus } from "@/lib/paperBets/types";
 
 interface Props {
@@ -25,19 +35,37 @@ interface Props {
 export function PaperBetCard({ bet, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
 
+  // Per-bet retry — re-runs the resolver and routes the outcome
+  // through the right persistence path:
+  //   • terminal (won/lost/push/voided)   → settlePaperBet (resolved_via='espn')
+  //   • needs_review                      → markPaperBetNeedsReview
+  //   • still pending (game not final)    → updatePaperBetLegs (legs only)
+  // Never flips a pending bet to a fake terminal status.
   const refresh = async () => {
     if (busy) return;
     setBusy(true);
     try {
       const r = await resolvePaperBet(bet);
       try {
-        await settlePaperBet({
-          betId: bet.id,
-          status: r.status,
-          pnl: r.pnl ?? 0,
-          legs: r.legs,
-        });
-        toast.success(`Bet ${r.status.replace("_", " ")} — ${r.pnl != null ? formatPnl(r.pnl) : "still pending"}.`);
+        const isTerminal =
+          r.status === "won" || r.status === "lost" ||
+          r.status === "push" || r.status === "voided";
+        if (isTerminal) {
+          await settlePaperBet({
+            betId: bet.id,
+            status: r.status,
+            pnl: r.pnl ?? 0,
+            legs: r.legs,
+            resolvedVia: "espn",
+          });
+          toast.success(`Resolved via ESPN — ${r.pnl != null ? formatPnl(r.pnl) : r.status}.`);
+        } else if (r.status === "needs_review") {
+          await markPaperBetNeedsReview(bet.id, r.legs);
+          toast.message("Needs review — see per-leg diagnosis.");
+        } else {
+          await updatePaperBetLegs(bet.id, r.legs);
+          toast.message("Still pending — game not final.");
+        }
         onChanged?.();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Settle failed.");
@@ -85,6 +113,7 @@ export function PaperBetCard({ bet, onChanged }: Props) {
           status: parlayStatus,
           pnl,
           legs: updatedLegs,
+          resolvedVia: "manual",
         });
         toast.success("Leg updated.");
         onChanged?.();
@@ -121,6 +150,7 @@ export function PaperBetCard({ bet, onChanged }: Props) {
           {bet.betType}
           {bet.legs.length > 1 ? ` · ${bet.legs.length} legs` : ""}
         </span>
+        <ResolutionVia bet={bet} />
         <span className="text-xs text-muted-foreground tabular-nums ml-auto">
           ${bet.stake.toFixed(2)} risk · {bet.combinedOddsAmerican > 0 ? `+${bet.combinedOddsAmerican}` : bet.combinedOddsAmerican}
         </span>
@@ -150,6 +180,8 @@ export function PaperBetCard({ bet, onChanged }: Props) {
                 <span className="text-muted-foreground">{l.resolvedReason}</span>
               </p>
             ) : null}
+            <LegDiagnosisRow leg={l} />
+
             {l.status === "open" || l.status === "needs_review" ? (
               <div className="flex flex-wrap gap-1 pt-1">
                 <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => manualSettle(i, "won")} disabled={busy}>Won</Button>
@@ -176,13 +208,56 @@ export function PaperBetCard({ bet, onChanged }: Props) {
           <>
             <Button size="sm" variant="outline" className="gap-1 h-8 text-xs" onClick={refresh} disabled={busy}>
               <RefreshCw className={cn("w-3 h-3", busy ? "animate-spin" : "")} />
-              Resolve from feeds
+              {bet.status === "needs_review" ? "Retry resolve" : "Resolve from feeds"}
             </Button>
             <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground" onClick={onVoid} disabled={busy}>Void</Button>
           </>
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Resolved via ESPN ✓" / "Manual" badge for the bet header. Hidden
+ * on still-pending bets (resolved_via is NULL until terminal).
+ */
+function ResolutionVia({ bet }: { bet: PaperBet }) {
+  if (!bet.resolvedVia) return null;
+  if (bet.resolvedVia === "espn") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+        <Check className="w-3 h-3" /> Resolved via ESPN
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-muted/40 text-muted-foreground">
+      Manual
+    </span>
+  );
+}
+
+/**
+ * Per-leg status row when the resolver wrote a resolutionDiagnosis
+ * but the leg isn't terminal. Distinguishes transient ("Pending —
+ * game not final") from terminal ("Needs review — stat not found")
+ * via isTransient(). Hidden once the leg has a real outcome.
+ */
+function LegDiagnosisRow({ leg }: { leg: PaperLeg }) {
+  const d = leg.resolutionDiagnosis as ResolutionDiagnosis | null | undefined;
+  if (!d) return null;
+  if (leg.status === "won" || leg.status === "lost" || leg.status === "push" || leg.status === "voided") return null;
+  const transient = isTransient(d);
+  const prefix = transient ? "Pending" : "Needs review";
+  const cls = transient
+    ? "text-blue-700 dark:text-blue-400"
+    : "text-amber-700 dark:text-amber-400";
+  return (
+    <p className={cn("text-[11px] flex items-center gap-1", cls)}>
+      {transient ? <Clock className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+      {prefix} — {diagnosisLabel(d)}
+    </p>
   );
 }
 

@@ -14,6 +14,9 @@
 
 import { fetchPlayerLastGames, type GameLogSport } from "@/lib/playerGameLog";
 import { americanToPayoutMultiplier } from "./normalizer";
+import type {
+  ResolutionDiagnosis,
+} from "@/lib/learning/resolutionDiagnosis";
 import type { PaperBet, PaperBetStatus, PaperLeg, PaperLegStatus } from "./types";
 
 // ── ESPN game summary fetcher ────────────────────────────────────────
@@ -70,31 +73,62 @@ interface LegResolution {
   status: PaperLegStatus;
   resolvedActual?: number | null;
   resolvedReason: string;
+  /**
+   * Canonical diagnosis enum. When status is "open" the resolver
+   * tried but the game/box-score isn't ready (transient). When
+   * status is "needs_review" the diagnosis pinpoints why a verified
+   * resolution wasn't possible (terminal until manual action).
+   */
+  diagnosis?: ResolutionDiagnosis;
 }
 
 /**
  * Moneyline / spread / total — settles from final score when game is "post".
+ *
+ * Safety rule: if the score, team label, or market type can't be
+ * verified, the leg returns needs_review with a diagnosis enum. The
+ * resolver never guesses an outcome.
  */
 async function resolveTeamLeg(leg: PaperLeg): Promise<LegResolution> {
   if (!leg.gameId) {
-    return { status: "needs_review", resolvedReason: "No game id on leg." };
+    return {
+      status: "needs_review",
+      resolvedReason: "No game id on leg.",
+      diagnosis: "unparseable_id",
+    };
   }
   const summary = await fetchGameSummary(leg.sport, leg.gameId);
   if (!summary) {
-    return { status: "needs_review", resolvedReason: "Game summary fetch failed." };
+    return {
+      status: "needs_review",
+      resolvedReason: "Game summary fetch failed.",
+      diagnosis: "box_score_missing",
+    };
   }
   if (summary.state !== "post") {
-    return { status: "open", resolvedReason: `Game state ${summary.state}.` };
+    return {
+      status: "open",
+      resolvedReason: `Game state ${summary.state}.`,
+      diagnosis: "game_not_final",
+    };
   }
   if (summary.homeScore == null || summary.awayScore == null) {
-    return { status: "needs_review", resolvedReason: "Final score missing." };
+    return {
+      status: "needs_review",
+      resolvedReason: "Final score missing.",
+      diagnosis: "box_score_missing",
+    };
   }
 
   const teamLabel = (leg.teamLabel ?? "").toUpperCase();
   const teamIsHome = teamLabel && teamLabel === summary.homeAbbr.toUpperCase();
   const teamIsAway = teamLabel && teamLabel === summary.awayAbbr.toUpperCase();
   if (!teamIsHome && !teamIsAway && leg.marketType !== "total") {
-    return { status: "needs_review", resolvedReason: "Team label didn't match either side." };
+    return {
+      status: "needs_review",
+      resolvedReason: "Team label didn't match either side.",
+      diagnosis: "team_label_unmatched",
+    };
   }
 
   if (leg.marketType === "moneyline") {
@@ -131,26 +165,58 @@ async function resolveTeamLeg(leg: PaperLeg): Promise<LegResolution> {
     };
   }
 
-  return { status: "needs_review", resolvedReason: "Market not recognised by team resolver." };
+  return {
+    status: "needs_review",
+    resolvedReason: "Market not recognised by team resolver.",
+    diagnosis: "stat_type_unsupported",
+  };
 }
 
 /**
- * Player prop — resolves from athlete gamelog. We pull the most
- * recent game and trust it only if the date matches the leg's
- * gameTimeIso (or is the same day). Otherwise mark needs_review.
+ * Player prop — resolves from athlete gamelog by playerId (never
+ * name). Date must match the leg's gameTimeIso so we don't pick up
+ * the wrong game's stat line. Otherwise mark needs_review.
+ *
+ * Safety rule: when a numeric stat can't be verified for the right
+ * date, the resolver writes a diagnosis and stops. It never falls
+ * back to the latest gamelog row.
  */
 async function resolvePropLeg(leg: PaperLeg): Promise<LegResolution> {
-  if (!leg.playerId || !leg.statType || leg.line == null || !leg.direction) {
-    return { status: "needs_review", resolvedReason: "Missing player id, stat type, line, or direction." };
+  // Per-field diagnosis so the UI can tell the user what's missing.
+  if (!leg.playerId) {
+    return {
+      status: "needs_review",
+      resolvedReason: "Missing playerId — name-only matching is not allowed.",
+      diagnosis: "unparseable_id",
+    };
+  }
+  if (!leg.statType) {
+    return {
+      status: "needs_review",
+      resolvedReason: "Missing stat type.",
+      diagnosis: "stat_type_unsupported",
+    };
+  }
+  if (leg.line == null || !leg.direction) {
+    return {
+      status: "needs_review",
+      resolvedReason: "Missing line or direction.",
+      diagnosis: "missing_direction",
+    };
   }
   const sport = leg.sport.toUpperCase() as GameLogSport;
   const rows = await fetchPlayerLastGames(sport, leg.playerId, leg.statType, 5);
   if (!rows.length) {
-    return { status: "needs_review", resolvedReason: "Athlete gamelog returned no rows." };
+    return {
+      status: "needs_review",
+      resolvedReason: "Athlete gamelog returned no rows.",
+      diagnosis: "player_not_in_box_score",
+    };
   }
 
-  // Pick the row matching the leg's game date (within a day tolerance
-  // for tz). If we can't match, surface review rather than guess.
+  // Pick the row matching the leg's game date — never fall back to
+  // the latest row. If we can't match, surface review rather than
+  // guess at the wrong game's line.
   let target = rows[0];
   if (leg.gameTimeIso) {
     const targetDay = leg.gameTimeIso.slice(0, 10);
@@ -159,12 +225,20 @@ async function resolvePropLeg(leg: PaperLeg): Promise<LegResolution> {
       return {
         status: "needs_review",
         resolvedReason: `No gamelog row for ${targetDay}; latest available ${rows[0].date}.`,
+        diagnosis: "player_not_in_box_score",
       };
     }
     target = match;
   }
 
   const actual = target.value;
+  if (!Number.isFinite(actual)) {
+    return {
+      status: "needs_review",
+      resolvedReason: "Gamelog row has no numeric value for this stat.",
+      diagnosis: "box_score_missing",
+    };
+  }
   if (actual === leg.line) {
     return { status: "push", resolvedActual: actual, resolvedReason: `Stat landed on the line (${actual}).` };
   }
@@ -181,7 +255,9 @@ async function resolvePropLeg(leg: PaperLeg): Promise<LegResolution> {
 
 /**
  * Attempt to resolve a single leg. Pure read-only; returns a new leg
- * object the caller can persist.
+ * object the caller can persist. Emits a single console.debug per
+ * attempt with playerId / line_value / matched stat — so a failing
+ * resolution is auditable without opening the JSONB.
  */
 export async function resolveLeg(leg: PaperLeg): Promise<PaperLeg> {
   if (leg.status !== "open") return leg;
@@ -189,13 +265,33 @@ export async function resolveLeg(leg: PaperLeg): Promise<PaperLeg> {
     ? await resolvePropLeg(leg)
     : await resolveTeamLeg(leg);
 
-  if (r.status === "open") return leg;
+  if (typeof console !== "undefined") {
+    console.debug("[paperBets/resolver]", {
+      sport:       leg.sport,
+      market:      leg.marketType,
+      stat:        leg.statType,
+      playerId:    leg.playerId,
+      gameId:      leg.gameId,
+      line_value:  leg.line,
+      direction:   leg.direction,
+      next_status: r.status,
+      diagnosis:   r.diagnosis ?? null,
+      actual:      r.resolvedActual ?? null,
+    });
+  }
+
+  if (r.status === "open") {
+    // Game/box not ready yet — preserve diagnosis for the UI without
+    // moving the leg to a terminal state.
+    return { ...leg, resolutionDiagnosis: r.diagnosis ?? null };
+  }
   return {
     ...leg,
     status: r.status,
     resolvedActual: r.resolvedActual ?? null,
     resolvedReason: r.resolvedReason,
     resolvedAt: new Date().toISOString(),
+    resolutionDiagnosis: r.status === "needs_review" ? (r.diagnosis ?? null) : null,
   };
 }
 

@@ -51,6 +51,13 @@ interface RecommendedParlayRow {
   ml_active: boolean;
   warnings: string[] | null;
   user_notes: string | null;
+  /**
+   * How the row's terminal status was reached:
+   *   "espn"   → auto-resolved
+   *   "manual" → user clicked Won/Lost/Push
+   *   null     → still pending
+   */
+  resolved_via: "espn" | "manual" | null;
 }
 
 type Tab = "pending" | "won" | "lost" | "missed" | "manual" | "analytics";
@@ -113,6 +120,28 @@ function SourceBadge({ source }: { source: ParlaySource }) {
   );
 }
 
+/**
+ * Small badge next to the outcome result showing how the row was
+ * resolved — auto-via-ESPN or by user click. Nothing renders for
+ * pending rows (resolved_via is NULL until terminal).
+ */
+function ResolutionViaBadge({
+  resolvedVia,
+}: {
+  resolvedVia: "espn" | "manual" | null;
+}) {
+  if (!resolvedVia) return null;
+  const isEspn = resolvedVia === "espn";
+  const cls = isEspn
+    ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+    : "bg-muted text-muted-foreground border-border";
+  return (
+    <span className={cn("text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded border", cls)}>
+      {isEspn ? "VIA ESPN ✓" : "MANUAL"}
+    </span>
+  );
+}
+
 function ModelStatusChip({ row }: { row: RecommendedParlayRow }) {
   if (row.rules_only) {
     return <span className="text-[9px] font-semibold text-muted-foreground border border-border rounded-full px-1.5 py-0.5">RULES</span>;
@@ -136,9 +165,16 @@ function ParlayRowCard({
     if (!supabase) return;
     setBusy(true);
     try {
+      // Tag manual resolutions explicitly. Pending → revert to NULL
+      // so an accidental click doesn't permanently mark the row.
+      const updates: Record<string, unknown> = {
+        outcome,
+        resolved_at: outcome === "pending" ? null : new Date().toISOString(),
+      };
+      updates.resolved_via = outcome === "pending" ? null : "manual";
       await supabase
         .from("recommended_parlays")
-        .update({ outcome, resolved_at: new Date().toISOString() })
+        .update(updates)
         .eq("id", row.id);
       toast.success(`Marked ${outcome.toUpperCase()}`);
       onUpdate();
@@ -189,6 +225,7 @@ function ParlayRowCard({
       <div className="flex items-start gap-2 flex-wrap">
         <SourceBadge source={row.source} />
         <ResultBadge outcome={row.outcome} />
+        <ResolutionViaBadge resolvedVia={row.resolved_via} />
         <ModelStatusChip row={row} />
         {row.tier && (
           <span className="text-[10px] font-bold tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary capitalize">

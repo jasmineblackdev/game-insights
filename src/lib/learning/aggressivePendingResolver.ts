@@ -517,6 +517,13 @@ export async function aggressivelyResolvePendingParlays(
         outcome: newOutcome,
         resolved_at: fullySettled ? new Date().toISOString() : null,
       };
+      // Tag the resolution path on terminal-state writes only —
+      // pending rows leave resolved_via NULL so the column truly
+      // represents how a *settled* row got there. Stale-void and
+      // unparseable-flag are also auto paths, tagged "espn".
+      if (fullySettled || stalenessVoided || unparseableMarked) {
+        updates.resolved_via = "espn";
+      }
       if (stalenessVoided) {
         updates.user_notes = `Auto-voided ${new Date().toISOString().slice(0, 10)}: data unavailable for resolution after cutoff.`;
       } else if (unparseableMarked) {

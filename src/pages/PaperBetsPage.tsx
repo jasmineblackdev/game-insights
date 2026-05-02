@@ -22,7 +22,9 @@ import { MySlipsTable } from "@/components/paperBets/MySlipsTable";
 import {
   getPaperBankroll,
   listPaperBets,
+  markPaperBetNeedsReview,
   settlePaperBet,
+  updatePaperBetLegs,
   PaperBetsMigrationMissingError,
 } from "@/lib/paperBets/store";
 import { resolvePaperBet } from "@/lib/paperBets/resolver";
@@ -70,33 +72,73 @@ export default function PaperBetsPage() {
   );
 
   // Auto-resolve sweep on Open tab visit. Best-effort; never blocks.
+  // Per-pass summary tracks resolved / pending / needs-review / failed
+  // so the user gets honest feedback, not just "Resolved X".
   const [sweeping, setSweeping] = useState(false);
-  const sweep = useCallback(async () => {
-    if (sweeping || !open.length) return;
-    setSweeping(true);
-    try {
-      let changed = 0;
-      for (const b of open) {
-        const r = await resolvePaperBet(b);
-        const becameTerminal = r.status !== "open" && r.status !== "in_progress";
-        if (becameTerminal) {
-          await settlePaperBet({
-            betId: b.id,
-            status: r.status,
-            pnl: r.pnl ?? 0,
-            legs: r.legs,
-          });
-          changed += 1;
+  const sweep = useCallback(
+    async (opts?: { betIds?: string[]; silent?: boolean }) => {
+      if (sweeping) return;
+      const candidates = opts?.betIds
+        ? open.filter((b) => opts.betIds!.includes(b.id))
+        : open;
+      if (!candidates.length) return;
+      setSweeping(true);
+      try {
+        let resolved = 0;
+        let pending = 0;
+        let needsReview = 0;
+        let failed = 0;
+        for (const b of candidates) {
+          try {
+            const r = await resolvePaperBet(b);
+            const becameTerminal =
+              r.status === "won" || r.status === "lost" ||
+              r.status === "push" || r.status === "voided";
+            if (becameTerminal) {
+              await settlePaperBet({
+                betId: b.id,
+                status: r.status,
+                pnl: r.pnl ?? 0,
+                legs: r.legs,
+                resolvedVia: "espn",
+              });
+              resolved += 1;
+            } else if (r.status === "needs_review") {
+              await markPaperBetNeedsReview(b.id, r.legs);
+              needsReview += 1;
+            } else {
+              // Still open / in_progress — game not final. Persist the
+              // updated legs (with their resolutionDiagnosis) so the
+              // per-leg "Pending — game not final" surfaces in the UI
+              // without flipping status to needs_review.
+              await updatePaperBetLegs(b.id, r.legs).catch(() => {});
+              pending += 1;
+            }
+          } catch (e) {
+            console.warn("[paper-sweep] bet failed:", b.id, e);
+            failed += 1;
+          }
         }
+        if (!opts?.silent) {
+          const parts: string[] = [];
+          if (resolved)    parts.push(`${resolved} resolved`);
+          if (pending)     parts.push(`${pending} pending`);
+          if (needsReview) parts.push(`${needsReview} needs review`);
+          if (failed)      parts.push(`${failed} failed`);
+          if (parts.length) {
+            const msg = parts.join(" · ");
+            if (resolved && !failed && !needsReview) toast.success(msg);
+            else if (failed)                          toast.error(msg);
+            else                                      toast.message(msg);
+          }
+        }
+        if (resolved + pending + needsReview > 0) refresh();
+      } finally {
+        setSweeping(false);
       }
-      if (changed) {
-        toast.success(`Resolved ${changed} paper bet${changed === 1 ? "" : "s"}.`);
-        refresh();
-      }
-    } finally {
-      setSweeping(false);
-    }
-  }, [open, sweeping, refresh]);
+    },
+    [open, sweeping, refresh],
+  );
 
   useEffect(() => {
     if (tab === "open" && open.length) {
