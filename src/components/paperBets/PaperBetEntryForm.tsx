@@ -28,7 +28,10 @@ import {
   saveDraft,
   snapshotCurrentDraft,
 } from "@/lib/paperBets/drafts";
-import { resolveGameIdByTeam } from "@/lib/paperBets/gameIdResolver";
+import {
+  resolveAthleteByName,
+  resolveGameIdByTeam,
+} from "@/lib/paperBets/gameIdResolver";
 import { SlipSummaryCard } from "@/components/paperBets/SlipSummaryCard";
 import type { PaperLeg, PaperLiveState } from "@/lib/paperBets/types";
 
@@ -168,38 +171,69 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
       return;
     }
 
-    // Auto-resolve gameId from team + sport + today when the user
-    // didn't paste one. The principle is "only manual step is
-    // submitting the slip" — without a gameId neither the live
-    // tracker nor the resolver can act, so we lock down the lookup
-    // at LEG-ADD time and block adding the leg if no game matches.
-    let resolvedGameId = draft.gameId.trim() || undefined;
-    let resolvedGameTimeIso = draft.gameTimeIso.trim() || undefined;
-    let resolvedTeamLabel = draft.teamLabel.trim() || undefined;
+    // Auto-resolve every system identifier on the leg so the user
+    // never has to paste an ESPN id. Three lookups can fire here:
+    //   1. gameId   — from (sport, team, today) via the scoreboard
+    //                 endpoint. Required for the live tracker and
+    //                 resolver to act on this leg post-submit.
+    //   2. athleteId — from (sport, player name) via ESPN's athlete
+    //                 search. Only fires for player props.
+    //   3. teamLabel canonicalization — typo'd abbreviations get
+    //                 snapped back to the form ESPN uses.
+    let resolvedGameId      = undefined as string | undefined;
+    let resolvedGameTimeIso = undefined as string | undefined;
+    let resolvedTeamLabel   = draft.teamLabel.trim() || undefined;
+    let resolvedPlayerId    = undefined as string | undefined;
 
     const teamForLookup = (draft.teamLabel ?? "").trim();
-    if (!resolvedGameId && teamForLookup && draft.sport !== "BOXING" && draft.sport !== "MMA") {
+    const playerForLookup = (draft.playerName ?? "").trim();
+    const isCombat = draft.sport === "BOXING" || draft.sport === "MMA";
+
+    if ((teamForLookup || playerForLookup) && !isCombat) {
       setResolvingGameId(true);
       try {
         const todayYmd = new Date().toISOString().slice(0, 10);
-        const match = await resolveGameIdByTeam({
-          sport: draft.sport,
-          teamLabel: teamForLookup,
-          dateIso: todayYmd,
-        });
-        if (!match) {
-          toast.error(
-            `No ${draft.sport} game found for "${teamForLookup}" today. Check the team abbreviation (e.g. TOR not TOR RAPYORS).`,
-            { duration: 8000 },
-          );
-          return;
+
+        // Athlete first when this looks like a player prop — ESPN's
+        // athlete search returns the team abbr, which seeds the
+        // gameId lookup when the user didn't type the team.
+        let teamForGameLookup = teamForLookup;
+        if (playerForLookup && (effectiveMarket === "player_prop" || entryCategory === "player_prop")) {
+          const athlete = await resolveAthleteByName({
+            sport: draft.sport,
+            name: playerForLookup,
+          });
+          if (athlete) {
+            resolvedPlayerId = athlete.athleteId;
+            if (!teamForGameLookup && athlete.teamAbbr) {
+              teamForGameLookup = athlete.teamAbbr;
+              resolvedTeamLabel = athlete.teamAbbr;
+            }
+          }
+          // Athlete miss is non-fatal — bet can still ship and the
+          // resolver will surface "player not in box score" with an
+          // Edit bet CTA.
         }
-        resolvedGameId = match.gameId;
-        resolvedGameTimeIso = match.startIso ?? undefined;
-        // Snap typo'd team back to the canonical abbr from ESPN.
-        resolvedTeamLabel = match.matchedSide === "home" ? match.homeAbbr : match.awayAbbr;
-        if (resolvedTeamLabel.toUpperCase() !== teamForLookup.toUpperCase()) {
-          toast.message(`Matched "${teamForLookup}" → ${resolvedTeamLabel}`);
+
+        if (teamForGameLookup) {
+          const match = await resolveGameIdByTeam({
+            sport: draft.sport,
+            teamLabel: teamForGameLookup,
+            dateIso: todayYmd,
+          });
+          if (!match) {
+            toast.error(
+              `No ${draft.sport} game found for "${teamForGameLookup}" today. Check the team abbreviation (e.g. TOR not TOR RAPYORS).`,
+              { duration: 8000 },
+            );
+            return;
+          }
+          resolvedGameId      = match.gameId;
+          resolvedGameTimeIso = match.startIso ?? undefined;
+          resolvedTeamLabel   = match.matchedSide === "home" ? match.homeAbbr : match.awayAbbr;
+          if (resolvedTeamLabel.toUpperCase() !== teamForGameLookup.toUpperCase()) {
+            toast.message(`Matched "${teamForGameLookup}" → ${resolvedTeamLabel}`);
+          }
         }
       } finally {
         setResolvingGameId(false);
@@ -214,7 +248,8 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
       gameTimeIso: resolvedGameTimeIso,
       teamLabel: resolvedTeamLabel,
       playerName: draft.playerName.trim() || undefined,
-      playerId: draft.playerId.trim() || undefined,
+      // Auto-resolved from ESPN athlete search; no manual input.
+      playerId: resolvedPlayerId,
       marketType: effectiveMarket,
       statType: effectiveStat || undefined,
       direction: effectiveDir,
@@ -253,20 +288,11 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
         legs.length === 1 ? "single"
         : sameGameIds.size === 1 && legs.length >= 2 ? "sgp"
         : "parlay";
-      // Build live-state payload only when the toggle is on. Empty
-      // strings stay null so the row reflects "not recorded" cleanly.
-      const num = (s: string): number | null =>
-        s.trim() === "" || !Number.isFinite(Number(s)) ? null : Number(s);
-      const liveState: PaperLiveState | null = trackLive
-        ? {
-            scoreHome:         num(liveScoreHome),
-            scoreAway:         num(liveScoreAway),
-            period:            livePeriod.trim() || null,
-            gameClock:         liveGameClock.trim() || null,
-            playerStatAtEntry: num(livePlayerStat),
-            modelProbAtEntry:  num(liveModelProb),
-          }
-        : null;
+      // Live state on submit is always null — the live tracker
+      // (#161) polls ESPN every 60s once the bet is open and writes
+      // score/period/clock to the row automatically. Manual entry of
+      // these fields was removed in Paper refactor Phase A.
+      const liveState: PaperLiveState | null = null;
 
       try {
         await placePaperBet({
@@ -393,22 +419,12 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
             />
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Player name (props)</Label>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Player (props)</Label>
             <Input
               type="text"
               placeholder="Aaron Judge"
               value={draft.playerName}
               onChange={(e) => setDraft({ ...draft, playerName: e.target.value })}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="col-span-2 sm:col-span-1">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">ESPN player id (optional)</Label>
-            <Input
-              type="text"
-              placeholder="33192"
-              value={draft.playerId}
-              onChange={(e) => setDraft({ ...draft, playerId: e.target.value })}
               className="h-9 text-sm"
             />
           </div>
@@ -422,17 +438,11 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
               className="h-9 text-sm"
             />
           </div>
-          <div className="col-span-2 sm:col-span-1">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">ESPN game id (optional)</Label>
-            <Input
-              type="text"
-              placeholder="401570123"
-              value={draft.gameId}
-              onChange={(e) => setDraft({ ...draft, gameId: e.target.value })}
-              className="h-9 text-sm"
-            />
-          </div>
         </div>
+        {/* ESPN player id and game id are no longer entered by hand —
+            the form auto-resolves both from (sport, player) and
+            (sport, team) via the ESPN search and scoreboard
+            endpoints when the user clicks Add. */}
 
         {/* Normalizer preview / overrides */}
         {draft.dkLabel.trim() ? (
@@ -546,11 +556,13 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
         </div>
       ) : null}
 
-      {/* Live bet tracking toggle + state inputs. Live bets resolve
-          through the same pipeline as pregame; the toggle just routes
-          analytics into the separate "Live vs Pregame" breakdown. */}
+      {/* Track Live Bet — toggle only. Manual score/period/clock/
+          player-stat fields were removed in favor of the live
+          tracker (#161), which polls ESPN every 60s and writes
+          live_state on the row automatically. The toggle just flips
+          bet_timing="live" so analytics segments correctly. */}
       <div className={cn(
-        "rounded-lg border p-3 space-y-2",
+        "rounded-lg border p-3",
         trackLive ? "border-blue-500/40 bg-blue-500/[0.05]" : "border-border/40 bg-background/40",
       )}>
         <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -563,77 +575,9 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
           <Radio className={cn("w-3.5 h-3.5", trackLive ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground")} />
           <span className="text-sm font-bold text-foreground">Track Live Bet</span>
           <span className="text-[11px] text-muted-foreground">
-            — entered after game has started
+            — game already started; live state fills automatically.
           </span>
         </label>
-        {trackLive ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Score (home)</Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                placeholder="62"
-                value={liveScoreHome}
-                onChange={(e) => setLiveScoreHome(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Score (away)</Label>
-              <Input
-                type="text"
-                inputMode="numeric"
-                placeholder="58"
-                value={liveScoreAway}
-                onChange={(e) => setLiveScoreAway(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Period</Label>
-              <Input
-                type="text"
-                placeholder="Q3 / 5th / 1st half"
-                value={livePeriod}
-                onChange={(e) => setLivePeriod(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Game clock</Label>
-              <Input
-                type="text"
-                placeholder="8:42"
-                value={liveGameClock}
-                onChange={(e) => setLiveGameClock(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Player stat at entry</Label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                placeholder="14 pts"
-                value={livePlayerStat}
-                onChange={(e) => setLivePlayerStat(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Model prob (optional)</Label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                placeholder="0.62"
-                value={liveModelProb}
-                onChange={(e) => setLiveModelProb(e.target.value)}
-                className="h-9 text-sm"
-              />
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <SlipSummaryCard

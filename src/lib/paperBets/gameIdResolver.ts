@@ -63,6 +63,100 @@ function ymdParam(dateIso: string): string {
   return compact.slice(0, 8);
 }
 
+// ── Athlete lookup ──────────────────────────────────────────────────
+
+const ATHLETE_SEARCH_URL = "https://site.api.espn.com/apis/common/v3/search";
+
+/**
+ * League slug ESPN uses for each sport in athlete search results.
+ * Used to filter the search response down to the right league when
+ * a name matches across multiple leagues (e.g. "Aaron Smith").
+ */
+const SPORT_LEAGUE_SLUG: Record<string, string> = {
+  MLB:  "mlb",
+  NBA:  "nba",
+  WNBA: "wnba",
+  NFL:  "nfl",
+};
+
+export interface AthleteMatch {
+  athleteId: string;
+  displayName: string;
+  /** Team abbreviation as ESPN reports it for this athlete. */
+  teamAbbr: string | null;
+}
+
+interface EspnAthleteHit {
+  id?: string;
+  uid?: string;
+  displayName?: string;
+  defaultLeague?: { abbreviation?: string; slug?: string };
+  team?: { abbreviation?: string };
+}
+
+/**
+ * Resolve an ESPN athlete id by full name + sport. Used at slip-add
+ * time so the user never has to paste ESPN's numeric id — they just
+ * type the player's name and the system links it.
+ *
+ * Combat sports skip this path (athletes are organized differently
+ * in ESPN's index); player props in BOXING/MMA aren't supported as
+ * paper bets anyway.
+ *
+ * Returns null when no match — caller should let the bet ship
+ * without an athleteId; the resolver will mark it needs_review with
+ * the existing "player_not_in_box_score" diagnosis and the user can
+ * Edit bet to correct.
+ */
+export async function resolveAthleteByName(args: {
+  sport: string;
+  name: string;
+}): Promise<AthleteMatch | null> {
+  const slug = SPORT_LEAGUE_SLUG[args.sport.toUpperCase()];
+  if (!slug) return null;
+  const trimmed = args.name.trim();
+  if (!trimmed) return null;
+
+  const url = `${ATHLETE_SEARCH_URL}?query=${encodeURIComponent(trimmed)}&limit=20&type=player`;
+  let json: { results?: Array<{ contents?: EspnAthleteHit[] }> };
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    json = await res.json();
+  } catch {
+    return null;
+  }
+
+  // ESPN search nests athletes inside results[].contents[]. Walk all
+  // groups, filter to the requested sport's slug, prefer exact name
+  // match before substring.
+  const all: EspnAthleteHit[] = [];
+  for (const group of json.results ?? []) {
+    if (!group.contents) continue;
+    for (const hit of group.contents) {
+      if (hit.id && hit.displayName) all.push(hit);
+    }
+  }
+  const wantedSlug = slug.toLowerCase();
+  const sportFiltered = all.filter((h) => {
+    const lg = h.defaultLeague?.slug?.toLowerCase()
+      ?? h.defaultLeague?.abbreviation?.toLowerCase()
+      ?? "";
+    return lg.includes(wantedSlug);
+  });
+  const pool = sportFiltered.length > 0 ? sportFiltered : all;
+
+  const lowerName = trimmed.toLowerCase();
+  const exact = pool.find((h) => h.displayName?.toLowerCase() === lowerName);
+  const pick = exact ?? pool[0];
+  if (!pick?.id) return null;
+  return {
+    athleteId: String(pick.id),
+    displayName: pick.displayName ?? trimmed,
+    teamAbbr: pick.team?.abbreviation ?? null,
+  };
+}
+
 /**
  * Resolve gameId by sport + team abbreviation + date.
  *
