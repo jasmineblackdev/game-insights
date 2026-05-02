@@ -22,6 +22,7 @@ import {
 import { americanToPayoutMultiplier } from "@/lib/paperBets/normalizer";
 import { formatLiveStateLine } from "@/lib/paperBets/liveTracker";
 import { snapshotBetAsDraft } from "@/lib/paperBets/drafts";
+import { InjuryBadge } from "@/components/InjuryBadge";
 import {
   actionableDiagnosisCopy,
   diagnosisLabel,
@@ -187,10 +188,13 @@ export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
               </span>
             </div>
             {l.playerName || l.teamLabel ? (
-              <p className="text-[11px] text-muted-foreground">
-                {l.playerName ?? l.teamLabel}
-                {l.statType ? ` · ${l.statType}` : ""}
-                {l.direction && l.line != null ? ` · ${l.direction} ${l.line}` : ""}
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                <span>{l.playerName ?? l.teamLabel}</span>
+                {l.playerName ? (
+                  <InjuryBadge playerName={l.playerName} sport={l.sport} />
+                ) : null}
+                {l.statType ? <span>· {l.statType}</span> : null}
+                {l.direction && l.line != null ? <span>· {l.direction} {l.line}</span> : null}
               </p>
             ) : null}
             <LivePlayerPropNote bet={bet} leg={l} />

@@ -43,6 +43,7 @@ import {
   getDkMapping,
 } from "@/lib/draftkings/dkMarketCatalog";
 import { cn } from "@/lib/utils";
+import { InjuryBadge } from "@/components/InjuryBadge";
 
 export interface BestPlayerPropTodayProps {
   predictions: PlayerEdgePrediction[];
@@ -177,8 +178,9 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
                 </span>
               ) : null}
             </div>
-            <p className="font-display font-bold text-lg text-foreground truncate">
-              {top.player_name}
+            <p className="font-display font-bold text-lg text-foreground truncate flex items-center gap-2">
+              <span className="truncate">{top.player_name}</span>
+              <InjuryBadge playerName={top.player_name} sport={top.sport} size="sm" />
             </p>
             <p className="text-base font-semibold text-foreground/90 mt-0.5">
               {dkHeadline(top)}
@@ -234,6 +236,7 @@ export function BestPlayerPropToday({ predictions, isPending }: BestPlayerPropTo
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-foreground truncate">
                     {p.player_name}
+                    <InjuryBadge playerName={p.player_name} sport={p.sport} className="ml-1.5" />
                     <span className="text-muted-foreground"> · </span>
                     {dkHeadline(p)}
                   </p>

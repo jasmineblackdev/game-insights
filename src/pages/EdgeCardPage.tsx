@@ -35,6 +35,7 @@ import {
   DataHealthSection,
 } from "@/components/insights/SystemHealthSections";
 import { UserVsSystemPanel } from "@/components/insights/UserVsSystemPanel";
+import { DataSourcesPanel } from "@/components/insights/DataSourcesPanel";
 import { MLPerformanceContent } from "@/pages/MLPerformancePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -109,6 +110,9 @@ function EdgeCardPageInner() {
 
         {/* ── User vs System split (#171) ─────────────────────────── */}
         <UserVsSystemPanel />
+
+        {/* ── External data sources (#168) ────────────────────────── */}
+        <DataSourcesPanel />
 
         {/* ── Saved Edge Cards ─────────────────────────────────────── */}
         <section className="space-y-3 border-t border-border pt-8">

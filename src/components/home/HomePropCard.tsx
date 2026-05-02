@@ -11,6 +11,7 @@ import type { PlayerEdgePrediction } from "@/data/playerEdgeMock";
 import { cn } from "@/lib/utils";
 import { MlReadinessBadge } from "@/components/MlReadinessBadge";
 import { SharpBadges } from "@/components/SharpBadges";
+import { InjuryBadge } from "@/components/InjuryBadge";
 import { Disclosure } from "@/components/ui/disclosure";
 import { useBankroll } from "@/context/BankrollContext";
 import {
@@ -85,7 +86,10 @@ export function HomePropCard({ pred, rank }: HomePropCardProps) {
           />
           <span className="text-[10px] font-medium text-muted-foreground ml-auto">{pred.sport}</span>
         </div>
-        <p className="text-xs text-muted-foreground">{pred.player_name}</p>
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <span>{pred.player_name}</span>
+          <InjuryBadge playerName={pred.player_name} sport={pred.sport} />
+        </p>
         <p className="font-display font-bold text-lg text-foreground leading-tight">{headline}</p>
         {action !== "SKIP" && action !== "WAIT" ? (
           <div className="flex items-baseline gap-3 text-xs">
