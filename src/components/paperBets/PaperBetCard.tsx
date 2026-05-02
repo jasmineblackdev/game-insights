@@ -21,7 +21,9 @@ import {
 } from "@/lib/paperBets/store";
 import { americanToPayoutMultiplier } from "@/lib/paperBets/normalizer";
 import { formatLiveStateLine } from "@/lib/paperBets/liveTracker";
+import { snapshotBetAsDraft } from "@/lib/paperBets/drafts";
 import {
+  actionableDiagnosisCopy,
   diagnosisLabel,
   isTransient,
   type ResolutionDiagnosis,
@@ -31,9 +33,16 @@ import type { PaperBet, PaperLeg, PaperLegStatus } from "@/lib/paperBets/types";
 interface Props {
   bet: PaperBet;
   onChanged?: () => void;
+  /**
+   * Called when the user hits "Edit bet" on a needs-review leg.
+   * The card converts the bet to a draft via snapshotBetAsDraft;
+   * the parent (PaperBetsPage) loads the draft into Slip builder.
+   * When omitted the Edit-bet CTA is hidden.
+   */
+  onEditBet?: (draftId: string) => void;
 }
 
-export function PaperBetCard({ bet, onChanged }: Props) {
+export function PaperBetCard({ bet, onChanged, onEditBet }: Props) {
   const [busy, setBusy] = useState(false);
 
   // Per-bet retry — re-runs the resolver and routes the outcome
@@ -184,7 +193,7 @@ export function PaperBetCard({ bet, onChanged }: Props) {
                 <span className="text-muted-foreground">{l.resolvedReason}</span>
               </p>
             ) : null}
-            <LegDiagnosisRow leg={l} />
+            <LegDiagnosisRow leg={l} bet={bet} onEditBet={onEditBet} />
 
             {l.status === "open" || l.status === "needs_review" ? (
               <div className="flex flex-wrap gap-1 pt-1">
@@ -290,22 +299,58 @@ function ResolutionVia({ bet }: { bet: PaperBet }) {
  * Per-leg status row when the resolver wrote a resolutionDiagnosis
  * but the leg isn't terminal. Distinguishes transient ("Pending —
  * game not final") from terminal ("Needs review — stat not found")
- * via isTransient(). Hidden once the leg has a real outcome.
+ * via isTransient(). For fixable diagnoses (unparseable_id,
+ * team_label_unmatched, missing_direction, etc.) renders an action-
+ * oriented headline + an "Edit bet" CTA; the CTA snapshots the bet
+ * to a draft via snapshotBetAsDraft and hands the draft id to the
+ * parent so the slip builder can hydrate from it.
+ *
+ * Hidden once the leg has a real outcome.
  */
-function LegDiagnosisRow({ leg }: { leg: PaperLeg }) {
+function LegDiagnosisRow({
+  leg, bet, onEditBet,
+}: {
+  leg: PaperLeg;
+  bet: PaperBet;
+  onEditBet?: (draftId: string) => void;
+}) {
   const d = leg.resolutionDiagnosis as ResolutionDiagnosis | null | undefined;
   if (!d) return null;
   if (leg.status === "won" || leg.status === "lost" || leg.status === "push" || leg.status === "voided") return null;
   const transient = isTransient(d);
-  const prefix = transient ? "Pending" : "Needs review";
+  const action = actionableDiagnosisCopy(d);
+  // Prefer the action-oriented headline when available; fall back to
+  // the short "Pending — {label}" / "Needs review — {label}" form.
+  const headline = action.headline
+    ? action.headline
+    : `${transient ? "Pending" : "Needs review"} — ${diagnosisLabel(d)}`;
   const cls = transient
     ? "text-blue-700 dark:text-blue-400"
     : "text-amber-700 dark:text-amber-400";
   return (
-    <p className={cn("text-[11px] flex items-center gap-1", cls)}>
-      {transient ? <Clock className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-      {prefix} — {diagnosisLabel(d)}
-    </p>
+    <div className="space-y-1">
+      <p className={cn("text-[11px] flex items-center gap-1", cls)}>
+        {transient ? <Clock className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+        {headline}
+      </p>
+      {action.canEdit && onEditBet ? (
+        <button
+          type="button"
+          onClick={() => {
+            const draft = snapshotBetAsDraft({
+              legs: bet.legs,
+              stake: bet.stake,
+              notes: bet.notes ?? null,
+              label: `Edit ${bet.betType} · ${new Date(bet.placedAt).toLocaleDateString()}`,
+            });
+            onEditBet(draft.id);
+          }}
+          className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-400 hover:underline"
+        >
+          Edit bet →
+        </button>
+      ) : null}
+    </div>
   );
 }
 

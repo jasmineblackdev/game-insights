@@ -60,6 +60,58 @@ export function diagnosisLabel(d: ResolutionDiagnosis | null | undefined): strin
 }
 
 /**
+ * Action-oriented copy for the "Needs review" path — tells the user
+ * what to *do*, not just what went wrong. Used on PaperBetCard
+ * alongside an "Edit bet" CTA so the user can fix the underlying
+ * data and retry. Returns an empty string for transient diagnoses
+ * (game_not_final, box_score_missing) since those resolve on their
+ * own when the game finishes / ESPN updates.
+ */
+export function actionableDiagnosisCopy(
+  d: ResolutionDiagnosis | null | undefined,
+): { headline: string; canEdit: boolean } {
+  switch (d) {
+    case "unparseable_id":
+      return {
+        headline: "Game id missing — edit the bet to add it.",
+        canEdit: true,
+      };
+    case "team_label_unmatched":
+      return {
+        headline: "Team abbreviation didn't match either side — edit the bet.",
+        canEdit: true,
+      };
+    case "missing_direction":
+      return {
+        headline: "Direction (Over/Under) missing — edit the bet to set it.",
+        canEdit: true,
+      };
+    case "stat_type_unsupported":
+      return {
+        headline: "Stat type isn't mapped — edit the bet or settle manually.",
+        canEdit: true,
+      };
+    case "player_not_in_box_score":
+      return {
+        headline: "Player not found in the box score — verify ESPN player id.",
+        canEdit: true,
+      };
+    case "box_score_missing":
+      return {
+        headline: "Box score not published yet — try retry resolve later.",
+        canEdit: false,
+      };
+    case "game_not_final":
+      return {
+        headline: "Game still in progress — auto-resolves when final.",
+        canEdit: false,
+      };
+    default:
+      return { headline: "", canEdit: false };
+  }
+}
+
+/**
  * Whether a diagnosis is *transient* — meaning the resolver should be
  * retried later because the underlying condition can resolve (e.g.
  * the game finishes, ESPN publishes the box score). The UI uses this

@@ -216,7 +216,17 @@ export default function PaperBetsPage() {
               No open paper bets. Add one in Slip builder.
             </p>
           ) : (
-            open.map((b) => <PaperBetCard key={b.id} bet={b} onChanged={refresh} />)
+            open.map((b) => (
+              <PaperBetCard
+                key={b.id}
+                bet={b}
+                onChanged={refresh}
+                onEditBet={(draftId) => {
+                  setEditingDraftId(draftId);
+                  setTab("build");
+                }}
+              />
+            ))
           )}
         </div>
       ) : null}

@@ -10,6 +10,7 @@
 import { describe, expect, it } from "vitest";
 import {
   RESOLUTION_DIAGNOSES,
+  actionableDiagnosisCopy,
   diagnosisLabel,
   isResolutionDiagnosis,
   isTransient,
@@ -72,6 +73,39 @@ describe("ResolutionDiagnosis", () => {
     it("treats missing diagnosis as non-transient (no retry suggested)", () => {
       expect(isTransient(null)).toBe(false);
       expect(isTransient(undefined)).toBe(false);
+    });
+  });
+
+  describe("actionableDiagnosisCopy — Phase 4 actionable errors", () => {
+    it("returns canEdit=true for fixable codes with imperative copy", () => {
+      const editable: ResolutionDiagnosis[] = [
+        "unparseable_id",
+        "team_label_unmatched",
+        "missing_direction",
+        "stat_type_unsupported",
+        "player_not_in_box_score",
+      ];
+      for (const d of editable) {
+        const c = actionableDiagnosisCopy(d);
+        expect(c.canEdit).toBe(true);
+        expect(c.headline.length).toBeGreaterThan(0);
+        // Imperative phrasing — should mention an action.
+        expect(c.headline.toLowerCase()).toMatch(/edit|verify|set/);
+      }
+    });
+
+    it("returns canEdit=false for transient codes (game/box score still landing)", () => {
+      const transient: ResolutionDiagnosis[] = ["game_not_final", "box_score_missing"];
+      for (const d of transient) {
+        const c = actionableDiagnosisCopy(d);
+        expect(c.canEdit).toBe(false);
+        expect(c.headline.toLowerCase()).not.toMatch(/edit/);
+      }
+    });
+
+    it("returns empty headline + canEdit=false for null/undefined", () => {
+      expect(actionableDiagnosisCopy(null)).toEqual({ headline: "", canEdit: false });
+      expect(actionableDiagnosisCopy(undefined)).toEqual({ headline: "", canEdit: false });
     });
   });
 });

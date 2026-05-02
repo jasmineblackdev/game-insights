@@ -127,3 +127,40 @@ export function snapshotCurrentDraft(label: string): PaperDraft | null {
 export function draftHasContent(draft: PaperDraft): boolean {
   return draft.legs.length > 0;
 }
+
+/**
+ * Convert a placed paper bet's data into a fresh draft so the user
+ * can edit malformed fields (game id, team abbr, etc.) and resubmit.
+ * The original bet is left in place — caller decides whether to
+ * void it after the user submits the corrected version.
+ *
+ * Used by the "Edit bet" CTA on PaperBetCard when a leg's
+ * resolution_diagnosis points at a fixable problem.
+ */
+export function snapshotBetAsDraft(args: {
+  legs: PaperDraft["legs"];
+  stake: number;
+  notes: string | null;
+  label?: string;
+}): PaperDraft {
+  const id = (typeof crypto !== "undefined" && "randomUUID" in crypto)
+    ? crypto.randomUUID()
+    : `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const draft: PaperDraft = {
+    id,
+    legs: args.legs,
+    stake: String(args.stake ?? "10"),
+    notes: args.notes ?? "",
+    trackLive: false,
+    liveScoreHome: "",
+    liveScoreAway: "",
+    livePeriod: "",
+    liveGameClock: "",
+    livePlayerStat: "",
+    liveModelProb: "",
+    label: args.label ?? "Edited from open bet",
+    updatedAt: new Date().toISOString(),
+  };
+  saveDraft(draft);
+  return draft;
+}
