@@ -263,12 +263,15 @@ export function DataHealthSection({ summary, loading, onChanged }: Props) {
         />
       </div>
 
-      {/* Per-diagnosis bucket strip (#170) — only renders when there
-          are any flagged legs. Surfaces silently-broken rows that
-          would otherwise sit in needs_review without anyone noticing.
-          Read-side only — counts come from
-          analytics_data_quality_summary, no client-side leg walk. */}
-      {summary?.dataQuality && summary.dataQuality.total > 0 ? (
+      {/* Per-diagnosis bucket strip — covers the original leg-walk
+          counts (#170) plus the bet-level extras and live odds-stale
+          signal (#172). Renders whenever there's anything to flag,
+          so a stale odds provider surfaces even if every leg is
+          clean. Read-side only — no client-side leg walk. */}
+      {summary?.dataQuality && (
+        summary.dataQuality.total > 0 ||
+        summary.dataQuality.staleOddsNow.stale
+      ) ? (
         <DataQualityRow counts={summary.dataQuality} />
       ) : null}
     </section>
@@ -315,35 +318,82 @@ function DataQualityRow({ counts }: { counts: NonNullable<SystemSummary["dataQua
       tone: counts.boxScoreMissing > 0 ? "warn" : "neutral",
       subtitle: counts.boxScoreMissing > 0 ? "ESPN hasn't published" : undefined,
     },
+    // Extras (#172) — bet-level signals not on the leg JSONB.
+    {
+      label: "Unresolved after final",
+      value: counts.unresolvedAfterFinal,
+      tone: counts.unresolvedAfterFinal > 0 ? "loss" : "neutral",
+      subtitle: counts.unresolvedAfterFinal > 0 ? "game over, bet still open" : undefined,
+    },
+    {
+      label: "Manual override used",
+      value: counts.manualOverrideUsed,
+      tone: counts.manualOverrideUsed > 0 ? "warn" : "neutral",
+      subtitle: counts.manualOverrideUsed > 0 ? "resolver missed it" : undefined,
+    },
+    {
+      label: "Odds unavailable",
+      value: counts.oddsUnavailable,
+      tone: counts.oddsUnavailable > 0 ? "warn" : "neutral",
+      subtitle: counts.oddsUnavailable > 0 ? "no closing line captured" : undefined,
+    },
   ];
   const visible = flags.filter((f) => f.value > 0);
-  if (visible.length === 0) {
+  const oddsStale = counts.staleOddsNow.stale;
+
+  if (visible.length === 0 && !oddsStale) {
     return (
       <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.04] px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-400">
         ✓ No data-quality issues flagged in the last 30 days.
       </div>
     );
   }
+
+  // The live "stale odds" banner sits above the collapsible counts
+  // since it's the most actionable signal — the user can refresh or
+  // wait for the rate-limit to clear, neither of which applies to
+  // the historical buckets below.
+  const flaggedLabel =
+    visible.length === 0
+      ? "Odds provider stale"
+      : `${visible.length} data-quality issue${visible.length === 1 ? "" : "s"} flagged`;
+
   return (
-    <details className="rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2 text-xs">
-      <summary className="font-semibold text-foreground cursor-pointer select-none flex items-center gap-2">
-        <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
-        {visible.length} data-quality issue{visible.length === 1 ? "" : "s"} flagged
-        <span className="text-muted-foreground font-normal ml-1">({counts.total} legs total)</span>
-      </summary>
-      <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {visible.map((f) => (
-          <Tile
-            key={f.label}
-            label={f.label}
-            value={`${f.value}`}
-            subtitle={f.subtitle ?? null}
-            tone={f.tone}
-            loading={false}
-          />
-        ))}
-      </div>
-    </details>
+    <div className="space-y-2">
+      {oddsStale ? (
+        <div className="rounded-md border border-red-500/40 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-700 dark:text-red-400 flex items-start gap-2">
+          <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Stale odds — provider degraded</p>
+            <p className="opacity-80">
+              {counts.staleOddsNow.message ?? "Lines on screen may be cached or mocked."}
+              {counts.staleOddsNow.sportKey ? ` (${counts.staleOddsNow.sportKey})` : ""}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {visible.length > 0 ? (
+        <details className="rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2 text-xs">
+          <summary className="font-semibold text-foreground cursor-pointer select-none flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+            {flaggedLabel}
+            <span className="text-muted-foreground font-normal ml-1">({counts.total} flagged total)</span>
+          </summary>
+          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {visible.map((f) => (
+              <Tile
+                key={f.label}
+                label={f.label}
+                value={`${f.value}`}
+                subtitle={f.subtitle ?? null}
+                tone={f.tone}
+                loading={false}
+              />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 

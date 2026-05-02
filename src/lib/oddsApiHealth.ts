@@ -147,6 +147,16 @@ export async function trackOddsResponse(
   return true;
 }
 
+/**
+ * Imperative read of the current health state. Used by code paths
+ * that aren't React components (e.g. the system-summary aggregator
+ * for Data Health), where subscribing via the hook would force a
+ * component-y rewrite for no benefit. Returns a copy.
+ */
+export function getOddsApiHealthSnapshot(): OddsHealthState {
+  return { ...state };
+}
+
 /** React hook — subscribes to the store and triggers rerenders. */
 export function useOddsApiHealth(): OddsHealthState {
   const [s, setS] = useState<OddsHealthState>(state);

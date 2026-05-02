@@ -29,16 +29,20 @@
 
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { fetchClvSummary } from "@/lib/analytics/clv";
+import { getOddsApiHealthSnapshot } from "@/lib/oddsApiHealth";
 
 export type ModelTrustStatus = "reliable" | "needs_data" | "unstable";
 
 /**
- * Per-diagnosis bucket counts surfaced on Data Health (#170).
- * Aggregated from analytics_data_quality_summary which walks the
- * legs JSONB on both recommended_parlays and paper_bets.
+ * Per-diagnosis bucket counts surfaced on Data Health.
+ * Originally seeded by analytics_data_quality_summary (per-leg JSONB
+ * walk, #170). Extended in #172 with three extra buckets that don't
+ * live in the legs JSONB (the union comes from
+ * analytics_data_quality_extras) plus a real-time stale_odds signal
+ * pulled from the odds-API health store.
  */
 export interface DataQualityCounts {
-  /** Total legs flagged with any diagnosis. */
+  /** Total legs/rows flagged with any diagnosis. */
   total:                number;
   /** Legs with diagnosis "unparseable_id" (missing/malformed game id). */
   missingGameId:        number;
@@ -55,6 +59,24 @@ export interface DataQualityCounts {
   /** Legs against games still in progress (not really "broken" but
    *  surfaced so the user knows the count). */
   gameNotFinal:         number;
+  /** Bets still open even though the latest leg's gameTime + 6h has
+   *  passed. The auto-resolver should have caught these. */
+  unresolvedAfterFinal: number;
+  /** Bets settled by user click (resolved_via='manual') instead of
+   *  the resolver — high counts mean the resolver is missing cases. */
+  manualOverrideUsed:   number;
+  /** prediction_history rows where the closing-line poll never fired,
+   *  so CLV can't be computed for that pick. */
+  oddsUnavailable:      number;
+  /** Live state of the odds-API provider. Not a count — the tile only
+   *  renders when stale=true. Caller can act on it (refresh, switch
+   *  provider, etc.) rather than just observe. */
+  staleOddsNow: {
+    stale: boolean;
+    reason?: string;
+    sportKey?: string;
+    message?: string;
+  };
 }
 
 export interface SystemSummary {
@@ -284,25 +306,49 @@ interface DiagnosisRow {
 
 async function fetchDataQuality(): Promise<DataQualityCounts | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.rpc("analytics_data_quality_summary", {
-    lookback_days: 30,
-  });
-  if (error || !data || !Array.isArray(data)) return null;
-  const rows = data as DiagnosisRow[];
+  // Two RPCs are unioned: the leg-walk (#170) covers per-leg JSONB
+  // diagnoses; the extras (#172) cover bet-level signals that don't
+  // live on a leg. Either RPC missing is non-fatal — we keep
+  // whichever rows we got.
+  const [primary, extras] = await Promise.all([
+    supabase.rpc("analytics_data_quality_summary", { lookback_days: 30 }),
+    supabase.rpc("analytics_data_quality_extras",  { lookback_days: 30 }),
+  ]);
 
+  const primaryRows = !primary.error && Array.isArray(primary.data)
+    ? (primary.data as DiagnosisRow[])
+    : [];
+  const extraRows   = !extras.error && Array.isArray(extras.data)
+    ? (extras.data as DiagnosisRow[])
+    : [];
+
+  // If both RPCs failed AND the odds health store is also clean,
+  // there's nothing to show — return null so the section can render
+  // its empty state. Otherwise we return a populated object even if
+  // every numeric bucket is zero (the live odds-stale tile may still
+  // need to render).
+  const odds = getOddsApiHealthSnapshot();
+  if (primaryRows.length === 0 && extraRows.length === 0 && !odds.stale) {
+    return null;
+  }
+
+  const allRows = [...primaryRows, ...extraRows];
   const sumWhere = (predicate: (d: string) => boolean) =>
-    rows
+    allRows
       .filter((r) => r.diagnosis && predicate(r.diagnosis))
       .reduce((acc, r) => acc + numOrZero(r.count), 0);
 
-  const total           = rows.reduce((acc, r) => acc + numOrZero(r.count), 0);
-  const missingGameId   = sumWhere((d) => d === "unparseable_id");
-  const missingPlayerId = sumWhere((d) => d === "player_not_in_box_score");
-  const unsupportedStat = sumWhere((d) => d === "stat_type_unsupported");
-  const invalidMarket   = sumWhere((d) => d === "team_label_unmatched");
-  const missingDirection = sumWhere((d) => d === "missing_direction");
-  const boxScoreMissing = sumWhere((d) => d === "box_score_missing");
-  const gameNotFinal    = sumWhere((d) => d === "game_not_final");
+  const total                 = allRows.reduce((acc, r) => acc + numOrZero(r.count), 0);
+  const missingGameId         = sumWhere((d) => d === "unparseable_id");
+  const missingPlayerId       = sumWhere((d) => d === "player_not_in_box_score");
+  const unsupportedStat       = sumWhere((d) => d === "stat_type_unsupported");
+  const invalidMarket         = sumWhere((d) => d === "team_label_unmatched");
+  const missingDirection      = sumWhere((d) => d === "missing_direction");
+  const boxScoreMissing       = sumWhere((d) => d === "box_score_missing");
+  const gameNotFinal          = sumWhere((d) => d === "game_not_final");
+  const unresolvedAfterFinal  = sumWhere((d) => d === "unresolved_after_final");
+  const manualOverrideUsed    = sumWhere((d) => d === "manual_override_used");
+  const oddsUnavailable       = sumWhere((d) => d === "odds_unavailable");
 
   return {
     total,
@@ -313,6 +359,15 @@ async function fetchDataQuality(): Promise<DataQualityCounts | null> {
     missingDirection,
     boxScoreMissing,
     gameNotFinal,
+    unresolvedAfterFinal,
+    manualOverrideUsed,
+    oddsUnavailable,
+    staleOddsNow: {
+      stale:    odds.stale,
+      reason:   odds.reason,
+      sportKey: odds.sportKey,
+      message:  odds.message,
+    },
   };
 }
 
