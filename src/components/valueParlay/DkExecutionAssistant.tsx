@@ -1,5 +1,5 @@
 /**
- * DraftKings Execution Assistant
+ * Bet Decision Assistant
  *
  * Hybrid design: quick actions and core analyses run on a deterministic
  * local engine (executionAssistant.ts) that uses existing optimizer
@@ -8,20 +8,29 @@
  * the gateway is down or the LOVABLE_API_KEY is missing — quick
  * actions never silently fail.
  *
- * Manual second-device DraftKings workflow only — no sportsbook
- * automation, no DraftKings API, no auto-place.
+ * Manual second-device sportsbook workflow only — no DraftKings
+ * automation, no sportsbook API, no auto-place. (Older copy referred
+ * to this as the "DraftKings Execution Assistant"; the panel was
+ * renamed to "Bet Decision Assistant" because the deterministic
+ * engine is sportsbook-agnostic.)
  */
 
 import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   AlertTriangle,
+  ArrowLeftRight,
   Check,
   ChevronRight,
+  Layers,
   Loader2,
   MessageSquare,
+  Search,
   Send,
+  Shield,
   Sparkles,
+  Target,
+  TrendingUp,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -98,6 +107,29 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
   const liveWarnings = useMemo<AssistantWarning[]>(() => {
     return scanWarnings({ slipLegs, pool: recommendedPool, context: mode });
   }, [slipLegs, recommendedPool, mode]);
+
+  // "Most pool candidates are AVOID" — fired when the candidate pool
+  // exists but the recommended subset is sparse, meaning a SAFE build
+  // probably can't pick two high-confidence low-vol legs.
+  const poolAvoidWarning = useMemo<AssistantWarning | null>(() => {
+    if (candidatePool.length < 5) return null;
+    const recommendedRatio = recommendedPool.length / candidatePool.length;
+    const safeCandidates = recommendedPool.filter(
+      (c) => c.confidence === "high" && (c.volatilityScore ?? 0) < 55,
+    );
+    if (recommendedRatio < 0.4 || safeCandidates.length < 2) {
+      return {
+        level: "warn",
+        message:
+          "Most available picks are marked AVOID. Safe build may be unavailable.",
+      };
+    }
+    return null;
+  }, [candidatePool, recommendedPool]);
+
+  const hasSlip = slipLegs.length > 0;
+  const hasPool = recommendedPool.length > 0;
+  const empty = !hasSlip && candidatePool.length === 0;
 
   const appendTurns = (...t: Turn[]) => setTurns((prev) => [...prev, ...t]);
 
@@ -276,7 +308,7 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
           <div className="space-y-1">
             <p className="font-display font-bold text-sm text-foreground flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-primary" />
-              DraftKings Execution Assistant
+              Bet Decision Assistant
             </p>
             <p className="text-[11px] text-muted-foreground">
               Audit your slip · build SAFE / CASH-OUT alternatives · find the weakest leg.
@@ -297,7 +329,7 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
       <div className="flex items-center justify-between gap-3">
         <p className="font-display font-bold text-sm text-foreground flex items-center gap-1.5">
           <Sparkles className="w-4 h-4 text-primary" />
-          DraftKings Execution Assistant
+          Bet Decision Assistant
         </p>
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setOpen(false)}>
           <X className="w-4 h-4" />
@@ -328,23 +360,87 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
         </span>
       </div>
 
-      {/* Live safety warnings */}
-      {liveWarnings.length ? (
+      {/* Live safety warnings + pool-avoid heuristic */}
+      {liveWarnings.length || poolAvoidWarning ? (
         <div className="space-y-1">
           {liveWarnings.map((w, i) => (
-            <WarningRow key={i} warning={w} />
+            <WarningRow key={`lw-${i}`} warning={w} />
           ))}
+          {poolAvoidWarning ? <WarningRow warning={poolAvoidWarning} /> : null}
         </div>
       ) : null}
 
-      {/* Quick actions — always work; deterministic engine */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-        <QuickButton onClick={onAuditSlip} disabled={slipLegs.length === 0}>Audit my slip</QuickButton>
-        <QuickButton onClick={onFindWeakest} disabled={slipLegs.length === 0}>Find weakest leg</QuickButton>
-        <QuickButton onClick={onCompare} disabled={slipLegs.length === 0 || recommendedPool.length === 0}>Compare slip vs pool</QuickButton>
-        <QuickButton onClick={onBuildSafe} disabled={recommendedPool.length === 0}>Build SAFE 2-leg</QuickButton>
-        <QuickButton onClick={onBuildCashout} disabled={recommendedPool.length === 0}>Build CASH-OUT 3-leg</QuickButton>
-        <QuickButton onClick={onImprovePayout} disabled={recommendedPool.length === 0}>Improve payout</QuickButton>
+      {/* Empty state — neither slip nor pool to act on. */}
+      {empty ? (
+        <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 px-4 py-6 text-center">
+          <p className="text-sm font-semibold text-foreground">Nothing to analyze yet</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Add legs or choose Today's pool, then run an audit.
+          </p>
+        </div>
+      ) : (
+        // Quick actions — bigger, scannable, two-column. Each button
+        // shows an inline reason when disabled instead of just a muted
+        // background, so the user knows what to do next.
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <QuickAction
+            icon={Search}
+            label="Audit Slip"
+            hint="Verdict + risk read on every leg."
+            disabledReason={!hasSlip ? "Add legs to your slip first." : null}
+            onClick={onAuditSlip}
+          />
+          <QuickAction
+            icon={Target}
+            label="Find Weakest Leg"
+            hint="Surface the leg most likely to drop the parlay."
+            disabledReason={!hasSlip ? "Add legs to your slip first." : null}
+            onClick={onFindWeakest}
+          />
+          <QuickAction
+            icon={ArrowLeftRight}
+            label="Compare Slip vs Pool"
+            hint="See if today's pool has stronger swaps."
+            disabledReason={
+              !hasSlip ? "Add legs to your slip first."
+              : !hasPool ? "Wait for today's pool to load."
+              : null
+            }
+            onClick={onCompare}
+          />
+          <QuickAction
+            icon={Shield}
+            label="Build Safe 2-Leg"
+            hint="Two highest-confidence, low-volatility legs."
+            disabledReason={!hasPool ? "Wait for today's pool to load." : null}
+            onClick={onBuildSafe}
+          />
+          <QuickAction
+            icon={Layers}
+            label="Build Cash-Out 3-Leg"
+            hint="3-leg target with realistic cash-out exit."
+            disabledReason={!hasPool ? "Wait for today's pool to load." : null}
+            onClick={onBuildCashout}
+          />
+          <QuickAction
+            icon={TrendingUp}
+            label="Improve Payout"
+            hint="Lift combined odds without adding longshots."
+            disabledReason={!hasPool ? "Wait for today's pool to load." : null}
+            onClick={onImprovePayout}
+          />
+        </div>
+      )}
+
+      {/* Chat — secondary surface for freeform follow-ups. Quick
+          actions above cover the common decisions; the transcript is
+          for "why did you say X" / "what about my last leg?" follow-
+          ups that don't fit the quick-action shape. */}
+      <div className="flex items-center gap-2 pt-1">
+        <MessageSquare className="w-3.5 h-3.5 text-muted-foreground" />
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">
+          Chat (optional)
+        </p>
       </div>
 
       {/* Transcript */}
@@ -410,28 +506,58 @@ export function DkExecutionAssistant({ slipLegs, candidatePool }: Props) {
 
 // ── Sub-components ────────────────────────────────────────────────────
 
-function QuickButton({
-  children,
+function QuickAction({
+  icon: Icon,
+  label,
+  hint,
+  disabledReason,
   onClick,
-  disabled,
 }: {
-  children: React.ReactNode;
+  icon: typeof Sparkles;
+  label: string;
+  hint: string;
+  /** When non-null, the button is disabled and this string explains why. */
+  disabledReason: string | null;
   onClick: () => void;
-  disabled?: boolean;
 }) {
+  const disabled = disabledReason !== null;
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={disabled ? disabledReason : hint}
       className={cn(
-        "text-[11px] px-2 py-1.5 rounded-md border text-left transition-colors",
+        "group flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-all",
         disabled
-          ? "border-border/40 bg-muted/20 text-muted-foreground/50 cursor-not-allowed"
-          : "border-border/60 bg-muted/40 text-foreground hover:bg-muted",
+          ? "border-border/40 bg-muted/10 cursor-not-allowed"
+          : "border-border bg-card hover:border-primary/60 hover:bg-primary/[0.04] active:scale-[0.99]",
       )}
     >
-      {children}
+      <Icon
+        className={cn(
+          "w-4 h-4 shrink-0 mt-0.5",
+          disabled ? "text-muted-foreground/40" : "text-primary",
+        )}
+      />
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <p
+          className={cn(
+            "text-xs font-bold",
+            disabled ? "text-muted-foreground/60" : "text-foreground",
+          )}
+        >
+          {label}
+        </p>
+        <p
+          className={cn(
+            "text-[10px] leading-snug",
+            disabled ? "text-muted-foreground/50 italic" : "text-muted-foreground",
+          )}
+        >
+          {disabled ? disabledReason : hint}
+        </p>
+      </div>
     </button>
   );
 }
