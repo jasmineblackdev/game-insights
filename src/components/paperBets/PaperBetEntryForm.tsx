@@ -28,6 +28,7 @@ import {
   saveDraft,
   snapshotCurrentDraft,
 } from "@/lib/paperBets/drafts";
+import { resolveGameIdByTeam } from "@/lib/paperBets/gameIdResolver";
 import { SlipSummaryCard } from "@/components/paperBets/SlipSummaryCard";
 import type { PaperLeg, PaperLiveState } from "@/lib/paperBets/types";
 
@@ -148,7 +149,11 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
   const effectiveDir = draft.directionOverride !== "auto" ? draft.directionOverride : norm?.direction;
   const effectiveLine = draft.lineOverride !== "" ? Number(draft.lineOverride) : norm?.line;
 
-  const addLeg = () => {
+  /** Tracks an in-flight gameId lookup so the user can see the form
+   *  is busy and the Add button can disable. */
+  const [resolvingGameId, setResolvingGameId] = useState(false);
+
+  const addLeg = async () => {
     if (!draft.dkLabel.trim()) {
       toast.error("Enter the DraftKings selection label.");
       return;
@@ -162,13 +167,52 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
       toast.error("Could not determine market type — pick one manually.");
       return;
     }
+
+    // Auto-resolve gameId from team + sport + today when the user
+    // didn't paste one. The principle is "only manual step is
+    // submitting the slip" — without a gameId neither the live
+    // tracker nor the resolver can act, so we lock down the lookup
+    // at LEG-ADD time and block adding the leg if no game matches.
+    let resolvedGameId = draft.gameId.trim() || undefined;
+    let resolvedGameTimeIso = draft.gameTimeIso.trim() || undefined;
+    let resolvedTeamLabel = draft.teamLabel.trim() || undefined;
+
+    const teamForLookup = (draft.teamLabel ?? "").trim();
+    if (!resolvedGameId && teamForLookup && draft.sport !== "BOXING" && draft.sport !== "MMA") {
+      setResolvingGameId(true);
+      try {
+        const todayYmd = new Date().toISOString().slice(0, 10);
+        const match = await resolveGameIdByTeam({
+          sport: draft.sport,
+          teamLabel: teamForLookup,
+          dateIso: todayYmd,
+        });
+        if (!match) {
+          toast.error(
+            `No ${draft.sport} game found for "${teamForLookup}" today. Check the team abbreviation (e.g. TOR not TOR RAPYORS).`,
+            { duration: 8000 },
+          );
+          return;
+        }
+        resolvedGameId = match.gameId;
+        resolvedGameTimeIso = match.startIso ?? undefined;
+        // Snap typo'd team back to the canonical abbr from ESPN.
+        resolvedTeamLabel = match.matchedSide === "home" ? match.homeAbbr : match.awayAbbr;
+        if (resolvedTeamLabel.toUpperCase() !== teamForLookup.toUpperCase()) {
+          toast.message(`Matched "${teamForLookup}" → ${resolvedTeamLabel}`);
+        }
+      } finally {
+        setResolvingGameId(false);
+      }
+    }
+
     const leg: PaperLeg = {
       dkLabel: draft.dkLabel.trim(),
       sport: draft.sport,
       league: draft.sport.toLowerCase(),
-      gameId: draft.gameId.trim() || undefined,
-      gameTimeIso: draft.gameTimeIso.trim() || undefined,
-      teamLabel: draft.teamLabel.trim() || undefined,
+      gameId: resolvedGameId,
+      gameTimeIso: resolvedGameTimeIso,
+      teamLabel: resolvedTeamLabel,
       playerName: draft.playerName.trim() || undefined,
       playerId: draft.playerId.trim() || undefined,
       marketType: effectiveMarket,
@@ -181,7 +225,11 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
     };
     setLegs((prev) => [...prev, leg]);
     setDraft(EMPTY_DRAFT);
-    toast.success("Leg added to slip.");
+    toast.success(
+      resolvedGameId && !draft.gameId.trim()
+        ? `Leg added — gameId auto-linked.`
+        : "Leg added to slip.",
+    );
   };
 
   const removeLeg = (idx: number) => {
@@ -460,9 +508,15 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
           </div>
         ) : null}
 
-        <Button onClick={addLeg} size="sm" variant="default" className="w-full gap-1">
+        <Button
+          onClick={addLeg}
+          size="sm"
+          variant="default"
+          className="w-full gap-1"
+          disabled={resolvingGameId}
+        >
           <Plus className="w-3.5 h-3.5" />
-          Add leg to slip
+          {resolvingGameId ? "Linking game…" : "Add leg to slip"}
         </Button>
       </div>
 
