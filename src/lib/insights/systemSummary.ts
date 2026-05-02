@@ -32,6 +32,31 @@ import { fetchClvSummary } from "@/lib/analytics/clv";
 
 export type ModelTrustStatus = "reliable" | "needs_data" | "unstable";
 
+/**
+ * Per-diagnosis bucket counts surfaced on Data Health (#170).
+ * Aggregated from analytics_data_quality_summary which walks the
+ * legs JSONB on both recommended_parlays and paper_bets.
+ */
+export interface DataQualityCounts {
+  /** Total legs flagged with any diagnosis. */
+  total:                number;
+  /** Legs with diagnosis "unparseable_id" (missing/malformed game id). */
+  missingGameId:        number;
+  /** Legs with "player_not_in_box_score" — missing or wrong playerId. */
+  missingPlayerId:      number;
+  /** Legs whose stat_type isn't mapped to ESPN box-score columns. */
+  unsupportedStat:      number;
+  /** Legs whose teamLabel doesn't match either side of the game. */
+  invalidMarket:        number;
+  /** Legs with no over/under direction set. */
+  missingDirection:     number;
+  /** Legs whose box score is published but the row didn't show up. */
+  boxScoreMissing:      number;
+  /** Legs against games still in progress (not really "broken" but
+   *  surfaced so the user knows the count). */
+  gameNotFinal:         number;
+}
+
 export interface SystemSummary {
   // System status
   roi7d:        number | null;
@@ -48,6 +73,8 @@ export interface SystemSummary {
   stalePending:        number;
   manualOverridePct:   number | null;
   totalRecommended:    number;
+  /** Per-diagnosis bucket counts; null when the RPC isn't deployed. */
+  dataQuality:         DataQualityCounts | null;
   // Meta
   thinSample: boolean;
 }
@@ -58,10 +85,11 @@ const STALE_HOURS = 48;
 export async function getSystemSummary(): Promise<SystemSummary> {
   if (!isSupabaseConfigured || !supabase) return blankSummary();
 
-  const [systemStatus, modelTrust, dataHealth] = await Promise.all([
+  const [systemStatus, modelTrust, dataHealth, dataQuality] = await Promise.all([
     fetchSystemStatus(),
     fetchModelTrust(),
     fetchDataHealth(),
+    fetchDataQuality(),
   ]);
 
   const sample7d = systemStatus.sample7d;
@@ -69,6 +97,7 @@ export async function getSystemSummary(): Promise<SystemSummary> {
     ...systemStatus,
     ...modelTrust,
     ...dataHealth,
+    dataQuality,
     thinSample: sample7d > 0 && sample7d < 20,
   };
 }
@@ -87,6 +116,7 @@ function blankSummary(): SystemSummary {
     stalePending: 0,
     manualOverridePct: null,
     totalRecommended: 0,
+    dataQuality: null,
     thinSample: true,
   };
 }
@@ -241,6 +271,48 @@ async function fetchDataHealth(): Promise<DataHealthFields> {
     stalePending,
     manualOverridePct: sourceCounts.manualPct,
     totalRecommended:  sourceCounts.total,
+  };
+}
+
+// ── Data quality (#170) ──────────────────────────────────────────────
+
+interface DiagnosisRow {
+  diagnosis:    string | null;
+  source_table: string | null;
+  count:        number | string | null;
+}
+
+async function fetchDataQuality(): Promise<DataQualityCounts | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("analytics_data_quality_summary", {
+    lookback_days: 30,
+  });
+  if (error || !data || !Array.isArray(data)) return null;
+  const rows = data as DiagnosisRow[];
+
+  const sumWhere = (predicate: (d: string) => boolean) =>
+    rows
+      .filter((r) => r.diagnosis && predicate(r.diagnosis))
+      .reduce((acc, r) => acc + numOrZero(r.count), 0);
+
+  const total           = rows.reduce((acc, r) => acc + numOrZero(r.count), 0);
+  const missingGameId   = sumWhere((d) => d === "unparseable_id");
+  const missingPlayerId = sumWhere((d) => d === "player_not_in_box_score");
+  const unsupportedStat = sumWhere((d) => d === "stat_type_unsupported");
+  const invalidMarket   = sumWhere((d) => d === "team_label_unmatched");
+  const missingDirection = sumWhere((d) => d === "missing_direction");
+  const boxScoreMissing = sumWhere((d) => d === "box_score_missing");
+  const gameNotFinal    = sumWhere((d) => d === "game_not_final");
+
+  return {
+    total,
+    missingGameId,
+    missingPlayerId,
+    unsupportedStat,
+    invalidMarket,
+    missingDirection,
+    boxScoreMissing,
+    gameNotFinal,
   };
 }
 

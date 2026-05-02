@@ -262,7 +262,88 @@ export function DataHealthSection({ summary, loading, onChanged }: Props) {
           }
         />
       </div>
+
+      {/* Per-diagnosis bucket strip (#170) — only renders when there
+          are any flagged legs. Surfaces silently-broken rows that
+          would otherwise sit in needs_review without anyone noticing.
+          Read-side only — counts come from
+          analytics_data_quality_summary, no client-side leg walk. */}
+      {summary?.dataQuality && summary.dataQuality.total > 0 ? (
+        <DataQualityRow counts={summary.dataQuality} />
+      ) : null}
     </section>
+  );
+}
+
+function DataQualityRow({ counts }: { counts: NonNullable<SystemSummary["dataQuality"]> }) {
+  // Each flag is only worth surfacing as a tile when non-zero. For
+  // a healthy deploy the row collapses to whatever is broken right
+  // now — no permanent "0 missing playerId" tile staring at the user.
+  const flags: { label: string; value: number; tone: Tone; subtitle?: string }[] = [
+    {
+      label: "Missing gameId",
+      value: counts.missingGameId,
+      tone: counts.missingGameId > 0 ? "loss" : "neutral",
+      subtitle: counts.missingGameId > 0 ? "edit bet to fix" : undefined,
+    },
+    {
+      label: "Missing playerId",
+      value: counts.missingPlayerId,
+      tone: counts.missingPlayerId > 0 ? "loss" : "neutral",
+      subtitle: counts.missingPlayerId > 0 ? "athlete not matched" : undefined,
+    },
+    {
+      label: "Unsupported stat",
+      value: counts.unsupportedStat,
+      tone: counts.unsupportedStat > 0 ? "warn" : "neutral",
+      subtitle: counts.unsupportedStat > 0 ? "no ESPN mapping" : undefined,
+    },
+    {
+      label: "Invalid market",
+      value: counts.invalidMarket,
+      tone: counts.invalidMarket > 0 ? "warn" : "neutral",
+      subtitle: counts.invalidMarket > 0 ? "team label unmatched" : undefined,
+    },
+    {
+      label: "Missing direction",
+      value: counts.missingDirection,
+      tone: counts.missingDirection > 0 ? "warn" : "neutral",
+    },
+    {
+      label: "Box score missing",
+      value: counts.boxScoreMissing,
+      tone: counts.boxScoreMissing > 0 ? "warn" : "neutral",
+      subtitle: counts.boxScoreMissing > 0 ? "ESPN hasn't published" : undefined,
+    },
+  ];
+  const visible = flags.filter((f) => f.value > 0);
+  if (visible.length === 0) {
+    return (
+      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/[0.04] px-3 py-2 text-[11px] text-emerald-700 dark:text-emerald-400">
+        ✓ No data-quality issues flagged in the last 30 days.
+      </div>
+    );
+  }
+  return (
+    <details className="rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2 text-xs">
+      <summary className="font-semibold text-foreground cursor-pointer select-none flex items-center gap-2">
+        <AlertTriangle className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" />
+        {visible.length} data-quality issue{visible.length === 1 ? "" : "s"} flagged
+        <span className="text-muted-foreground font-normal ml-1">({counts.total} legs total)</span>
+      </summary>
+      <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {visible.map((f) => (
+          <Tile
+            key={f.label}
+            label={f.label}
+            value={`${f.value}`}
+            subtitle={f.subtitle ?? null}
+            tone={f.tone}
+            loading={false}
+          />
+        ))}
+      </div>
+    </details>
   );
 }
 
