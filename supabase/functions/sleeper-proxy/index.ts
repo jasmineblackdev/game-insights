@@ -17,9 +17,19 @@
  *      we already control the boundary.
  *
  * Routes (passed as `?path=...`):
- *   players/nfl              — full NFL roster (large)
- *   injuries/nfl             — injured-only subset, normalized
- *   state/nfl                — current week / season
+ *   players/nfl                                 — full NFL roster (large)
+ *   injuries/nfl                                — injured-only subset, normalized
+ *   state/nfl                                   — current week / season
+ *   user/{username_or_id}                       — single user
+ *   user/{user_id}/leagues/{sport}/{season}     — user's leagues
+ *   league/{league_id}                          — single league
+ *   league/{league_id}/rosters                  — league rosters
+ *   league/{league_id}/users                    — league owners
+ *
+ * Variable-segment paths are validated by regex (alphanumeric +
+ * underscore for usernames, digits for ids, fixed sport+season).
+ * No `..`, no slashes-into-other-services — anything off-pattern
+ * gets rejected with path_not_allowed.
  */
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -31,11 +41,35 @@ const corsHeaders: Record<string, string> = {
 
 const SLEEPER_UPSTREAM = "https://api.sleeper.app/v1";
 
-const ALLOWED_PATHS = new Set([
+// Exact-match paths. Anything else falls through to the regex
+// validator below.
+const ALLOWED_EXACT = new Set([
   "players/nfl",
   "injuries/nfl",   // synthesized — we walk players/nfl and filter
   "state/nfl",
 ]);
+
+// Regex-validated paths. Each pattern is anchored end-to-end and
+// only allows characters that can appear in legitimate Sleeper ids
+// or usernames — no slashes, no `..`, no query strings.
+const ALLOWED_PATTERNS: RegExp[] = [
+  // user/{username_or_id} — Sleeper usernames are 4-15 chars
+  // alphanumeric + underscore; user_ids are numeric. Allow either.
+  /^user\/[A-Za-z0-9_-]{1,64}$/,
+  // user/{user_id}/leagues/{sport}/{season}
+  /^user\/\d{1,32}\/leagues\/(nfl|nba|mlb|soccer|lcs)\/\d{4}$/,
+  // league/{league_id} — single league lookup
+  /^league\/\d{1,32}$/,
+  // league/{league_id}/rosters
+  /^league\/\d{1,32}\/rosters$/,
+  // league/{league_id}/users
+  /^league\/\d{1,32}\/users$/,
+];
+
+function isAllowedPath(path: string): boolean {
+  if (ALLOWED_EXACT.has(path)) return true;
+  return ALLOWED_PATTERNS.some((re) => re.test(path));
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -118,8 +152,8 @@ Deno.serve(async (req) => {
 
   const path = url.searchParams.get("path");
   if (!path) return json({ error: "missing_path" }, 400);
-  if (!ALLOWED_PATHS.has(path)) {
-    return json({ error: "path_not_allowed", path, allowed: [...ALLOWED_PATHS] }, 400);
+  if (!isAllowedPath(path)) {
+    return json({ error: "path_not_allowed", path }, 400);
   }
 
   // injuries/nfl is synthesized from the full roster — Sleeper has

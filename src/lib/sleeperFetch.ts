@@ -166,3 +166,81 @@ export async function pingSleeper(): Promise<"ok" | "no_proxy" | "upstream_faile
   const state = await fetchNflState();
   return state && typeof state.week === "number" ? "ok" : "upstream_failed";
 }
+
+// ── User + league lookup ─────────────────────────────────────────────
+
+export interface SleeperUser {
+  /** Snowflake-style numeric id, returned as a string. Stable. */
+  user_id:      string;
+  username:     string;
+  display_name: string;
+  avatar:       string | null;
+}
+
+/**
+ * Look up a Sleeper user by username OR by numeric user_id (the
+ * upstream endpoint accepts both). Returns null when the username
+ * doesn't exist or the proxy is unavailable. Username is forwarded
+ * verbatim — Sleeper's allowed character set is alphanumeric +
+ * underscore so the proxy regex covers the same range.
+ */
+export async function fetchSleeperUser(
+  usernameOrId: string,
+): Promise<SleeperUser | null> {
+  const id = usernameOrId.trim();
+  if (!id) return null;
+  const raw = await sleeperGet<Partial<SleeperUser> | null>(`user/${encodeURIComponent(id)}`);
+  if (!raw || !raw.user_id || !raw.username) return null;
+  return {
+    user_id:      raw.user_id,
+    username:     raw.username,
+    display_name: raw.display_name ?? raw.username,
+    avatar:       raw.avatar ?? null,
+  };
+}
+
+export type SleeperSport = "nfl" | "nba" | "mlb" | "soccer" | "lcs";
+
+export interface SleeperLeague {
+  league_id:        string;
+  name:             string;
+  season:           string;
+  status:           string;       // "in_season" | "complete" | "drafting" | etc.
+  sport:            string;
+  total_rosters:    number;
+  scoring_settings: Record<string, unknown> | null;
+  settings:         Record<string, unknown> | null;
+}
+
+/**
+ * Leagues the user belongs to for a given sport + season. Returns
+ * an empty array if the user has none (free-agent account, or
+ * off-season for that sport) or if the call fails.
+ */
+export async function fetchSleeperUserLeagues(
+  userId: string,
+  sport:  SleeperSport,
+  season: number | string,
+): Promise<SleeperLeague[]> {
+  const id = userId.trim();
+  if (!/^\d{1,32}$/.test(id)) return [];
+  const seasonStr = String(season);
+  if (!/^\d{4}$/.test(seasonStr)) return [];
+  const raw = await sleeperGet<Partial<SleeperLeague>[] | null>(
+    `user/${id}/leagues/${sport}/${seasonStr}`,
+  );
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((l): l is Partial<SleeperLeague> & { league_id: string; name: string } =>
+      Boolean(l && l.league_id && l.name))
+    .map((l) => ({
+      league_id:        l.league_id,
+      name:             l.name,
+      season:           l.season ?? seasonStr,
+      status:           l.status ?? "unknown",
+      sport:            l.sport ?? sport,
+      total_rosters:    l.total_rosters ?? 0,
+      scoring_settings: l.scoring_settings ?? null,
+      settings:         l.settings ?? null,
+    }));
+}

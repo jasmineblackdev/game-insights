@@ -15,6 +15,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Settings as SettingsIcon } from "lucide-react";
 import { SharpModeSettings } from "@/components/SharpModeSettings";
+import { SleeperAccountPanel } from "@/components/settings/SleeperAccountPanel";
 
 export default function SettingsPage() {
   return (
@@ -31,6 +32,8 @@ export default function SettingsPage() {
         </div>
 
         <SharpModeSettings />
+
+        <SleeperAccountPanel />
 
         <Link
           to="/paper"
