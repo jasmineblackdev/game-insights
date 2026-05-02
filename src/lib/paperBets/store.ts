@@ -43,14 +43,21 @@ export class PaperBetsMigrationMissingError extends Error {
 function classifyError(error: { message?: string; code?: string; details?: string } | null | undefined, fallback: string): Error {
   const msg = error?.message ?? "";
   const detail = error?.details ?? "";
-  // Postgres "relation does not exist" → migration missing.
-  // Code 42P01 is the canonical SQLSTATE; PostgREST also surfaces it
-  // in the message text.
-  if (
+  // Migration missing — multiple signal shapes:
+  //   • Postgres "relation … does not exist" (SQLSTATE 42P01) — direct
+  //     query path, when PostgREST forwards the raw error.
+  //   • PostgREST "Could not find the table … in the schema cache"
+  //     (PGRST205) — when the schema cache hasn't been refreshed yet
+  //     and PostgREST short-circuits before hitting Postgres. This is
+  //     the more common case in deployed environments.
+  const looksLikeMigrationMissing =
     error?.code === "42P01" ||
+    error?.code === "PGRST205" ||
     /relation .* does not exist/i.test(msg) ||
-    /relation .* does not exist/i.test(detail)
-  ) {
+    /relation .* does not exist/i.test(detail) ||
+    /could not find the table .* in the schema cache/i.test(msg) ||
+    /could not find the table .* in the schema cache/i.test(detail);
+  if (looksLikeMigrationMissing) {
     return new PaperBetsMigrationMissingError(msg || detail || "table not found");
   }
   return new Error(msg || fallback);
