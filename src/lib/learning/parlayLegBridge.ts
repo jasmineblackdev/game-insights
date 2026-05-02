@@ -357,6 +357,15 @@ export async function bridgeParlayLegs(parlay: ParlayRowInput): Promise<BridgeRe
         p_error_tags: [],
       });
       if (error) {
+        // Postgres unique_violation — the full-coverage index
+        // added in migration 20260522 catches duplicate inserts
+        // that slipped past the pre-query dedupe SELECT (which
+        // anon-RLS blocks). Treat as already-bridged rather than
+        // an error so reruns don't pollute the error log.
+        if (error.code === "23505") {
+          result.skipped_already_bridged++;
+          continue;
+        }
         result.errors.push(`L${i}: ${error.message}`);
         continue;
       }

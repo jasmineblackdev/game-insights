@@ -318,6 +318,16 @@ export async function bridgePaperBetLegs(bet: PaperBet): Promise<PaperBridgeResu
         p_error_tags: [],
       });
       if (error) {
+        // Postgres unique_violation. The full-coverage unique
+        // index on (external_game_id, market_type) added in
+        // migration 20260522 catches the case where the pre-query
+        // dedupe SELECT was blocked by RLS — instead of an
+        // unbounded duplicate insert, the constraint fires and
+        // we count the leg as already bridged.
+        if (error.code === "23505") {
+          result.skipped_already_bridged++;
+          continue;
+        }
         result.errors.push(`L${i}: ${error.message}`);
         continue;
       }
