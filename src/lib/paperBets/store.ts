@@ -268,6 +268,14 @@ export async function placePaperBet(args: {
   betTiming?: PaperBetTiming;
   /** Game state captured at the moment of a live bet. */
   liveState?: PaperLiveState | null;
+  /**
+   * How the bet was created. Defaults to "manual_draftkings_entry"
+   * for backwards compatibility with the slip builder. Set to
+   * "app_recommendation_paper" when an auto-plan draft is being
+   * submitted so analytics splits (#171) attribute the row to
+   * the system rather than the user.
+   */
+  source?: PaperBet["source"];
 }): Promise<PaperBet> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error("Supabase not configured.");
@@ -299,7 +307,7 @@ export async function placePaperBet(args: {
   const { data: created, error: insErr } = await supabase
     .from("paper_bets")
     .insert({
-      source: "manual_draftkings_entry",
+      source: args.source ?? "manual_draftkings_entry",
       bet_type: args.betType,
       legs: args.legs,
       stake: args.stake,

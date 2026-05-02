@@ -34,6 +34,7 @@ import {
   ModelTrustSection,
   DataHealthSection,
 } from "@/components/insights/SystemHealthSections";
+import { UserVsSystemPanel } from "@/components/insights/UserVsSystemPanel";
 import { MLPerformanceContent } from "@/pages/MLPerformancePage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -105,6 +106,9 @@ function EdgeCardPageInner() {
         <section className="space-y-3 border-t border-border pt-8">
           <ClvDashboard />
         </section>
+
+        {/* ── User vs System split (#171) ─────────────────────────── */}
+        <UserVsSystemPanel />
 
         {/* ── Saved Edge Cards ─────────────────────────────────────── */}
         <section className="space-y-3 border-t border-border pt-8">

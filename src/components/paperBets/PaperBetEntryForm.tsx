@@ -27,6 +27,7 @@ import {
   getDraft,
   saveDraft,
   snapshotCurrentDraft,
+  type PaperDraftSource,
 } from "@/lib/paperBets/drafts";
 import {
   resolveAthleteByName,
@@ -98,6 +99,13 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
   const [livePlayerStat, setLivePlayerStat] = useState("");
   const [liveModelProb, setLiveModelProb] = useState("");
 
+  // Loaded-draft origin. "auto_plan" drafts come from Today's
+  // Decision → Track as Paper Bet (#167) and need to be persisted
+  // with paper_bets.source="app_recommendation_paper" so the user vs
+  // system analytics split (#171) attributes them to the system.
+  // Manual drafts default to undefined → "manual_draftkings_entry".
+  const [draftSource, setDraftSource] = useState<PaperDraftSource | undefined>(undefined);
+
   // Draft restore. Prefer an explicit loadDraftId (My Slips → Edit
   // draft) over the auto-saved "current" slip. Runs once on mount.
   const hydratedRef = useRef(false);
@@ -117,6 +125,7 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
     setLiveGameClock(d.liveGameClock || "");
     setLivePlayerStat(d.livePlayerStat || "");
     setLiveModelProb(d.liveModelProb || "");
+    setDraftSource(d.source);
   }, [loadDraftId]);
 
   // Auto-save the in-progress slip whenever legs / stake / notes /
@@ -140,10 +149,14 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
       liveGameClock,
       livePlayerStat,
       liveModelProb,
+      // Preserve auto_plan provenance through the autosave so an
+      // edit-then-submit cycle still attributes to the system.
+      source: draftSource,
     });
   }, [
     legs, stake, notes, trackLive,
     liveScoreHome, liveScoreAway, livePeriod, liveGameClock, livePlayerStat, liveModelProb,
+    draftSource,
   ]);
 
   const norm = draft.dkLabel.trim() ? normalizeDraftKingsLabel(draft.dkLabel) : null;
@@ -302,6 +315,7 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
           notes: notes.trim() || undefined,
           betTiming: trackLive ? "live" : "pregame",
           liveState,
+          source: draftSource === "auto_plan" ? "app_recommendation_paper" : undefined,
         });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown error";
@@ -319,6 +333,7 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
       setLiveModelProb("");
       setStake("10");
       setNotes("");
+      setDraftSource(undefined);
       onPlaced?.();
     } finally {
       setSubmitting(false);
