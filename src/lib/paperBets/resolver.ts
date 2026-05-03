@@ -14,8 +14,9 @@
 
 import { fetchPlayerLastGames, type GameLogSport } from "@/lib/playerGameLog";
 import { americanToPayoutMultiplier } from "./normalizer";
-import type {
-  ResolutionDiagnosis,
+import {
+  isTransient,
+  type ResolutionDiagnosis,
 } from "@/lib/learning/resolutionDiagnosis";
 import type { PaperBet, PaperBetStatus, PaperLeg, PaperLegStatus } from "./types";
 
@@ -265,6 +266,19 @@ export async function resolveLeg(leg: PaperLeg): Promise<PaperLeg> {
     ? await resolvePropLeg(leg)
     : await resolveTeamLeg(leg);
 
+  // Centralize the "transient diagnosis → keep leg open" rule so the
+  // parlay rollup doesn't paint a red NEEDS REVIEW pill on bets that
+  // are just waiting for ESPN. Per-resolver sites historically were
+  // inconsistent — game_not_final returned status="open" but
+  // box_score_missing returned status="needs_review", so a parlay with
+  // one in-progress game and one game-just-ended (box not yet
+  // published) showed up as needs_review when neither leg actually
+  // needs the user to do anything. isTransient() is the single source
+  // of truth for which diagnoses can self-clear over time.
+  const effective: LegResolution = (r.status === "needs_review" && isTransient(r.diagnosis))
+    ? { ...r, status: "open" }
+    : r;
+
   if (typeof console !== "undefined") {
     console.debug("[paperBets/resolver]", {
       sport:       leg.sport,
@@ -274,24 +288,25 @@ export async function resolveLeg(leg: PaperLeg): Promise<PaperLeg> {
       gameId:      leg.gameId,
       line_value:  leg.line,
       direction:   leg.direction,
-      next_status: r.status,
-      diagnosis:   r.diagnosis ?? null,
-      actual:      r.resolvedActual ?? null,
+      next_status: effective.status,
+      diagnosis:   effective.diagnosis ?? null,
+      transient:   isTransient(effective.diagnosis),
+      actual:      effective.resolvedActual ?? null,
     });
   }
 
-  if (r.status === "open") {
+  if (effective.status === "open") {
     // Game/box not ready yet — preserve diagnosis for the UI without
     // moving the leg to a terminal state.
-    return { ...leg, resolutionDiagnosis: r.diagnosis ?? null };
+    return { ...leg, resolutionDiagnosis: effective.diagnosis ?? null };
   }
   return {
     ...leg,
-    status: r.status,
-    resolvedActual: r.resolvedActual ?? null,
-    resolvedReason: r.resolvedReason,
+    status: effective.status,
+    resolvedActual: effective.resolvedActual ?? null,
+    resolvedReason: effective.resolvedReason,
     resolvedAt: new Date().toISOString(),
-    resolutionDiagnosis: r.status === "needs_review" ? (r.diagnosis ?? null) : null,
+    resolutionDiagnosis: effective.status === "needs_review" ? (effective.diagnosis ?? null) : null,
   };
 }
 
