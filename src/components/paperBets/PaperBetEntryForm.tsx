@@ -429,7 +429,21 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
               type="text"
               placeholder="e.g. Aaron Judge — Total Bases Over 1.5"
               value={draft.dkLabel}
-              onChange={(e) => setDraft({ ...draft, dkLabel: e.target.value })}
+              onChange={(e) => setDraft({
+                ...draft,
+                dkLabel: e.target.value,
+                // Reset auto-derived overrides on every label edit so
+                // a stale value (e.g. user typed "25+" into stat-type
+                // earlier and now changed the label to "Points") can't
+                // beat the parser's fresh output. Custom-mode users can
+                // re-enter overrides after the new label parses; the
+                // override fields stay visible while the parser is
+                // unsure or the Custom chip is active.
+                marketTypeOverride: "auto",
+                statTypeOverride: "",
+                directionOverride: "auto",
+                lineOverride: "",
+              })}
               className="h-9 text-sm"
             />
           </div>

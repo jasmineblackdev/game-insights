@@ -135,12 +135,31 @@ export function normalizeDraftKingsLabel(rawLabel: string): NormalizedSelection 
   }
 
   // Player prop O/U — try every stat alias, longest first.
-  const direction: PaperDirection | undefined =
+  let direction: PaperDirection | undefined =
     /\bover\b/.test(lc) ? "over" :
     /\bunder\b/.test(lc) ? "under" :
     undefined;
-  const numericMatch = lc.match(/(\d+(?:\.\d+)?)\s*\+?\s*$/) ?? lc.match(/(\d+(?:\.\d+)?)/);
-  const line = numericMatch ? Number(numericMatch[1]) : undefined;
+  let line = (() => {
+    const m = lc.match(/(\d+(?:\.\d+)?)\s*\+?\s*$/) ?? lc.match(/(\d+(?:\.\d+)?)/);
+    return m ? Number(m[1]) : undefined;
+  })();
+
+  // Threshold pattern — DraftKings often books player props as "25+
+  // Points" / "Points 25+" / "Banchero 25+ Points" meaning "25 or
+  // more". That's equivalent to Over 24.5 in the resolver's
+  // direction/line model. Detect the `N+` token and overwrite the
+  // direction/line we extracted above (which would otherwise leave
+  // line=N and direction=undefined).
+  const thresholdMatch = lc.match(/(?:^|\D)(\d+)\+(?!\d)/);
+  if (thresholdMatch) {
+    const n = Number(thresholdMatch[1]);
+    if (Number.isFinite(n) && n > 0) {
+      direction = "over";
+      // N - 0.5 so the resolver wins on actual ≥ N (the DK semantic
+      // for "25+"). Using N alone would push on actual exactly N.
+      line = n - 0.5;
+    }
+  }
 
   for (const alias of STAT_ALIAS_KEYS_LONG) {
     // Word-boundary match so "h" in "hits" isn't a substring trap.
@@ -160,6 +179,19 @@ export function normalizeDraftKingsLabel(rawLabel: string): NormalizedSelection 
         note: "Stat recognised; verify direction and line manually.",
       };
     }
+  }
+
+  // No stat alias matched, but we DID extract a threshold (e.g.
+  // bare "25+"). Surface direction/line so the user only has to
+  // pick a stat type — the line and direction are already correct.
+  if (thresholdMatch && direction != null && line != null) {
+    return {
+      marketType: "player_prop",
+      direction,
+      line,
+      confident: false,
+      note: "Threshold parsed (Over " + line + "). Pick a stat type from the dropdown.",
+    };
   }
 
   return {
