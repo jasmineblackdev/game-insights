@@ -73,6 +73,117 @@ function pickUsBook(books: Bookmaker[] | undefined): Bookmaker | undefined {
   );
 }
 
+// ── Cross-book line shopping (#124) ──────────────────────────────────
+//
+// "Best line" = highest payout (best for the user) on a given side.
+// For favorites (negative odds) higher = closer to zero (lose less).
+// For dogs (positive odds) higher = bigger payout. Either way, the
+// max of the American-odds value is the best price.
+//
+// "Consensus" = median across books' prices per outcome. Median (not
+// mean) is robust to one book being way off — common when a small
+// book hasn't moved with the market. With 4-6 US books in the typical
+// response, the median is a solid no-vig-ish anchor without paying
+// for sharp data like Pinnacle.
+//
+// Visibility-only — these helpers feed enrichmentNotes. No optimizer
+// or scoring path consumes the consensus value (yet); the next step
+// after we observe how often best-line beats DK is to push these into
+// the value-edge calculation. Holding scope tight here: surface only.
+
+function median(nums: number[]): number | null {
+  if (!nums.length) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
+function bookShortName(b: Bookmaker): string {
+  const k = (b.key ?? "").toLowerCase();
+  if (k.includes("draftkings")) return "DK";
+  if (k.includes("fanduel"))    return "FD";
+  if (k.includes("betmgm"))     return "MGM";
+  if (k.includes("caesars"))    return "Caesars";
+  if (k.includes("pointsbet"))  return "PB";
+  if (k.includes("wynnbet"))    return "Wynn";
+  if (k.includes("betrivers"))  return "BR";
+  if (k.includes("twinspires")) return "TS";
+  if (k.includes("pinnacle"))   return "Pin";
+  return b.title ?? b.key ?? "?";
+}
+
+interface BestQuote {
+  /** Outcome name as the book reports it (team name / "Over" / "Under"). */
+  outcome: string;
+  /** Best (highest) American-odds price for this outcome across all books. */
+  bestPrice: number;
+  /** Short name of the book offering the best price. */
+  bestBook: string;
+  /** Median price across books for this outcome (vig-included). */
+  consensusPrice: number | null;
+  /** How many books quoted this outcome. */
+  bookCount: number;
+}
+
+function compareBooksOnMarket(
+  books: Bookmaker[] | undefined,
+  marketKey: string,
+): BestQuote[] {
+  if (!books?.length) return [];
+  // Group all (outcome → [{ price, book }]) across books.
+  const byOutcome = new Map<string, Array<{ price: number; book: Bookmaker }>>();
+  for (const b of books) {
+    const m = b.markets?.find((x) => x.key === marketKey);
+    if (!m?.outcomes?.length) continue;
+    for (const o of m.outcomes) {
+      const name = (o.name ?? "").trim();
+      if (!name || o.price == null || !Number.isFinite(o.price)) continue;
+      if (!byOutcome.has(name)) byOutcome.set(name, []);
+      byOutcome.get(name)!.push({ price: Number(o.price), book: b });
+    }
+  }
+  const out: BestQuote[] = [];
+  for (const [outcome, entries] of byOutcome.entries()) {
+    if (!entries.length) continue;
+    let best = entries[0];
+    for (const e of entries) {
+      if (e.price > best.price) best = e;
+    }
+    out.push({
+      outcome,
+      bestPrice:      best.price,
+      bestBook:       bookShortName(best.book),
+      consensusPrice: median(entries.map((e) => e.price)),
+      bookCount:      entries.length,
+    });
+  }
+  return out;
+}
+
+function fmtAmerican(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const r = Math.round(n);
+  return r > 0 ? `+${r}` : `${r}`;
+}
+
+/**
+ * Format the cross-book ML / spread / total best-line summary as a
+ * single enrichmentNotes line. Returns null when fewer than 2 books
+ * quoted the market (best-line "shopping" requires at least two
+ * candidates to be meaningful).
+ */
+function bestLineNote(books: Bookmaker[] | undefined, marketKey: string, label: string): string | null {
+  const quotes = compareBooksOnMarket(books, marketKey);
+  // Demand at least one outcome with ≥2 books — otherwise we'd just
+  // be reporting the single book's price as "best", which is noise.
+  const anyMulti = quotes.some((q) => q.bookCount >= 2);
+  if (!anyMulti) return null;
+  const parts = quotes.map((q) =>
+    `${q.outcome} ${fmtAmerican(q.bestPrice)} (${q.bestBook}; cons ${fmtAmerican(q.consensusPrice)}, n=${q.bookCount})`,
+  );
+  return `Best ${label}: ${parts.join(" · ")}`;
+}
+
 /** Format moneyline-style outcomes for a single market (e.g. F5 h2h). */
 function marketOutcomesLine(b: Bookmaker | undefined, marketKey: string): string | null {
   const m = b?.markets?.find((x) => x.key === marketKey);
@@ -146,7 +257,21 @@ export async function mergeTheOddsApiNotes(
         if (idx >= 0) notes[idx] = `${notes[idx]} · ${f5}`;
         else notes.push(line);
       }
-      return { ...p, enrichmentNotes: notes };
+      // Cross-book best-line / consensus (#124). Visibility-only —
+      // fires once per market where ≥2 books quoted, surfaces as a
+      // separate note so existing UIs render it without changes.
+      const bestNotes: string[] = [];
+      const ml  = bestLineNote(ev.bookmakers, "h2h",     "ML");
+      const sp  = bestLineNote(ev.bookmakers, "spreads", "spread");
+      const tot = bestLineNote(ev.bookmakers, "totals",  "total");
+      if (ml)  bestNotes.push(ml);
+      if (sp)  bestNotes.push(sp);
+      if (tot) bestNotes.push(tot);
+      let outNotes = notes;
+      if (bestNotes.length && !outNotes.some((n) => n.startsWith("Best "))) {
+        outNotes = [...outNotes, bestNotes.join(" · ")];
+      }
+      return { ...p, enrichmentNotes: outNotes };
     });
   } catch {
     return predictions;
