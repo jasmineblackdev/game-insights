@@ -54,7 +54,10 @@ const STAT_LOOKUP: Record<GameLogSport, Record<string, StatSpec>> = {
     rebounds:   { labels: ["REB", "R"] },
     assists:    { labels: ["AST", "A"] },
     threes:     { labels: ["3PT", "3PM"], parse: parseFraction },
-    pra:        { labels: [] }, // computed below
+    pra:        { labels: [] }, // computed below — points + rebounds + assists
+    pts_reb:    { labels: [] }, // computed below — points + rebounds
+    pts_ast:    { labels: [] }, // computed below — points + assists
+    reb_ast:    { labels: [] }, // computed below — rebounds + assists
   },
   NFL: {
     passing_yards:   { labels: ["YDS", "PASS YDS"], categoryContains: "pass" },
@@ -101,8 +104,17 @@ export async function fetchPlayerLastGames(
   const s = sport.toUpperCase() as GameLogSport;
   if (!ATHLETE_GAMELOG[s]) return [];
 
-  const spec = STAT_LOOKUP[s]?.[statType.toLowerCase()];
-  if (!spec && statType.toLowerCase() !== "pra") return [];
+  const stKey = statType.toLowerCase();
+  const spec = STAT_LOOKUP[s]?.[stKey];
+  // PRA + the 2-stat combined props (pts_ast / pts_reb / reb_ast) are
+  // computed from per-event PTS/REB/AST columns rather than read from
+  // a single label, so they're allowed through even when their
+  // STAT_LOOKUP entry has no labels.
+  const isComputedNbaCombo = s === "NBA" && (
+    stKey === "pra" || stKey === "pts_ast" ||
+    stKey === "pts_reb" || stKey === "reb_ast"
+  );
+  if (!spec && !isComputedNbaCombo) return [];
 
   const key = `${s}:${athleteId}:${statType}:${limit}`;
   const cached = cache.get(key);
@@ -135,24 +147,39 @@ export async function fetchPlayerLastGames(
           if (!n.includes(spec.categoryContains)) continue;
         }
 
-        // For PRA: we need to sum points + rebounds + assists → iterate differently
-        if (statType.toLowerCase() === "pra" && s === "NBA") {
+        // Combined NBA props (PRA + the 2-stat picks) are summed from
+        // per-event PTS/REB/AST columns. The pra branch was here
+        // before; pts_ast / pts_reb / reb_ast piggy-back on the same
+        // column lookup so a missing column for any required stat
+        // skips this category cleanly rather than partially summing.
+        if (s === "NBA" && isComputedNbaCombo) {
           const pIdx = findLabelIdx(labels, ["PTS", "P"]);
           const rIdx = findLabelIdx(labels, ["REB", "R"]);
           const aIdx = findLabelIdx(labels, ["AST", "A"]);
-          if (pIdx < 0 || rIdx < 0 || aIdx < 0) continue;
+          // Required-column gate per stat. If a category lacks a
+          // needed column, skip — another category in the same
+          // gamelog usually carries the full set.
+          if (stKey === "pra"     && (pIdx < 0 || rIdx < 0 || aIdx < 0)) continue;
+          if (stKey === "pts_reb" && (pIdx < 0 || rIdx < 0))             continue;
+          if (stKey === "pts_ast" && (pIdx < 0 || aIdx < 0))             continue;
+          if (stKey === "reb_ast" && (rIdx < 0 || aIdx < 0))             continue;
           for (const e of cat.events) {
             const ev = events[e.eventId];
             if (!ev) continue;
-            const p = Number(e.stats?.[pIdx]);
-            const r = Number(e.stats?.[rIdx]);
-            const a = Number(e.stats?.[aIdx]);
-            if (!Number.isFinite(p + r + a)) continue;
+            const p = pIdx >= 0 ? Number(e.stats?.[pIdx]) : 0;
+            const r = rIdx >= 0 ? Number(e.stats?.[rIdx]) : 0;
+            const a = aIdx >= 0 ? Number(e.stats?.[aIdx]) : 0;
+            const value =
+              stKey === "pra"     ? p + r + a :
+              stKey === "pts_reb" ? p + r :
+              stKey === "pts_ast" ? p + a :
+              /* reb_ast */         r + a;
+            if (!Number.isFinite(value)) continue;
             rows.push({
               date:     (ev.date ?? "").slice(0, 10),
               opponent: parseOpponent(ev.atVs),
               homeAway: (ev.atVs ?? "").startsWith("@") ? "away" : "home",
-              value:    p + r + a,
+              value,
             });
           }
           continue;

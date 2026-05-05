@@ -72,6 +72,19 @@ const STAT_ALIASES: Record<string, string> = {
   "pra":            "pra",
   "p+r+a":          "pra",
   "pts+reb+ast":    "pra",
+  "points+rebounds+assists": "pra",
+  // 2-stat combined NBA props — DK books these as "Pts + Ast" /
+  // "Points + Assists" / "Pts+Reb" / etc. Resolver via
+  // playerGameLog.ts sums the per-event columns.
+  "pts+ast":        "pts_ast",
+  "pts + ast":      "pts_ast",
+  "points+assists": "pts_ast",
+  "pts+reb":        "pts_reb",
+  "pts + reb":      "pts_reb",
+  "points+rebounds": "pts_reb",
+  "reb+ast":        "reb_ast",
+  "reb + ast":      "reb_ast",
+  "rebounds+assists": "reb_ast",
 
   // NFL
   "passing yards":   "passing_yards",
