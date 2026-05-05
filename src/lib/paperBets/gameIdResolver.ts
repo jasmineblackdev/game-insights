@@ -210,7 +210,33 @@ export async function resolveGameIdByTeam(args: {
   // with "no game today" — even when the team was on the slate.
   const norm = (s: string): string =>
     s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const teamNorm = norm(team);
+
+  // Common short city abbreviations that DraftKings and bettors use
+  // colloquially but ESPN doesn't recognize as token-matchable
+  // ("NY" doesn't appear in the displayName "New York Knicks").
+  // Expand the user input to the full city before the matcher runs.
+  // Within a sport scope (the only thing this resolver looks at),
+  // ambiguity is mostly limited to NFL (Giants vs Jets) and MLB
+  // (Yankees vs Mets). The first match in the slate wins; the user
+  // can disambiguate by typing the team name instead of just the
+  // city abbreviation when both teams are playing on the same day.
+  const SHORT_CITY_ALIASES: Record<string, string> = {
+    ny:  "new york",
+    nyc: "new york",
+    la:  "los angeles",
+    sf:  "san francisco",
+    sd:  "san diego",
+    kc:  "kansas city",
+    tb:  "tampa bay",
+    no:  "new orleans",
+    okc: "oklahoma city",
+    dc:  "washington",
+    gs:  "golden state",
+    gsw: "golden state",
+  };
+
+  const teamNormRaw = norm(team);
+  const teamNorm = SHORT_CITY_ALIASES[teamNormRaw] ?? teamNormRaw;
   const teamTokens = teamNorm.split(" ").filter(Boolean);
 
   const sideMatches = (
