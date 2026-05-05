@@ -908,16 +908,22 @@ const Index = ({ defaultView }: IndexProps = {}) => {
                   allProps={homePropsQuery.data?.items ?? []}
                   oddsMap={oddsMapAll}
                   // Tomorrow needs the full cross-sport pool. Wait for every
-                  // supported sport's fetch, not just the currently-selected
-                  // league's query — otherwise the tab looks "done" while
-                  // NFL/Boxing/MMA are still loading.
+                  // supported sport's first fetch — but use `isLoading`,
+                  // not `isPending`. In React Query v5, `isPending` is also
+                  // true for disabled queries (no data yet), so a query
+                  // configured with `enabled: viewMode === "tomorrow"` reads
+                  // pending forever before tomorrow is opened, and the OR
+                  // sometimes stayed true even after fetches actually
+                  // resolved — leaving the skeleton up indefinitely.
+                  // `isLoading` is true only during the first active fetch,
+                  // not when disabled-and-idle.
                   loading={
-                    nbaFastQuery.isPending ||
-                    nflQuery.isPending ||
-                    mlbFastQuery.isPending ||
-                    boxingQuery.isPending ||
-                    mmaQuery.isPending ||
-                    homePropsQuery.isPending
+                    nbaFastQuery.isLoading ||
+                    nflQuery.isLoading ||
+                    mlbFastQuery.isLoading ||
+                    boxingQuery.isLoading ||
+                    mmaQuery.isLoading ||
+                    homePropsQuery.isLoading
                   }
                 />
               ) : viewMode === "parlay_builder" ? (
