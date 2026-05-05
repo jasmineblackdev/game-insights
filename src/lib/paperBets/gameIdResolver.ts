@@ -48,7 +48,13 @@ interface EspnEventRaw {
   competitions?: Array<{
     competitors?: Array<{
       homeAway?: string;
-      team?: { abbreviation?: string };
+      team?: {
+        abbreviation?: string;
+        displayName?: string;
+        name?: string;
+        shortDisplayName?: string;
+        location?: string;
+      };
     }>;
   }>;
 }
@@ -197,6 +203,49 @@ export async function resolveGameIdByTeam(args: {
     return null;
   }
 
+  // Normalize the user-typed string and the side candidates the
+  // same way so "NY KNICKS" / "NY Knicks" / "Knicks" / "New York"
+  // all match ESPN's "NYK". Without this, only the canonical
+  // abbreviation matched and any full-name input failed silently
+  // with "no game today" — even when the team was on the slate.
+  const norm = (s: string): string =>
+    s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const teamNorm = norm(team);
+  const teamTokens = teamNorm.split(" ").filter(Boolean);
+
+  const sideMatches = (
+    t: { abbreviation?: string; displayName?: string; name?: string; shortDisplayName?: string; location?: string } | undefined,
+  ): boolean => {
+    if (!t) return false;
+    const abbr = (t.abbreviation ?? "").toUpperCase();
+    if (abbr && abbr === team) return true; // fast path: exact abbr
+    const candidates = [
+      t.abbreviation,
+      t.displayName,
+      t.name,
+      t.shortDisplayName,
+      t.location && t.name ? `${t.location} ${t.name}` : undefined,
+    ].filter((s): s is string => typeof s === "string" && s.length > 0).map(norm);
+    if (candidates.includes(teamNorm)) return true;
+    // Strict subset — every user token appears in some candidate.
+    // Catches "Knicks" → matches name "knicks", and "Brooklyn Nets"
+    // → matches displayName "brooklyn nets".
+    const strict = teamTokens.length > 0 && candidates.some((c) => {
+      const cTokens = c.split(" ").filter(Boolean);
+      return teamTokens.every((tok) => cTokens.includes(tok));
+    });
+    if (strict) return true;
+    // Loose — at least one substantial user token (≥4 chars)
+    // appears as a substring inside any candidate. Catches
+    // "NY KNICKS" → "knicks" substring of "new york knicks", and
+    // typo cases like "knick" → still matches "knicks". The 4-char
+    // gate prevents false positives from short prefixes ("ny",
+    // "la", "sf") landing in unrelated team names.
+    return teamTokens.some((tok) =>
+      tok.length >= 4 && candidates.some((c) => c.includes(tok)),
+    );
+  };
+
   const events = json.events ?? [];
   for (const ev of events) {
     const comp = ev.competitions?.[0];
@@ -204,13 +253,15 @@ export async function resolveGameIdByTeam(args: {
     const away = comp?.competitors?.find((c) => c.homeAway === "away");
     const homeAbbr = (home?.team?.abbreviation ?? "").toUpperCase();
     const awayAbbr = (away?.team?.abbreviation ?? "").toUpperCase();
-    if (homeAbbr === team || awayAbbr === team) {
+    const homeMatched = sideMatches(home?.team);
+    const awayMatched = sideMatches(away?.team);
+    if (homeMatched || awayMatched) {
       return {
         gameId: String(ev.id ?? ""),
         homeAbbr,
         awayAbbr,
         startIso: ev.date ?? null,
-        matchedSide: homeAbbr === team ? "home" : "away",
+        matchedSide: homeMatched ? "home" : "away",
       };
     }
   }
