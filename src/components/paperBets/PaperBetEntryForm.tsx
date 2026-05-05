@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, AlertTriangle, Radio, Save } from "lucide-react";
+import { Plus, Trash2, AlertTriangle, Radio, Save, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -282,6 +282,53 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
 
   const removeLeg = (idx: number) => {
     setLegs((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  /**
+   * Pull a slipped leg back into the "Add a leg" form for editing.
+   * Removes it from the Draft slip; the user adjusts fields and
+   * clicks "Add leg to slip" to put the corrected version back.
+   *
+   * Override fields are pre-populated from whatever the leg already
+   * carries so the user sees the actual stored values, not the
+   * normalizer's re-parse of the dkLabel. They can clear any
+   * override field to fall back on the normalizer.
+   */
+  const editLeg = (idx: number) => {
+    const l = legs[idx];
+    if (!l) return;
+    setDraft({
+      sport: l.sport,
+      gameId: l.gameId ?? "",
+      gameTimeIso: l.gameTimeIso ?? "",
+      teamLabel: l.teamLabel ?? "",
+      playerName: l.playerName ?? "",
+      playerId: l.playerId ?? "",
+      dkLabel: l.dkLabel ?? "",
+      americanOdds: String(l.americanOdds ?? ""),
+      marketTypeOverride: l.marketType,
+      statTypeOverride: l.statType ?? "",
+      directionOverride: l.direction ?? "auto",
+      lineOverride: l.line != null ? String(l.line) : "",
+    });
+    // Surface the right entry-category so the override fields stay
+    // visible even when the normalizer is confident — otherwise the
+    // user opens edit, sees the form populated, and the override row
+    // collapses out from under them on the next keystroke.
+    setEntryCategory(
+      l.marketType === "player_prop" ? "player_prop" :
+      l.marketType === "moneyline"   ? "team"        :
+      l.marketType === "total"       ? "game"        :
+      "custom",
+    );
+    setLegs((prev) => prev.filter((_, i) => i !== idx));
+    // Scroll the user back to the form so the re-populated fields
+    // are visible — otherwise the leg "disappears" and the form
+    // change is invisible at the top of the page.
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    toast.message("Leg moved to editor — adjust and click Add leg to slip.");
   };
 
   const submit = async () => {
@@ -571,6 +618,15 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
                 <span className="text-[10px] uppercase font-bold text-muted-foreground w-8">{l.sport}</span>
                 <span className="flex-1 min-w-0 truncate text-foreground">{l.dkLabel}</span>
                 <span className="font-mono tabular-nums text-foreground">{l.americanOdds > 0 ? `+${l.americanOdds}` : l.americanOdds}</span>
+                <button
+                  type="button"
+                  onClick={() => editLeg(i)}
+                  className="text-muted-foreground hover:text-foreground p-0.5"
+                  aria-label="Edit leg"
+                  title="Edit this leg"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
                 <button
                   type="button"
                   onClick={() => removeLeg(i)}
