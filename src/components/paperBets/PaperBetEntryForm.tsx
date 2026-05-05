@@ -205,7 +205,15 @@ export function PaperBetEntryForm({ onPlaced, loadDraftId, onDraftSaved }: Props
     if ((teamForLookup || playerForLookup) && !isCombat) {
       setResolvingGameId(true);
       try {
-        const todayYmd = new Date().toISOString().slice(0, 10);
+        // Local YMD — toISOString() returns UTC, which silently
+        // shifts the slate-date by a day for evening users in any
+        // timezone west of UTC. A user in ET at 9:21 PM on May 4
+        // would otherwise query ESPN for May 5 games and miss
+        // every May-4 ET game on the slate.
+        const now = new Date();
+        const todayYmd = `${now.getFullYear()}-${
+          String(now.getMonth() + 1).padStart(2, "0")
+        }-${String(now.getDate()).padStart(2, "0")}`;
 
         // Athlete first when this looks like a player prop — ESPN's
         // athlete search returns the team abbr, which seeds the
