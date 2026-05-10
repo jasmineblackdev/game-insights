@@ -170,23 +170,36 @@ Deno.serve(async (req) => {
   );
 
   const url = new URL(req.url);
-  const MIN_SAMPLES = Number(url.searchParams.get("min_samples") ?? 30);
+  // 25 matches the bucket-activation threshold the rest of the
+  // system already uses (mlPredictionLayer.ts requires ≥25 settled
+  // outcomes per (sport × market × confidence) before consulting
+  // bucket-derived hit-rate). Override via ?min_samples= for testing.
+  const MIN_SAMPLES = Number(url.searchParams.get("min_samples") ?? 25);
   const WINDOW_DAYS = Number(url.searchParams.get("window_days") ?? 90);
 
   const cutoff = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
   const batchId = crypto.randomUUID();
 
-  // 1. Pull unapplied resolved predictions in the window
+  // 1. Pull settled predictions in the window from the live
+  // `prediction_history` schema (gamelens_learning_intelligence
+  // migration 20260421). Live columns:
+  //   model_probability   — Platt input (was hit_probability_at_prediction)
+  //   settled_at          — resolution timestamp (was resolved_at)
+  //   outcome ∈ win|loss|push (we filter to win/loss only)
+  //   confidence ∈ high|medium|low (lowercase per check constraint)
+  // No `platt_applied` flag exists on this schema — we re-fit every
+  // run and the upsert (sport, market, confidence) keeps it
+  // idempotent. Cheap; the alternative (tracking applied rows) was
+  // load-bearing only for the legacy schema.
   const { data, error } = await supabase
     .from("prediction_history")
-    .select("id, sport, market_type, confidence, hit_probability_at_prediction, outcome, resolved_at")
-    .eq("platt_applied", false)
+    .select("id, sport, market_type, confidence, model_probability, outcome, settled_at")
     .in("outcome", ["win", "loss"])
-    .gte("resolved_at", cutoff)
+    .gte("settled_at", cutoff)
     .limit(50_000);
 
   if (error) return json({ ok: false, error: error.message }, 500);
-  if (!data?.length) return json({ ok: true, message: "no pending predictions", batch_id: batchId });
+  if (!data?.length) return json({ ok: true, message: "no settled predictions in window", batch_id: batchId });
 
   // 2. Group by (sport, market_type, confidence) — plus an "ALL" bucket
   type Group = {
@@ -195,7 +208,6 @@ Deno.serve(async (req) => {
     confidence_bucket: string;
     probs: number[];
     outcomes: number[];
-    ids: string[];
   };
   const groups = new Map<string, Group>();
 
@@ -206,33 +218,30 @@ Deno.serve(async (req) => {
     confidence_bucket: string,
     p: number,
     y: number,
-    id: string,
   ) => {
     let g = groups.get(key);
     if (!g) {
-      g = { sport, market_type, confidence_bucket, probs: [], outcomes: [], ids: [] };
+      g = { sport, market_type, confidence_bucket, probs: [], outcomes: [] };
       groups.set(key, g);
     }
     g.probs.push(p);
     g.outcomes.push(y);
-    g.ids.push(id);
   };
 
   for (const r of data) {
-    const p = Number(r.hit_probability_at_prediction);
+    const p = Number(r.model_probability);
     if (!Number.isFinite(p)) continue;
     const y = r.outcome === "win" ? 1 : 0;
     const sport = String(r.sport).toLowerCase();
     const mkt   = String(r.market_type).toLowerCase();
     const conf  = String(r.confidence).toUpperCase();
 
-    addToGroup(`${sport}|${mkt}|${conf}`, sport, mkt, conf,  p, y, r.id);
-    addToGroup(`${sport}|${mkt}|ALL`,     sport, mkt, "ALL", p, y, r.id);
+    addToGroup(`${sport}|${mkt}|${conf}`, sport, mkt, conf,  p, y);
+    addToGroup(`${sport}|${mkt}|ALL`,     sport, mkt, "ALL", p, y);
   }
 
   // 3. Fit Platt per group with enough samples
   const upserts: unknown[] = [];
-  const idsToMark: string[] = [];
   const skipped: unknown[] = [];
 
   for (const g of groups.values()) {
@@ -259,9 +268,6 @@ Deno.serve(async (req) => {
       log_loss:          Math.round(logLossVal * 10_000) / 10_000,
       fitted_at:         new Date().toISOString(),
     });
-    if (g.confidence_bucket !== "ALL") {
-      idsToMark.push(...g.ids);
-    }
   }
 
   if (!upserts.length) {
@@ -270,28 +276,20 @@ Deno.serve(async (req) => {
     });
   }
 
-  // 4. Upsert platt params
+  // 4. Upsert platt params — re-fit on every run so the params
+  // track the latest 90-day window without needing a per-row
+  // applied flag.
   const { error: upErr } = await supabase
     .from("platt_calibration_params")
     .upsert(upserts, { onConflict: "sport,market_type,confidence_bucket" });
   if (upErr) return json({ ok: false, error: upErr.message }, 500);
 
-  // 5. Mark predictions as applied
-  const uniqueIds = Array.from(new Set(idsToMark));
-  if (uniqueIds.length) {
-    const { error: markErr } = await supabase
-      .from("prediction_history")
-      .update({ platt_applied: true, platt_batch_id: batchId })
-      .in("id", uniqueIds);
-    if (markErr) return json({ ok: false, error: markErr.message }, 500);
-  }
-
   return json({
     ok: true,
     batch_id: batchId,
     groups_fit: upserts.length,
-    predictions_marked: uniqueIds.length,
     skipped_groups: skipped.length,
     upserts,
+    skipped,
   });
 });
