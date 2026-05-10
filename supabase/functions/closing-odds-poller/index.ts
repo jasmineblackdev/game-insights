@@ -307,28 +307,142 @@ Deno.serve(async (req) => {
   const errors: string[] = [];
   const oddsByGame = new Map<string, OddsEvent>();
 
-  for (const [sportKey, mkts] of sportMarketMap.entries()) {
-    if (mkts.size === 0) continue;
-    const marketsParam = [...mkts].join(",");
-    const url = `${ODDS_UPSTREAM}/sports/${encodeURIComponent(sportKey)}/odds?regions=us&markets=${encodeURIComponent(marketsParam)}&oddsFormat=american&apiKey=${encodeURIComponent(ODDS_KEY)}`;
-    try {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) {
-        errors.push(`${sportKey}: HTTP ${res.status}`);
-        continue;
+  // Track the worst-status the run observed. The end-of-run health
+  // upsert reads this — "ok" stays sticky only when every sport
+  // succeeded; the moment any sport hits OUT_OF_USAGE_CREDITS we
+  // surface that to Insights regardless of whether other sports
+  // partially succeeded earlier in the loop.
+  type HealthStatus =
+    | "ok"
+    | "quota_exhausted"
+    | "rate_limited"
+    | "auth_failed"
+    | "invalid_market"
+    | "network_error"
+    | "unknown";
+  let runStatus: HealthStatus = "unknown";
+  let runErrorCode: string | null = null;
+  let runMessage: string = "";
+  let runSportKey: string | null = null;
+  let quotaExhausted = false;
+
+  // Try-once-with-backoff wrapper for transient network blips.
+  async function fetchOdds(url: string): Promise<Response> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch(url, { headers: { Accept: "application/json" } });
+        return r;
+      } catch (e) {
+        if (attempt === 1) throw e;
+        await new Promise((res) => setTimeout(res, 800));
       }
-      const data = await res.json() as OddsEvent[];
-      for (const ev of data) {
-        oddsByGame.set(ev.id, ev);
-        const homeUp = ev.home_team?.toUpperCase() ?? "";
-        const awayUp = ev.away_team?.toUpperCase() ?? "";
-        if (homeUp && awayUp) {
-          oddsByGame.set(`__teams::${awayUp}@${homeUp}`, ev);
+    }
+    // unreachable, but appeases TS
+    throw new Error("unreachable");
+  }
+
+  // Parse The Odds API error envelope. They always return JSON with
+  // `error_code` + `message` on 4xx — we map their codes to our
+  // singleton-table status enum so Insights can render a useful
+  // banner without the consumer having to know the upstream taxonomy.
+  function classifyUpstreamError(status: number, body: unknown): {
+    healthStatus: HealthStatus;
+    errorCode: string | null;
+    message: string;
+    fatal: boolean; // true → break out of sport loop entirely
+  } {
+    const obj = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+    const code = typeof obj.error_code === "string" ? obj.error_code : "";
+    const msg  = typeof obj.message    === "string" ? obj.message    : `HTTP ${status}`;
+    if (status === 401 && code === "OUT_OF_USAGE_CREDITS") {
+      return { healthStatus: "quota_exhausted", errorCode: code, message: msg, fatal: true };
+    }
+    if (status === 401) {
+      return { healthStatus: "auth_failed", errorCode: code || "UNAUTHORIZED", message: msg, fatal: true };
+    }
+    if (status === 422 && code === "INVALID_MARKET") {
+      return { healthStatus: "invalid_market", errorCode: code, message: msg, fatal: false };
+    }
+    if (status === 429 || code === "EXCEEDED_FREQ_LIMIT") {
+      return { healthStatus: "rate_limited", errorCode: code || "EXCEEDED_FREQ_LIMIT", message: msg, fatal: false };
+    }
+    if (status >= 500) {
+      return { healthStatus: "network_error", errorCode: code || `HTTP_${status}`, message: msg, fatal: false };
+    }
+    return { healthStatus: "unknown", errorCode: code || `HTTP_${status}`, message: msg, fatal: false };
+  }
+
+  for (const [sportKey, mktsSet] of sportMarketMap.entries()) {
+    if (quotaExhausted) {
+      // Skip remaining sports — every call would just burn the same
+      // 401, and OUT_OF_USAGE_CREDITS is account-wide, not per-sport.
+      errors.push(`${sportKey}: skipped (quota exhausted earlier in run)`);
+      continue;
+    }
+    if (mktsSet.size === 0) continue;
+    // Mutable copy so we can drop INVALID_MARKET entries and retry.
+    let mkts = [...mktsSet];
+    let attemptedRetry = false;
+
+    while (mkts.length > 0) {
+      const marketsParam = mkts.join(",");
+      const url = `${ODDS_UPSTREAM}/sports/${encodeURIComponent(sportKey)}/odds?regions=us&markets=${encodeURIComponent(marketsParam)}&oddsFormat=american&apiKey=${encodeURIComponent(ODDS_KEY)}`;
+      try {
+        const res = await fetchOdds(url);
+        if (res.ok) {
+          const data = await res.json() as OddsEvent[];
+          for (const ev of data) {
+            oddsByGame.set(ev.id, ev);
+            const homeUp = ev.home_team?.toUpperCase() ?? "";
+            const awayUp = ev.away_team?.toUpperCase() ?? "";
+            if (homeUp && awayUp) {
+              oddsByGame.set(`__teams::${awayUp}@${homeUp}`, ev);
+            }
+            gamesPolled++;
+          }
+          // Sport done — promote runStatus to "ok" only if it hasn't
+          // been set to something worse already.
+          if (runStatus === "unknown") runStatus = "ok";
+          break;
         }
-        gamesPolled++;
+        // Parse upstream error body for the exact code.
+        let body: unknown = null;
+        try { body = await res.json(); } catch { /* non-JSON */ }
+        const cls = classifyUpstreamError(res.status, body);
+        runStatus    = cls.healthStatus;
+        runErrorCode = cls.errorCode;
+        runMessage   = cls.message;
+        runSportKey  = sportKey;
+        errors.push(`${sportKey}: ${cls.errorCode ?? `HTTP ${res.status}`} — ${cls.message}`);
+
+        if (cls.healthStatus === "quota_exhausted" || cls.healthStatus === "auth_failed") {
+          quotaExhausted = true;
+          break;
+        }
+        if (cls.healthStatus === "invalid_market" && !attemptedRetry) {
+          // Drop the most expensive market (last one in the list,
+          // which is typically a player-prop market that requires
+          // a higher tier) and retry the same sport with what's left.
+          // Single retry per sport — don't loop forever.
+          attemptedRetry = true;
+          const dropped = mkts.pop();
+          if (dropped) {
+            errors.push(`${sportKey}: dropped market "${dropped}", retrying`);
+            continue;
+          }
+          break;
+        }
+        // Other classes (rate_limited, network_error, unknown):
+        // give up on this sport, move on. Cron will retry next run.
+        break;
+      } catch (e) {
+        runStatus    = "network_error";
+        runErrorCode = "FETCH_THREW";
+        runMessage   = String(e).slice(0, 200);
+        runSportKey  = sportKey;
+        errors.push(`${sportKey}: ${runMessage}`);
+        break;
       }
-    } catch (e) {
-      errors.push(`${sportKey}: ${String(e).slice(0, 100)}`);
     }
   }
 
@@ -409,8 +523,66 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Persist the run's worst-status to the singleton odds_api_health
+  // row so Insights Data Health can surface "quota exhausted" et al.
+  // without users having to read the function's response body. The
+  // banner copy is built here so the client never has to translate
+  // upstream error codes into UI strings.
+  const finalStatus: HealthStatus =
+    runStatus === "unknown" && (parlays?.length ?? 0) === 0
+      ? "ok"  // nothing to poll → nothing to be wrong about
+      : runStatus === "unknown"
+        ? "ok"
+        : runStatus;
+  const banner = (() => {
+    switch (finalStatus) {
+      case "quota_exhausted":
+        return "The Odds API monthly quota exhausted — closing-line capture paused until quota resets or plan upgrades.";
+      case "auth_failed":
+        return "The Odds API rejected the configured API key — verify THE_ODDS_API_KEY secret on the Edge function.";
+      case "invalid_market":
+        return runMessage
+          ? `The Odds API rejected a market: ${runMessage}`
+          : "The Odds API rejected one or more requested markets — function dropped them and continued.";
+      case "rate_limited":
+        return "The Odds API rate-limited the poller — this run is partial; next cron tick will retry.";
+      case "network_error":
+        return "The Odds API was unreachable for at least one sport — partial run.";
+      case "ok":
+        return parlays?.length === 0
+          ? "No pending parlays in the closing-line window — nothing to poll."
+          : `Healthy — ${gamesPolled} games polled, ${legsUpdated} legs updated.`;
+      default:
+        return "Closing-line poller status unknown.";
+    }
+  })();
+
+  try {
+    await supabase
+      .from("odds_api_health")
+      .upsert({
+        id: "singleton",
+        status: finalStatus,
+        error_code: runErrorCode,
+        sport_key: runSportKey,
+        message: banner,
+        parlays_scanned: parlays?.length ?? 0,
+        games_polled: gamesPolled,
+        legs_updated: legsUpdated,
+        observed_at: new Date().toISOString(),
+      }, { onConflict: "id" });
+  } catch (e) {
+    // Health upsert failure is non-fatal — the poll itself still
+    // happened and the response below carries the details.
+    errors.push(`health_upsert: ${String(e).slice(0, 100)}`);
+  }
+
   return json({
-    ok: true,
+    ok: finalStatus === "ok",
+    health_status: finalStatus,
+    error_code: runErrorCode,
+    sport_key: runSportKey,
+    message: banner,
     parlays_scanned: parlays?.length ?? 0,
     games_polled: gamesPolled,
     legs_updated: legsUpdated,

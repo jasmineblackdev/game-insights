@@ -182,6 +182,48 @@ export async function fetchClvResultsBySport(lookbackDays = 30): Promise<ClvResu
 }
 
 /**
+ * Server-side health snapshot from the closing-odds-poller's most
+ * recent run. Distinct from the in-memory `oddsApiHealth` store
+ * (per-session, from user page-load fetches) — this reflects the
+ * cron / Edge function's view of The Odds API state, which is the
+ * authoritative source for "why is CLV empty?" diagnostics.
+ *
+ * Status enum mirrors the one the Edge function persists:
+ *   ok | quota_exhausted | rate_limited | auth_failed |
+ *   invalid_market | network_error | unknown
+ */
+export interface OddsApiServerHealth {
+  status:          "ok" | "quota_exhausted" | "rate_limited" | "auth_failed" | "invalid_market" | "network_error" | "unknown";
+  errorCode:       string | null;
+  sportKey:        string | null;
+  message:         string;
+  parlaysScanned:  number;
+  gamesPolled:     number;
+  legsUpdated:     number;
+  observedAt:      string | null;
+}
+
+export async function fetchOddsApiServerHealth(): Promise<OddsApiServerHealth | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  const { data, error } = await supabase.rpc("analytics_odds_api_health");
+  if (error || !data || !Array.isArray(data) || data.length === 0) return null;
+  const r = data[0] as Record<string, unknown>;
+  const statusRaw = String(r.status ?? "unknown");
+  const allowed = ["ok","quota_exhausted","rate_limited","auth_failed","invalid_market","network_error","unknown"];
+  const status = (allowed.includes(statusRaw) ? statusRaw : "unknown") as OddsApiServerHealth["status"];
+  return {
+    status,
+    errorCode:      (r.error_code as string | null) ?? null,
+    sportKey:       (r.sport_key as string | null) ?? null,
+    message:        String(r.message ?? ""),
+    parlaysScanned: num(r.parlays_scanned),
+    gamesPolled:    num(r.games_polled),
+    legsUpdated:    num(r.legs_updated),
+    observedAt:     (r.observed_at as string | null) ?? null,
+  };
+}
+
+/**
  * 7-day vs 30-day trend direction. Positive deltaPct = improving.
  * Returns null when either window is too thin to compare.
  */

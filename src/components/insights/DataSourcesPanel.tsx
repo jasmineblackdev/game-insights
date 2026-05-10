@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { useNflInjuries } from "@/hooks/useNflInjuries";
 import { pingBalldontlie } from "@/lib/balldontlieFetch";
 import { getOddsApiHealthSnapshot } from "@/lib/oddsApiHealth";
+import { fetchOddsApiServerHealth, type OddsApiServerHealth } from "@/lib/analytics/clv";
 
 type Tone = "green" | "amber" | "red" | "neutral";
 
@@ -112,20 +113,37 @@ export function DataSourcesPanel() {
     refetchOnWindowFocus: false,
   });
 
-  // The Odds API — the health store is module-level, not a query.
-  // Snapshot it on mount and re-render when the user clicks Refresh
-  // (since the snapshot is imperative there's no subscription here).
+  // The Odds API — TWO sources merged:
+  //   • Client-side `oddsApiHealth` store: per-session, captures the
+  //     user's own browser-side fetch failures (StaleLinesBanner).
+  //   • Server-side singleton from analytics_odds_api_health: the
+  //     closing-odds-poller's last-run state. Authoritative for
+  //     "is the cron actually capturing closing lines?" — needed
+  //     because client fetches and server cron use the same key
+  //     and quota, so a cron quota-exhaustion is invisible to the
+  //     browser until the user happens to hit the same wall.
+  // The server signal wins when both report degraded — it's the
+  // real "why CLV samples aren't growing" answer.
   const [oddsSnapshot, setOddsSnapshot] = useState(getOddsApiHealthSnapshot());
   useEffect(() => { setOddsSnapshot(getOddsApiHealthSnapshot()); }, []);
+  const oddsServer = useQuery({
+    queryKey:             ["odds-api-server-health"],
+    queryFn:              fetchOddsApiServerHealth,
+    staleTime:            60 * 1000,
+    refetchOnWindowFocus: false,
+  });
 
   const refreshAll = () => {
     void ping.refetch();
+    void oddsServer.refetch();
     setOddsSnapshot(getOddsApiHealthSnapshot());
     // useNflInjuries query is keyed off React-Query — invalidating
     // would require importing the queryClient. Skip for now; the
     // hook's 15-min staleTime will refresh on its own when the
     // user comes back.
   };
+
+  const oddsRow = computeOddsRow(oddsServer.data ?? null, oddsSnapshot);
 
   return (
     <section className="space-y-2 border-t border-border pt-8">
@@ -194,17 +212,64 @@ export function DataSourcesPanel() {
         />
         <Row
           name="The Odds API · lines + close"
-          state={oddsSnapshot.stale ? "warn" : "ok"}
-          subtitle={
-            oddsSnapshot.stale
-              ? oddsSnapshot.message ?? "Provider degraded — lines may be cached."
-              : "Provider healthy — closing-line poller active."
-          }
-          lastFetchedIso={oddsSnapshot.occurredAt}
+          state={oddsRow.state}
+          subtitle={oddsRow.subtitle}
+          lastFetchedIso={oddsRow.lastFetchedIso}
         />
       </div>
     </section>
   );
+}
+
+/**
+ * Merge server-side closing-poller health with the client's
+ * runtime stale flag into a single row description. The server
+ * signal carries the canonical message ("quota exhausted",
+ * "auth failed", etc.) so we use that verbatim when present.
+ *
+ * Status mapping (server → row state):
+ *   ok                 → green (when poller had something to do)
+ *                      → neutral when "nothing to poll" (parlays_scanned=0)
+ *   quota_exhausted    → red — no closes will land until quota resets
+ *   auth_failed        → red — secret needs reset
+ *   invalid_market     → amber — partial run, dropped expensive markets
+ *   rate_limited       → amber — partial run, retries on next tick
+ *   network_error      → amber — transient
+ *   unknown            → neutral
+ *
+ * Falls back to the client-side oddsSnapshot when the server row
+ * hasn't been written yet (migration not applied / function not
+ * upgraded).
+ */
+function computeOddsRow(
+  server: OddsApiServerHealth | null,
+  client: ReturnType<typeof getOddsApiHealthSnapshot>,
+): { state: RowProps["state"]; subtitle: string; lastFetchedIso: string | null } {
+  if (server) {
+    const ranOk = server.status === "ok" && server.parlaysScanned > 0;
+    const idle  = server.status === "ok" && server.parlaysScanned === 0;
+    const state: RowProps["state"] =
+      server.status === "quota_exhausted" || server.status === "auth_failed"
+        ? "down"
+        : server.status === "invalid_market" || server.status === "rate_limited" || server.status === "network_error"
+          ? "warn"
+          : ranOk
+            ? "ok"
+            : idle
+              ? "ok"
+              : "unknown";
+    const subtitle = server.message
+      || (idle ? "No pending parlays in the closing-line window." : "Status unknown.");
+    return { state, subtitle, lastFetchedIso: server.observedAt };
+  }
+  // No server signal yet — fall back to in-memory client store.
+  return {
+    state: client.stale ? "warn" : "ok",
+    subtitle: client.stale
+      ? client.message ?? "Provider degraded — lines may be cached."
+      : "Provider healthy — closing-line poller active.",
+    lastFetchedIso: client.occurredAt ?? null,
+  };
 }
 
 function countByStatus(rows: { injuryStatus: string }[]): string {
